@@ -90,3 +90,19 @@ export function createCompositeAuthorizer(legacy: Authorizer, session: Authorize
     return { ok: false, status: 401, error: 'UNAUTHORIZED', message: 'Autenticação necessária.' };
   };
 }
+
+export const SYNC_RATE_PER_MINUTE = 60;
+export type AccountAuth = { ok: true; userId: string; licenseId: string } | { ok: false; status: 401 | 403 | 429; error: string; message: string; retryAfterSeconds?: number };
+
+/** Autoriza operações sobre os DADOS da conta: sessão válida, CSRF (se alterar dados), licença ativa e limite de taxa. */
+export async function authorizeAccount(request: Request, env: SessionEnv, now: Date, opts: { write: boolean }): Promise<AccountAuth> {
+  const r = await resolveSession(request, env, now);
+  if (!r.ok) return r;
+  if (opts.write) { const csrf = checkCsrf(request, env, r.ctx.session); if (csrf) return csrf; }
+  const license = r.ctx.license;
+  if (!license) return { ok: false, status: 403, error: 'NO_ACTIVE_LICENSE', message: 'Esta conta não tem licença ativa.' };
+  if (license.status !== 'active') return { ok: false, status: 403, error: 'LICENSE_REVOKED', message: 'A licença desta conta foi revogada. Entre em contato com o suporte.' };
+  const rate = await consumeRateLimit(env.DB, license.id, 'sync', SYNC_RATE_PER_MINUTE, 60, now.getTime());
+  if (!rate.allowed) return { ok: false, status: 429, error: 'RATE_LIMITED', message: 'Muitas requisições. Aguarde um instante e tente novamente.', retryAfterSeconds: rate.retryAfterSeconds };
+  return { ok: true, userId: r.ctx.user.id, licenseId: license.id };
+}

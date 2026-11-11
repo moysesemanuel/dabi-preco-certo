@@ -5,6 +5,7 @@ import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authoriz
 import { currentSession, logout, requestCode, sessionRevoke, sessionsList, verifyCode, type AuthEnv } from './authRoutes';
 import { createEmailSender, type EmailSender } from './email';
 import { createCompositeAuthorizer } from './session';
+import { syncPull, syncPush } from './syncRoutes';
 import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
@@ -148,6 +149,11 @@ export function createHandler(options: Options) {
         const del = r.match(/^\/api\/sessions\/([^/]+)$/);
         if (del && method === 'DELETE') return await sessionRevoke(request, env, authDeps, del[1]);
         return apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
+      }
+      if (pathname === '/api/sync' || pathname === '/api/sync/push') {
+        if (pathname === '/api/sync' && method === 'GET') return await syncPull(request, env, authDeps);
+        if (pathname === '/api/sync/push' && method === 'POST') return await syncPush(request, env, authDeps);
+        return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }
       if (/^\/api\/license\/?$/.test(pathname)) {
         return method === 'GET' ? await verifyLicense(request, env) : apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');

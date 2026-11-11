@@ -47,6 +47,22 @@ Segredos: `AUTH_SECRET` em `wrangler secret put AUTH_SECRET` (produção) ou `wo
 
 Emissão: `npm run licenses -- issue --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`.
 
+## Dados online e sincronização (Etapa 1, Fase 3)
+
+**Fonte autoritativa:** quando o usuário está logado e licenciado, o **servidor (D1)** é a fonte da verdade. O IndexedDB do app vira cache offline + alterações ainda não enviadas. Sem login, o app continua 100% local.
+
+**Tabelas** (`0004_data.sql`): `sync_state`, `ingredients`, `recipes`, `recipe_items`, `orders`. Toda linha tem `user_id` (isolamento por conta; todas as consultas filtram por ele e usam parâmetros) e uma `rev`. Exclusões são **lógicas** (`deleted_at`): a sincronização nunca apaga dados do usuário de verdade. (Recebimentos entram na Fase 4.)
+
+**Protocolo** (`shared/sync.ts`):
+- `GET /api/sync?since=N` devolve as entidades com revisão maior que N (inclui exclusões lógicas); `since=0` devolve tudo.
+- `POST /api/sync/push` envia até 100 alterações de uma vez. Cada gravação aceita aumenta a revisão da conta em 1.
+- **Atomicidade e concorrência:** o envio é uma única transação (`D1.batch`). A primeira instrução só passa se a revisão da conta ainda for a que foi lida, e as demais só se aplicam se essa passou. Se outro dispositivo gravou no meio, responde `409 STALE` e **nenhuma** instrução é aplicada.
+- **Conflitos:** se uma entidade enviada mudou no servidor depois da revisão que o cliente conhecia, o envio inteiro é recusado com `409 CONFLICT` e a lista dos itens. Reenviar algo idêntico ao que já está no servidor é aceito como "sem alteração" (idempotente), o que torna seguro repetir um envio cuja resposta se perdeu.
+- **Integridade:** o conteúdo passa pelas mesmas regras do backup (`shared/dataset.ts`); receitas só apontam para ingredientes existentes, encomendas para receitas existentes, e não se exclui o que ainda é usado (`422 REFERENCE_ERROR`).
+- Limites: 1 MB por corpo, 100 alterações por envio, 60 requisições/minuto por licença.
+
+**Cliente** (`src/sync/`): `engine.ts` (puro) faz a mesclagem de 3 vias e divide o envio em blocos na ordem das dependências; `api.ts` é o cliente HTTP (cookie de sessão, CSRF no envio). Em conflito de uma **mesma entidade** o servidor vence e a versão local perdida fica guardada em `meta.conflicts` (nada some em silêncio). Se algo novo daqui depende de um item que outro dispositivo excluiu, o item é restaurado. Na primeira sincronização com dados dos dois lados e conteúdo diferente, o motor devolve `needs-decision` (nada é alterado até o usuário escolher). Falhas de rede, sessão expirada ou dados recusados interrompem sem perder nada.
+
 ## Licenças por chave (modo antigo, desligado por padrão)
 
 - **Chave:** `dabi_lic_` + 24 bytes aleatórios em base64url (**192 bits**), 41 caracteres. Gerada com Web Crypto.

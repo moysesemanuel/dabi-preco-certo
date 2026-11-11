@@ -45,3 +45,27 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 - Limitar por e-mail permite negação de serviço do login de uma vítima (não afeta sessões abertas).
 - `AUTH_SECRET` precisa ser definido como segredo no ambiente real (não versionado).
 - A tela de login/dispositivos no app entra na Fase 3/4.
+
+## Fase 3 — Persistência online: CONCLUÍDA (servidor + motor do cliente; ligação à interface na Fase 4)
+
+**Feito** (detalhes em `worker/README.md`, seção "Dados online e sincronização")
+- Tabelas D1 versionadas (`0004_data.sql`) com `user_id`, `rev` e exclusão lógica; ingredientes, receitas, itens de receita e encomendas.
+- `GET /api/sync` (incremental por revisão) e `POST /api/sync/push` (transação única, atômico, até 100 alterações): conflitos por entidade (409), `STALE` em corrida, reenvio idempotente, integridade referencial (422), validação com as regras do backup, limites de tamanho e de taxa.
+- **Isolamento por conta** verificado (mesmos ids em contas diferentes não interferem).
+- Motor do cliente (`src/sync/engine.ts`): mesclagem de 3 vias, conflitos **preservados**, restauração de itens necessários, blocos em ordem de dependência, importação inicial com decisão do usuário, tolerância a falhas.
+- Verificado no D1 **real** (workerd): envio atômico com `json_each`, conflito, integridade, idempotência, exclusão lógica e 401.
+
+**Testes:** +53 (`sync-server` 24, `sync-engine` 29, incluindo dois dispositivos contra o Worker real com falhas de rede injetadas). Total: 341.
+
+**Decisões**
+- Servidor = fonte autoritativa; IndexedDB = cache + alterações pendentes.
+- Conflito na mesma entidade: **servidor vence + cópia local preservada** (em vez de "último a gravar vence" ou fusão por campo), por ser a opção que não perde dados e não exige adivinhar a intenção do usuário.
+- Configurações (tamanho da xícara) sincronizam como uma entidade única.
+- Entidade → linhas: itens de receita em tabela própria, gravados por `json_each` (um comando por receita, respeita o limite de parâmetros do D1).
+
+**Pendências / riscos**
+- A **interface** de login, dispositivos e "sincronizar" ainda não existe (entra na Fase 4 junto com os demais fluxos); o IndexedDB ainda não aciona a sincronização sozinho.
+- Recebimentos (pagamentos) entram na sincronização na Fase 4 (extensão do esquema).
+- `GET /api/sync?since=0` devolve tudo de uma vez (até ~5 mil itens); paginação fica para depois.
+- A restauração automática de itens excluídos em outro dispositivo é uma escolha de segurança de dados; avaliar na prática se surpreende o usuário.
+- Várias abas no mesmo navegador continuam podendo disputar o IndexedDB; a sincronização reconcilia pelo servidor.

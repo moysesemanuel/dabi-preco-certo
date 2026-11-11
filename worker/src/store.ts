@@ -1,12 +1,13 @@
 /** Interface mínima do D1 usada aqui (compatível com D1Database do Cloudflare e com o simulador dos testes). */
+export interface BoundStatement {
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+  run(): Promise<{ meta: { changes?: number } }>;
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+}
 export interface D1Like {
-  prepare(sql: string): {
-    bind(...values: unknown[]): {
-      first<T = Record<string, unknown>>(): Promise<T | null>;
-      run(): Promise<{ meta: { changes?: number } }>;
-      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
-    };
-  };
+  prepare(sql: string): { bind(...values: unknown[]): BoundStatement };
+  /** Executa as instruções em UMA transação: ou todas valem, ou nenhuma (como D1Database.batch). */
+  batch(statements: BoundStatement[]): Promise<{ meta: { changes?: number } }[]>;
 }
 
 export type QuoteRow = { id: string; payload: string; created_at: string; updated_at: string; revoked_at: string | null; owner_id: string | null };

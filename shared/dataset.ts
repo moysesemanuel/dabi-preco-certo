@@ -134,3 +134,12 @@ export function validateDataSet(value: unknown): DataSet {
   }
   return result;
 }
+
+// ---- Validadores por entidade (usados pela sincronização no servidor; mesmas regras do backup) ----
+export const parseIngredient = (raw: unknown): Ingredient => ingredientOf(raw, 0, new Set());
+export const parseRecipe = (raw: unknown, ingredientIds: Set<string>): Recipe => recipeOf(raw, 0, new Set(), ingredientIds);
+export const parseOrder = (raw: unknown, recipeIds: Set<string>): Order => orderOf(raw, 0, new Set(), recipeIds);
+export function parseSettings(raw: unknown): { cupSizeMl: number } {
+  if (!isObj(raw) || typeof raw.cupSizeMl !== 'number' || !Number.isFinite(raw.cupSizeMl) || raw.cupSizeMl <= 0 || raw.cupSizeMl > 1000) return fail('Configurações inválidas.');
+  return { cupSizeMl: raw.cupSizeMl };
+}
