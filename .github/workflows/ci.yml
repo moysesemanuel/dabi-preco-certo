@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Testes, build e migrações
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22        # mínimo do projeto: 22.18 (node:sqlite nos testes e CLI em TypeScript)
+          cache: npm
+      - run: npm ci
+      - name: Verificação de tipos e build de produção (app + Worker)
+        run: npm run build
+      - name: Testes automatizados
+        run: npm test
+      - name: Migrações do D1 aplicadas em um banco local temporário
+        run: npm run worker:migrate
+        env:
+          CI: '1'
+          WRANGLER_SEND_METRICS: 'false'
+
+  seguranca:
+    name: Dependências e segredos
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Auditoria de dependências (falha em severidade alta ou crítica)
+        run: npm audit --audit-level=high
+      - name: Procura segredos acidentais no repositório
+        run: sh scripts/check-secrets.sh

@@ -4,7 +4,7 @@ Aplicação independente da DaBi Price. Stack: React 19 + TypeScript + Vite 6 + 
 
 ## Executar
 
-Requisitos: Node.js 20+.
+Requisitos: **Node.js 22.18+** (os testes usam `node:sqlite` e o CLI de licenças executa TypeScript). Instruções completas em [`docs/DESENVOLVIMENTO.md`](docs/DESENVOLVIMENTO.md).
 
 ```bash
 npm install
@@ -19,6 +19,16 @@ npm test
 ```
 
 **Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 409/409. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface tem testes de componente (`tests/ui/`, jsdom); o fluxo completo contra o Worker real foi verificado manualmente no navegador.
+
+## Documentação
+
+- [`docs/DESENVOLVIMENTO.md`](docs/DESENVOLVIMENTO.md): ambiente local, comandos e convenções.
+- [`docs/AMBIENTES_E_VARIAVEIS.md`](docs/AMBIENTES_E_VARIAVEIS.md): ambientes (local, homologação, produção), variáveis e segredos.
+- [`docs/BACKUP_E_RECUPERACAO.md`](docs/BACKUP_E_RECUPERACAO.md): backups e recuperação (aparelho e D1), com ensaio realizado.
+- [`docs/SEGURANCA_CHECKLIST.md`](docs/SEGURANCA_CHECKLIST.md): o que está protegido e o que falta.
+- [`docs/IMPLANTACAO_HOMOLOGACAO.md`](docs/IMPLANTACAO_HOMOLOGACAO.md): roteiro de implantação em homologação (não executado).
+- [`docs/ETAPA_1_PROGRESSO.md`](docs/ETAPA_1_PROGRESSO.md): histórico e decisões da Etapa 1.
+- [`worker/README.md`](worker/README.md): API, contas, sincronização, licenças e pendências do servidor.
 
 ## Estrutura
 

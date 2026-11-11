@@ -21,3 +21,41 @@ database_name = "dabi-orcamentos"
 # Placeholder para uso local. Antes de qualquer deploy, crie o banco no Cloudflare e substitua pelo ID real.
 database_id = "00000000-0000-0000-0000-000000000000"
 migrations_dir = "migrations"
+
+# ---------------------------------------------------------------------------------------------------------------------
+# AMBIENTES SEPARADOS (nada abaixo foi criado nem publicado). Cada ambiente tem o próprio banco D1, as próprias variáveis e os
+# próprios segredos. As variáveis [vars] NÃO são herdadas: repita todas. Os `database_id` abaixo são marcadores: o deploy falha
+# até serem trocados pelos IDs reais (criados com `wrangler d1 create`), o que evita publicar por engano.
+# Os endereços são EXEMPLOS: ajuste para os domínios reais ao implantar (DNS não é configurado por este repositório).
+# Segredos (por ambiente): `wrangler secret put AUTH_SECRET --env staging|production`.
+# ---------------------------------------------------------------------------------------------------------------------
+[env.staging]
+name = "dabi-orcamentos-staging"
+workers_dev = false
+
+[env.staging.vars]
+PUBLIC_BASE_URL = "https://orcamento-hml.exemplo.com.br"
+ALLOWED_ORIGINS = "https://app-hml.exemplo.com.br"
+LEGACY_KEY_AUTH = "off"
+# EMAIL_ADAPTER: deixe em branco até existir um provedor de e-mail real (o login responde 503, sem fingir envio).
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_name = "dabi-orcamentos-staging"
+database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-HOMOLOGACAO"
+migrations_dir = "migrations"
+
+[env.production]
+name = "dabi-orcamentos"
+workers_dev = false
+
+[env.production.vars]
+PUBLIC_BASE_URL = "https://orcamento.exemplo.com.br"
+ALLOWED_ORIGINS = "https://app.exemplo.com.br"
+LEGACY_KEY_AUTH = "off"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "dabi-orcamentos-producao"
+database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-PRODUCAO"
+migrations_dir = "migrations"

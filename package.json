@@ -10,7 +10,10 @@
     "test": "vitest run",
     "worker:migrate": "wrangler d1 migrations apply dabi-orcamentos --local --config worker/wrangler.toml",
     "worker:dev": "wrangler dev --local --config worker/wrangler.toml",
-    "licenses": "node worker/scripts/licenses.ts"
+    "licenses": "node worker/scripts/licenses.ts",
+    "typecheck": "tsc -b",
+    "audit": "npm audit --audit-level=high",
+    "check:secrets": "sh scripts/check-secrets.sh"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.1.0",
@@ -31,5 +34,8 @@
     "vite": "^6.0.5",
     "vitest": "^4.1.12",
     "wrangler": "^4.160.1"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }
