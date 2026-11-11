@@ -112,3 +112,42 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 **Playwright:** não foi adotado. Exige baixar navegadores e não há necessidade comprovada; os fluxos críticos estão cobertos por testes de componente com armazenamento real simulado, e o fluxo completo contra o Worker real foi verificado manualmente no Chrome. Reavaliar para testes e2e no CI se a equipe crescer.
 
 **Pendências:** teste visual automatizado (capturas) e e2e em navegador real no CI; revisão de contraste das cores do Design System com ferramenta dedicada (cores preservadas conforme a regra).
+
+## Fase 6 — Preparação para o beta: CONCLUÍDA (sem deploy)
+
+**Feito**
+- **GitHub Actions** (`.github/workflows/ci.yml`): build de tipos e produção (app + Worker), 409 testes, migrações do D1 num banco local temporário, auditoria de dependências (`npm audit --audit-level=high`) e verificação de segredos. Dependabot semanal (npm e Actions).
+- A receita do CI foi **reproduzida a partir de um clone limpo** (`npm ci` → build → testes → migrações → auditoria → segredos): tudo passou.
+- **Ambientes separados** em `worker/wrangler.toml` (`[env.staging]`, `[env.production]`) com marcadores no lugar dos IDs de banco, de modo que o deploy falha até serem preenchidos. Configuração validada com `wrangler deploy --dry-run` (sem publicar). Bundle do Worker: ~81 KiB (21,6 KiB comprimido).
+- `scripts/check-secrets.sh` (testado com um segredo falso: detecta e falha) e `engines: node >=22.18` (o README dizia 20+, o que estava incorreto).
+- **Documentação:** `docs/DESENVOLVIMENTO.md`, `AMBIENTES_E_VARIAVEIS.md`, `BACKUP_E_RECUPERACAO.md` (com **ensaio local** de exportar e restaurar em banco novo), `SEGURANCA_CHECKLIST.md` e `IMPLANTACAO_HOMOLOGACAO.md` (roteiro **não executado**).
+- Tratamento de falhas de API: o cliente traduz 401/403/429/503/rede em mensagens claras; a sincronização interrompe sem perder dados; `ErrorBoundary` na interface.
+
+**Pendências / riscos:** veja a seção seguinte.
+
+---
+
+# Resumo da Etapa 1 (estado final desta execução)
+
+**Fases:** 1, 2, 3, 4, 5 e 6 concluídas no que é possível sem credenciais, custos ou ações em produção. Nada foi publicado, nenhum DNS foi alterado, nenhuma chave real foi criada e nenhum e-mail foi enviado.
+
+**Números:** 24 arquivos de teste, **409 testes** passando; build de produção e checagem de tipos (app + Worker) sem erros; 0 vulnerabilidades conhecidas nas dependências; 6 migrações do D1.
+
+## Pendências para produção
+1. **Provedor de e-mail transacional** (decisão sua): sem ele não há login em produção.
+2. Criar os bancos D1 reais, definir `AUTH_SECRET` por ambiente, configurar rotas/domínios/DNS e publicar (ações suas, com credenciais).
+3. Regra de limitação de taxa por IP no WAF da Cloudflare para `/api/*`.
+4. Hospedagem do frontend e seus cabeçalhos de segurança.
+5. Retenção/limpeza de dados antigos, política de privacidade/LGPD e termos.
+6. Rotina de backup do D1 e ensaio de restauração em homologação.
+7. Monitoramento/alertas e revisão de segurança independente.
+8. Fluxo comercial (cobrança, emissão automática de licenças, reembolso) — fora de escopo desta etapa.
+9. Melhorias técnicas: paginação da sincronização completa, fusão por campo em conflitos, testes e2e em navegador real no CI, várias abas no mesmo navegador.
+
+## Decisões que precisam da sua aprovação
+- **Login sem senha por código no e-mail** (em vez de senha): é a arquitetura implementada.
+- **Conflito na mesma entidade: o servidor vence e a versão local fica guardada** para o usuário refazer.
+- **Conta só para quem tem licença emitida** (sem cadastro aberto).
+- **Limites padrão por licença:** 100 links ativos, 30 novos links por dia, 20 escritas/min, 60 sincronizações/min; **até 2 dispositivos**.
+- **Escolha do provedor de e-mail e da hospedagem** (custos).
+- Manter ou remover o modo antigo de chave de licença no servidor (hoje desligado por padrão).
