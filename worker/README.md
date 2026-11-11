@@ -6,56 +6,99 @@ Serviço remoto **mínimo** do DaBi Preço Certo. Ele existe só para publicar e
 
 | Funcionalidade | Estado |
 |---|---|
-| `GET /o/:id` página pública (HTML, sem JavaScript, mobile-first) | pronta |
-| `GET /api/quotes/:id` JSON público + totais calculados | pronta |
-| `POST /api/quotes`, `PUT /api/quotes/:id`, `DELETE /api/quotes/:id` | implementados e testados, **bloqueados**: respondem `501 PUBLISHING_DISABLED` |
-| Autenticação de compradores | **não existe** (decisão pendente, ver abaixo) |
-| Botão "Gerar link" no app | **não existe** de propósito; só será criado junto com a autenticação |
-
-O bloqueio está em `src/index.ts`: o Worker exportado usa o autorizador `denyAll`. A autorização é checada **antes** de ler o corpo da requisição. Os testes injetam um autorizador falso para exercitar a escrita; não há caminho em produção para trocá-lo sem implementar autenticação de verdade.
+| `GET /o/:id` página pública (HTML, sem JavaScript, mobile-first) | pronta, **sem autenticação** |
+| `GET /api/quotes/:id` JSON público + totais calculados | pronta, **sem autenticação** |
+| `POST /api/quotes`, `PUT /api/quotes/:id`, `DELETE /api/quotes/:id` | pronta, exige **chave de licença** |
+| `GET /api/license` (verificar licença e ver o uso das cotas) | pronta, exige chave de licença |
+| Emissão, revogação e consulta de licenças | CLI local (`npm run licenses`); **não há endpoint público** |
+| Tela Configurações no app (informar, verificar e remover a chave) | pronta |
+| Botão "Gerar link" no app (montar o orçamento e publicar) | **não existe ainda** |
 
 ## Estrutura
 
-- `../shared/publicQuote.ts`: contrato `PublicQuote`, validação estrita, totais em centavos e formatação pt-BR (compartilhado com o app).
-- `src/index.ts`: rotas, cabeçalhos de segurança e porta de autorização.
-- `src/store.ts`: acesso ao D1 (somente consultas parametrizadas) e geração do id.
+- `../shared/publicQuote.ts`: contrato `PublicQuote`, validação estrita, totais em centavos, formatação pt-BR.
+- `../shared/licenseKey.ts`: formato da chave e leitura do cabeçalho `Authorization: Bearer`.
+- `src/index.ts`: rotas, CORS, cotas e cabeçalhos de segurança.
+- `src/auth.ts`: autorização por licença e limitação de taxa.
+- `src/licenses.ts`: geração da chave (Web Crypto) e hash. `src/licenseAdmin.ts`: SQL de administração (validado).
+- `src/store.ts`: acesso ao D1 (somente consultas parametrizadas, operações atômicas).
 - `src/render.ts`: página pública, com todo texto escapado.
-- `migrations/0001_quotes.sql`: tabela `quotes`.
-- `wrangler.toml`: configuração **local** (ID de banco placeholder, sem rotas).
+- `scripts/licenses.ts`: CLI administrativo.
+- `migrations/`: `0001_quotes.sql` (orçamentos) e `0002_licenses.sql` (licenças, contadores de taxa e índices).
+
+## Licenças (opção A: chave individual)
+
+- **Chave:** `dabi_lic_` + 24 bytes aleatórios em base64url (**192 bits**), 41 caracteres. Gerada com Web Crypto.
+- **Armazenamento:** o D1 guarda somente o **SHA-256 (hex)** da chave em `licenses.key_hash`, mais um identificador interno do proprietário (`lic_` + 16 hex), status (`active`/`revoked`), cotas e rótulo administrativo. A chave nunca é gravada, registrada em log, colocada em URL nem devolvida em respostas.
+- **Uso:** `Authorization: Bearer <chave>`. A chave na URL (`?key=`, `?access_token=`) **nunca** autentica. Ausente, malformada e desconhecida respondem igual (`401`); revogada responde `403 LICENSE_REVOKED`.
+- **Propriedade:** o orçamento guarda o `owner_id` da licença que o criou. Quem não é o dono recebe `404` ao tentar atualizar ou revogar, como se o orçamento não existisse.
+- **Efeito de revogar a licença:** ela deixa de poder publicar, atualizar e revogar. Os orçamentos já publicados **continuam acessíveis**, a menos que se use `--revoke-quotes` (retira todos do ar). Reativar a licença (`activate`) restaura o acesso.
+
+### Cotas e limitação de taxa (por licença)
+
+| Controle | Padrão | Resposta ao exceder |
+|---|---|---|
+| Orçamentos **ativos** (não revogados) | 100 (`quota_active`) | `429 QUOTA_ACTIVE_EXCEEDED`; revogar um libera espaço |
+| Orçamentos **criados por dia** (dia no fuso do Brasil) | 30 (`quota_daily`) | `429 QUOTA_DAILY_EXCEEDED`; revogar **não** devolve a cota do dia |
+| Escritas (criar, atualizar, revogar) | 20 por minuto | `429 RATE_LIMITED` com `Retry-After` |
+| Verificações (`GET /api/license`) | 30 por minuto | `429 RATE_LIMITED` com `Retry-After` |
+
+As cotas são aplicadas em **um único `INSERT … SELECT … WHERE`** e a limitação de taxa em **um único `UPSERT … RETURNING`**, ambos atômicos: requisições simultâneas não ultrapassam os limites (há testes de concorrência). A autorização e o limite de taxa vêm **antes** de ler o corpo da requisição. Requisições inválidas também consomem o limite de taxa.
+
+### Fluxo de emissão manual
+
+Pré-requisito: Node 22.18+ (o CLI executa TypeScript) e, para o banco real, as credenciais da Cloudflare do operador (`CLOUDFLARE_API_TOKEN` ou `wrangler login`). **Essas credenciais são a credencial administrativa**: sem elas não é possível emitir no banco remoto, e elas nunca devem ficar no repositório nem no app.
+
+```bash
+# desenvolvimento (D1 local)
+npm run worker:migrate
+npm run licenses -- issue --local --label "Pedido 123" [--quota-active 100] [--quota-daily 30]
+
+# produção (D1 remoto; escreve no banco real)
+npm run licenses -- issue --remote --label "Pedido 123"
+
+npm run licenses -- list   --local|--remote
+npm run licenses -- status   <lic_id> --local|--remote
+npm run licenses -- revoke   <lic_id> --local|--remote [--revoke-quotes]
+npm run licenses -- activate <lic_id> --local|--remote
+```
+
+1. O comando gera a chave, calcula o SHA-256 e envia **apenas o hash** ao D1 (a chave não vai em linha de comando nem em logs do Wrangler).
+2. A chave completa é exibida **uma única vez** no terminal. Entregue-a ao comprador por um canal seguro e guarde só o ID interno (`lic_…`). Ela não pode ser recuperada; em caso de perda ou vazamento, emita outra e revogue a antiga.
+3. O destino (`--local` ou `--remote`) é obrigatório. Rótulos e identificadores são validados por padrão estrito antes de entrar no SQL.
 
 ## Dados e privacidade
 
-- Um orçamento publicado contém apenas o `PublicQuote`: nome e telefone do estabelecimento, número, datas, itens (descrição, quantidade, preço unitário em centavos), taxa de entrega, desconto e observações. Campos desconhecidos são **rejeitados**, então custo, margem, preço de compra, dados do cliente ou registros do IndexedDB não conseguem entrar.
-- O total nunca é aceito de fora: é sempre recalculado a partir dos valores públicos.
-- O id é aleatório (128 bits). Quem tem o link vê o orçamento; **não há autenticação para leitura**. Não coloque dados confidenciais nas observações.
-- Limites: 50 itens, descrição 120 caracteres, observações 1.000, corpo de 16 KB, total máximo R$ 10 milhões.
-- A página envia `noindex`, `no-store`, `Referrer-Policy: no-referrer` e uma CSP sem scripts. Erros não registram o conteúdo dos orçamentos.
-- Revogar um link (`DELETE`) o torna indisponível (410). Alterar (`PUT`) atualiza o que o cliente vê no mesmo link. As duas ações exigirão ser o dono do orçamento.
+- Um orçamento publicado contém apenas o `PublicQuote`. Campos desconhecidos são rejeitados, então custo, margem, preço de compra, dados do cliente ou registros do IndexedDB não conseguem entrar. O total é sempre recalculado.
+- Quem tem o **link** do orçamento o vê; **não há autenticação para leitura**. Não coloque dados confidenciais nas observações.
+- A página pública envia `noindex`, `no-store`, `Referrer-Policy: no-referrer` e uma CSP sem scripts. Erros não registram o conteúdo dos orçamentos nem chaves (há testes que espionam o `console`).
+- CORS: apenas as origens em `ALLOWED_ORIGINS` (valor de desenvolvimento em `wrangler.toml`), sem cookies.
+
+## No app
+
+A página **Configurações** permite informar a chave, ativar/verificar (mostra licença válida, inválida ou revogada e o uso das cotas) e remover a chave do dispositivo. O endereço do serviço vem de `VITE_QUOTES_API_URL` (veja `.env.example`; só aceita `https`, ou `http` em localhost). A chave fica no `localStorage`, **fora do banco de dados do app e dos backups**. O armazenamento do navegador **não protege** contra quem acessa o dispositivo ou contra scripts maliciosos. As funções de precificação, receitas e encomendas não usam rede nem licença.
 
 ## Desenvolvimento local
 
 ```bash
 npm run worker:migrate   # cria o D1 local e aplica as migrações
-npm run worker:dev       # sobe o Worker em http://127.0.0.1:8787
-npm test                 # testes (inclui o Worker contra SQLite real)
+npm run worker:dev       # Worker em http://127.0.0.1:8787
+VITE_QUOTES_API_URL=http://127.0.0.1:8787 npm run dev   # app falando com o Worker local
+npm test
 ```
 
-Para ver uma página sem publicar, insira uma linha direto no D1 local com `wrangler d1 execute dabi-orcamentos --local --config worker/wrangler.toml --command "INSERT INTO quotes ..."`. O estado local fica em `worker/.wrangler/` (ignorado pelo git).
+O estado local do D1 fica em `worker/.wrangler/` (ignorado pelo git).
 
-## Pendências antes de liberar a publicação
+## Pendências (segurança e publicação)
 
-1. **Autenticação de compradores** (principal). Opções na seção abaixo; nenhuma foi implementada.
-2. Cota por comprador e limitação de taxa (ex.: publicações por dia), para evitar abuso do D1.
-3. CORS restrito à origem do app (hoje não há CORS, porque o app ainda não chama o Worker).
-4. Criar o banco D1 real e trocar o `database_id` placeholder; configurar rota/domínio e DNS; deploy.
-5. No app: configurações do negócio (nome e telefone), montagem do `PublicQuote` a partir da encomenda (`createPublicQuote`), prévia, copiar link e WhatsApp, com os avisos de limitação ao vendedor.
-6. Política de retenção (limpeza de orçamentos antigos/revogados) e backup do D1.
-7. Revisar LGPD: texto livre de observações pode conter dados pessoais.
+O Worker **não está pronto para produção**: as cotas, a autorização por proprietário e a limitação de taxa estão implementadas e testadas, mas faltam itens operacionais.
 
-## Opções simples e econômicas para autorizar compradores (não implementadas)
-
-- **A. Chave de licença por compra.** Cada venda gera uma chave aleatória. O Worker guarda só o hash SHA-256 numa tabela `licenses` do D1 (com status e cota) e o app envia a chave em `Authorization: Bearer`. `owner_id` = id da licença. Revogar uma chave bloqueia só aquele comprador. Custo: zero além do plano gratuito; esforço pequeno.
-- **B. Token assinado offline (Ed25519).** Você assina licenças com uma chave privada guardada fora do Worker; o Worker só tem a chave pública e verifica assinatura e validade. Sem tabela de compradores e sem estado. Para revogar, uma lista curta de bloqueio. Custo: zero; esforço pequeno a médio.
-- **C. A ou B com emissão automática pelo gateway de pagamento.** Um webhook do pagamento aprovado emite e envia a chave por e-mail. Mais conveniente, porém mais peças (webhook, e-mail, tratamento de reembolso).
-
-Em qualquer uma, manter cota por comprador e limitação de taxa.
+1. **Proteção contra inundação de requisições sem licença.** O limite de taxa é por licença; chaves inválidas só passam pela checagem de formato antes de uma consulta ao D1. Configurar uma regra de limitação de taxa por IP no WAF da Cloudflare para `/api/*` (e, se necessário, Turnstile).
+2. **Deploy:** criar o D1 real, trocar o `database_id` placeholder, aplicar as migrações com `--remote`, configurar rota/domínio e DNS, e definir `ALLOWED_ORIGINS` com a origem real do app.
+3. **Token administrativo da Cloudflare** com escopo mínimo (apenas D1) e guardado fora do repositório. Não há trilha de auditoria de emissões além de `created_at` e do rótulo; considerar registrar quem emitiu e quando.
+4. **Limite de taxa em janela fixa:** permite rajadas de até 2× o limite na virada do minuto. Aceitável para esta etapa; usar janela deslizante se virar problema.
+5. **Chave no `localStorage`** é legível por scripts da mesma origem. Manter o app livre de scripts de terceiros e de `dangerouslySetInnerHTML`.
+6. **Rotação de chave:** hoje é manual (emitir outra e revogar a antiga). Não há endpoint de autoatendimento.
+7. **No app:** montar o `PublicQuote` a partir da encomenda, prévia, publicar, copiar link e WhatsApp, com os avisos de limitação ao vendedor (o botão "Gerar link" ainda não existe).
+8. Retenção/limpeza de orçamentos antigos e revogados, backup do D1 e revisão de LGPD (texto livre pode conter dados pessoais).
+9. Fluxo comercial: emissão automática após pagamento, reembolso/cancelamento e suporte (fora do escopo desta etapa).

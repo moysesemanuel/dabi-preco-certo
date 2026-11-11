@@ -1,20 +1,17 @@
 import { computeTotals, LIMITS, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
 import { renderMessagePage, renderQuotePage } from './render';
-import { generateId, getQuote, ID_PATTERN, insertQuote, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
+import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authorizer } from './auth';
+import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
   DB: D1Like;
   /** Origem pública dos links, ex.: https://orcamento.dabitech.com.br (sem barra final). */
   PUBLIC_BASE_URL?: string;
+  /** Origens do app autorizadas a chamar a API (CORS), separadas por vírgula. Vazio = nenhuma. */
+  ALLOWED_ORIGINS?: string;
 }
 
-/**
- * Decide quem pode publicar, atualizar ou revogar orçamentos. AINDA NÃO EXISTE autenticação:
- * o Worker publicado usa `denyAll`, então os endpoints de escrita respondem 501 e nada é gravado.
- * Os testes injetam um autorizador falso; não há caminho em produção para trocá-lo sem implementar a autenticação.
- */
-export type Authorizer = (request: Request, env: Env) => Promise<{ ok: true; ownerId: string } | { ok: false }>;
-export const denyAll: Authorizer = async () => ({ ok: false });
+export type { Authorizer, AuthResult };
 
 type Options = { authorize: Authorizer; now?: () => Date; newId?: () => string };
 
@@ -35,6 +32,16 @@ const html = (body: string, status = 200, head = false) => respond(head ? null :
 
 /** Data de hoje no Brasil (UTC-3, sem horário de verão), para decidir se a validade encerrou. */
 const todayInBrazil = (now: Date) => new Date(now.getTime() - 3 * 3600_000).toISOString().slice(0, 10);
+
+/** Início do dia atual no Brasil, em UTC (00:00 em UTC-3 = 03:00Z). Usado na cota diária. */
+const dayStartUtc = (now: Date) => `${todayInBrazil(now)}T03:00:00.000Z`;
+
+function authFailure(f: Extract<AuthResult, { ok: false }>): Response {
+  const extra: Record<string, string> = {};
+  if (f.status === 401) extra['WWW-Authenticate'] = 'Bearer realm="dabi-orcamentos"';
+  if (f.retryAfterSeconds !== undefined) extra['Retry-After'] = String(f.retryAfterSeconds);
+  return respond(JSON.stringify({ error: f.error, message: f.message }), f.status, 'application/json; charset=utf-8', extra);
+}
 
 function readStored(row: QuoteRow): PublicQuote | undefined {
   try {
@@ -70,9 +77,9 @@ export function createHandler(options: Options) {
   }
 
   async function write(request: Request, env: Env, method: string, id: string | undefined): Promise<Response> {
-    // A autorização vem ANTES de ler o corpo: sem credencial válida, nada é processado nem gravado.
-    const auth = await options.authorize(request, env);
-    if (!auth.ok) return apiError(501, 'PUBLISHING_DISABLED', 'A publicação de orçamentos ainda não está habilitada.');
+    // A autorização vem ANTES de ler o corpo: sem licença válida (e dentro do limite de taxa), nada é processado nem gravado.
+    const auth = await options.authorize(request, env, { scope: 'write', now: now() });
+    if (!auth.ok) return authFailure(auth);
 
     if (method === 'POST' && id === undefined) {
       const body = await readJsonBody(request);
@@ -80,8 +87,15 @@ export function createHandler(options: Options) {
       const v = validatePublicQuote(body.data);
       if (!v.ok) return json({ error: 'INVALID_QUOTE', code: v.error, field: v.field }, 400);
       const newQuoteId = newId();
-      const stamp = now().toISOString();
-      await insertQuote(env.DB, { id: newQuoteId, payload: JSON.stringify(v.quote), now: stamp, ownerId: auth.ownerId });
+      const current = now();
+      const limits = auth.limits ?? { quotaActive: DEFAULT_LIMITS.quotaActive, quotaDaily: DEFAULT_LIMITS.quotaDaily };
+      const inserted = await insertQuoteWithinQuotas(env.DB, { id: newQuoteId, payload: JSON.stringify(v.quote), now: current.toISOString(), ownerId: auth.ownerId, dayStartIso: dayStartUtc(current), quotaActive: limits.quotaActive, quotaDaily: limits.quotaDaily });
+      if (!inserted.ok) {
+        const message = inserted.reason === 'ACTIVE'
+          ? 'Você atingiu o limite de orçamentos ativos. Revogue orçamentos antigos para liberar espaço.'
+          : 'Você atingiu o limite de orçamentos criados hoje. Tente novamente amanhã.';
+        return json({ error: inserted.reason === 'ACTIVE' ? 'QUOTA_ACTIVE_EXCEEDED' : 'QUOTA_DAILY_EXCEEDED', message, used: inserted.used, limit: inserted.limit }, 429);
+      }
       const path = `/o/${newQuoteId}`;
       return json({ id: newQuoteId, path, ...(env.PUBLIC_BASE_URL ? { url: `${env.PUBLIC_BASE_URL}${path}` } : {}) }, 201);
     }
@@ -105,7 +119,28 @@ export function createHandler(options: Options) {
     return json({ id, updated: true });
   }
 
-  return async function handle(request: Request, env: Env): Promise<Response> {
+  /** Verifica a licença e informa o uso das cotas. Usada pelo botão "Ativar/verificar" do app. */
+  async function verifyLicense(request: Request, env: Env): Promise<Response> {
+    const auth = await options.authorize(request, env, { scope: 'verify', now: now() });
+    if (!auth.ok) return authFailure(auth);
+    const limits = auth.limits ?? { quotaActive: DEFAULT_LIMITS.quotaActive, quotaDaily: DEFAULT_LIMITS.quotaDaily };
+    const usage = await countQuotaUsage(env.DB, auth.ownerId, dayStartUtc(now()));
+    return json({ status: 'active', licenseId: auth.ownerId, quotas: { active: { used: usage?.active ?? 0, limit: limits.quotaActive }, daily: { used: usage?.today ?? 0, limit: limits.quotaDaily } } });
+  }
+
+  /** CORS só para origens explicitamente autorizadas; a chave vai em cabeçalho, sem cookies. */
+  function withCors(request: Request, env: Env, response: Response): Response {
+    const origin = request.headers.get('origin');
+    const allowed = (env.ALLOWED_ORIGINS ?? '').split(',').map(o => o.trim()).filter(Boolean);
+    if (origin && allowed.includes(origin)) {
+      response.headers.set('Access-Control-Allow-Origin', origin);
+      response.headers.set('Access-Control-Expose-Headers', 'Retry-After');
+      response.headers.append('Vary', 'Origin');
+    }
+    return response;
+  }
+
+  async function route(request: Request, env: Env): Promise<Response> {
     try {
       const { pathname } = new URL(request.url);
       const method = request.method.toUpperCase();
@@ -113,24 +148,38 @@ export function createHandler(options: Options) {
       const page = pathname.match(/^\/o\/([^/]+)\/?$/);
       if (page) {
         if (method !== 'GET' && method !== 'HEAD') return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
-        return readQuote(env, page[1], method === 'HEAD', false);
+        return await readQuote(env, page[1], method === 'HEAD', false);
+      }
+      if (/^\/api\/license\/?$/.test(pathname)) {
+        return method === 'GET' ? await verifyLicense(request, env) : apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }
       const api = pathname.match(/^\/api\/quotes(?:\/([^/]+))?\/?$/);
       if (api) {
         const id = api[1];
-        if (method === 'GET' && id !== undefined) return readQuote(env, id, false, true);
-        if ((method === 'POST' && id === undefined) || ((method === 'PUT' || method === 'DELETE') && id !== undefined)) return write(request, env, method, id);
+        if (method === 'GET' && id !== undefined) return await readQuote(env, id, false, true); // leitura pública: sem autenticação
+        if ((method === 'POST' && id === undefined) || ((method === 'PUT' || method === 'DELETE') && id !== undefined)) return await write(request, env, method, id);
         return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }
       if (pathname === '/healthz') return json({ ok: true });
       return html(renderMessagePage('Página não encontrada', 'Este endereço não existe.'), 404, method === 'HEAD');
     } catch {
-      // Não expõe detalhes internos nem dados do orçamento em erros.
+      // Não expõe detalhes internos, chaves nem dados do orçamento em erros.
       return apiError(500, 'INTERNAL_ERROR', 'Erro interno.');
     }
+  }
+
+  return async function handle(request: Request, env: Env): Promise<Response> {
+    const { pathname } = new URL(request.url);
+    if (request.method.toUpperCase() === 'OPTIONS' && pathname.startsWith('/api/')) {
+      const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
+      return withCors(request, env, preflight);
+    }
+    return withCors(request, env, await route(request, env));
   };
 }
 
+// O Worker publicado autoriza SOMENTE por chave de licença individual (veja auth.ts).
+const handler = createHandler({ authorize: createLicenseAuthorizer() });
 export default {
-  fetch: (request: Request, env: Env) => createHandler({ authorize: denyAll })(request, env),
+  fetch: (request: Request, env: Env) => handler(request, env),
 };

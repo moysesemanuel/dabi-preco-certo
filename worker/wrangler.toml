@@ -8,6 +8,8 @@ workers_dev = false
 [vars]
 # Origem usada para montar os links curtos devolvidos pela API (quando a publicação for habilitada).
 PUBLIC_BASE_URL = "https://orcamento.dabitech.com.br"
+# Origens do app autorizadas a chamar a API (CORS). Valores de DESENVOLVIMENTO: troque pela origem real do app antes do deploy.
+ALLOWED_ORIGINS = "http://localhost:5174,http://127.0.0.1:5174"
 
 [[d1_databases]]
 binding = "DB"

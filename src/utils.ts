@@ -2,7 +2,7 @@ import { recipeCost } from './domain/pricing';
 import type { DataSet, Recipe, Unit } from './domain/types';
 import { DEFAULT_CUP_ML } from './features/measurement/convert';
 
-export type Page = 'dashboard' | 'ingredients' | 'recipes' | 'orders' | 'converter' | 'backup';
+export type Page = 'dashboard' | 'ingredients' | 'recipes' | 'orders' | 'converter' | 'settings' | 'backup';
 export type PageProps = {
   data: DataSet;
   update: (fn: (prev: DataSet) => DataSet) => void;

@@ -18,7 +18,7 @@ let env: Env;
 beforeEach(() => { db = createTestD1(); env = { DB: db.d1, PUBLIC_BASE_URL: BASE }; });
 
 const seed = (id: string, q: PublicQuote, ownerId = 'dono-1') => insertQuote(db.d1, { id, payload: JSON.stringify(q), now: NOW.toISOString(), ownerId });
-const as = (ownerId: string | null): Authorizer => async () => (ownerId ? { ok: true, ownerId } : { ok: false });
+const as = (ownerId: string | null): Authorizer => async () => (ownerId ? { ok: true, ownerId } : { ok: false, status: 401, error: 'UNAUTHORIZED', message: 'Chave de licença ausente ou inválida.' });
 const handler = (ownerId: string | null = 'dono-1', ids: string[] = []) => createHandler({ authorize: as(ownerId), now: () => NOW, newId: () => ids.shift() ?? generateId() });
 const req = (method: string, path: string, body?: unknown) => new Request(`${BASE}${path}`, { method, ...(body !== undefined ? { body: typeof body === 'string' ? body : JSON.stringify(body), headers: { 'content-type': 'application/json' } } : {}) });
 const readOnly = createHandler({ authorize: as(null), now: () => NOW });
@@ -104,25 +104,25 @@ describe('Leitura pública', () => {
   });
 });
 
-describe('Publicação bloqueada (sem autenticação)', () => {
+describe('Escrita sem licença: o Worker exportado recusa tudo', () => {
   const attempts: [string, string, unknown][] = [['POST', '/api/quotes', quote()], ['PUT', `/api/quotes/${ID_A}`, quote()], ['DELETE', `/api/quotes/${ID_A}`, undefined]];
-  it('o Worker exportado nega TODA escrita com 501 e não grava nada', async () => {
+  it('o Worker exportado nega TODA escrita sem licença (401) e não grava nada', async () => {
     await seed(ID_A, quote());
     const before = db.rows();
     for (const [method, path, body] of attempts) {
       const res = await worker.fetch(req(method, path, body), env);
-      expect(res.status, `${method} ${path}`).toBe(501);
-      expect(await res.json()).toMatchObject({ error: 'PUBLISHING_DISABLED' });
+      expect(res.status, `${method} ${path}`).toBe(401);
+      expect(await res.json()).toMatchObject({ error: 'UNAUTHORIZED' });
     }
     expect(db.rows()).toEqual(before);
   });
   it('nem corpo gigante ou inválido é processado sem autorização', async () => {
     const res = await worker.fetch(req('POST', '/api/quotes', 'x'.repeat(100_000)), env);
-    expect(res.status).toBe(501); expect(db.rows()).toHaveLength(0);
+    expect(res.status).toBe(401); expect(db.rows()).toHaveLength(0);
   });
   it('cabeçalhos de credencial inventados não liberam nada', async () => {
     const r = new Request(`${BASE}/api/quotes`, { method: 'POST', headers: { authorization: 'Bearer qualquer', 'x-api-key': 'admin', 'content-type': 'application/json' }, body: JSON.stringify(quote()) });
-    expect((await worker.fetch(r, env)).status).toBe(501); expect(db.rows()).toHaveLength(0);
+    expect((await worker.fetch(r, env)).status).toBe(401); expect(db.rows()).toHaveLength(0);
   });
   it('o Worker exportado ainda serve a leitura pública', async () => {
     await seed(ID_A, quote());
@@ -182,8 +182,8 @@ describe('Endpoints de escrita (prontos, atrás de autorizador injetado)', () =>
     expect(db.rows()[0].revoked_at).toBe(stamp);
     expect((await handler('dono-1')(req('PUT', `/api/quotes/${ID_A}`, quote()), env)).status).toBe(410);
   });
-  it('autorizador que nega → 501, mesmo com payload válido', async () => {
-    expect((await handler(null)(req('POST', '/api/quotes', quote()), env)).status).toBe(501);
+  it('autorizador que nega → 401, mesmo com payload válido', async () => {
+    expect((await handler(null)(req('POST', '/api/quotes', quote()), env)).status).toBe(401);
     expect(db.rows()).toHaveLength(0);
   });
 });

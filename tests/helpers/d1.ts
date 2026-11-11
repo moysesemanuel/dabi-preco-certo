@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import type { D1Like } from '../../worker/src/store';
 
@@ -8,7 +8,8 @@ const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof
 /** Simula o D1 com SQLite real (node:sqlite) aplicando a migração verdadeira do projeto. */
 export function createTestD1() {
   const db = new DatabaseSync(':memory:');
-  db.exec(readFileSync(new URL('../../worker/migrations/0001_quotes.sql', import.meta.url), 'utf8'));
+  const dir = new URL('../../worker/migrations/', import.meta.url);
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(file, dir), 'utf8'));
   const d1: D1Like = {
     prepare(sql: string) {
       const stmt = db.prepare(sql);
@@ -23,5 +24,5 @@ export function createTestD1() {
       };
     },
   };
-  return { d1, rows: () => db.prepare('SELECT * FROM quotes').all().map(r => ({ ...r })) as Record<string, string | null>[] };
+  return { d1, raw: db, rows: () => db.prepare('SELECT * FROM quotes').all().map(r => ({ ...r })) as Record<string, string | null>[] };
 }
