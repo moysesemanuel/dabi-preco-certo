@@ -30,7 +30,7 @@ npx wrangler secret put RESEND_API_KEY --env staging --config worker/wrangler.to
 ## 3. Migrações
 
 ```bash
-npx wrangler d1 migrations apply dabi-orcamentos-staging --remote --env staging --config worker/wrangler.toml
+npm run d1 -- migrate --env staging        # mostra o banco de destino (dabi-orcamentos-staging) antes de aplicar
 ```
 As migrações só **criam** tabelas e colunas (nenhuma apaga dados). Exporte um backup antes de migrações futuras.
 
@@ -47,9 +47,9 @@ Configure rota/domínio do Worker e o DNS no painel da Cloudflare (manual).
 ## 5. Dados de teste (nunca clientes reais)
 
 ```bash
-npm run licenses -- issue --remote --email teste1@seudominio --label "homologação"
+npm run licenses -- issue --env staging --email teste1@seudominio --label "homologação"
 ```
-(Use `--remote` somente com a credencial de homologação ativa; confirme o banco antes.)
+`--env staging` usa **exclusivamente** o D1 `dabi-orcamentos-staging` (Wrangler `--env staging --remote`); o CLI imprime ambiente e banco antes de agir e recusa `--remote` sozinho. Confira o banner (`Ambiente: staging`) e use a credencial da Cloudflare do ambiente de homologação.
 
 ## 6. Testes de fumaça
 
@@ -60,7 +60,7 @@ npm run licenses -- issue --remote --email teste1@seudominio --label "homologaç
 5. Publicar um orçamento, abrir o link **sem sessão** (aba anônima): sem custos, sem dados do cliente; revogar e ver `410`.
 6. Estourar o limite de taxa de propósito e conferir o `429` com `Retry-After`.
 7. Cabeçalhos da página pública: CSP sem scripts, `noindex`, `no-store`.
-8. Fazer um backup (`d1 export`) e restaurar em outro banco de teste.
+8. Fazer um backup (`npm run d1 -- export --env staging --output backup-hml.sql`) e restaurar no banco de ensaio (`npm run d1 -- restore-file --env restore --file backup-hml.sql`, depois de `wrangler d1 create dabi-orcamentos-restauracao` e de trocar o marcador de ID em `[env.restore]`).
 
 ## 7. Critérios para sair da homologação
 

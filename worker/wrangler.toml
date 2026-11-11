@@ -65,3 +65,14 @@ binding = "DB"
 database_name = "dabi-orcamentos-producao"
 database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-PRODUCAO"
 migrations_dir = "migrations"
+
+# Banco SÓ para ensaiar restauração de backups (`npm run d1 -- restore-file --env restore --file backup.sql`). Nunca recebe dados reais por outro caminho.
+[env.restore]
+name = "dabi-orcamentos-restauracao"
+workers_dev = false
+
+[[env.restore.d1_databases]]
+binding = "DB"
+database_name = "dabi-orcamentos-restauracao"
+database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-RESTAURACAO"
+migrations_dir = "migrations"

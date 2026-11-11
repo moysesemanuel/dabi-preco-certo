@@ -33,6 +33,17 @@ Definidas em `worker/wrangler.toml` (não secretas) ou como segredos.
 
 Em desenvolvimento, os segredos ficam em `worker/.dev.vars` (ignorado pelo git; veja `worker/.dev.vars.example`).
 
+## Ambientes de administração (CLIs)
+
+| `--env` | Banco D1 | Wrangler |
+|---|---|---|
+| `local` | `dabi-orcamentos` | `--local` |
+| `staging` | `dabi-orcamentos-staging` | `--env staging --remote` |
+| `production` | `dabi-orcamentos-producao` | `--env production --remote` |
+| `restore` (só migrar/restaurar ensaio) | `dabi-orcamentos-restauracao` | `--env restore --remote` |
+
+`npm run licenses` e `npm run d1` exigem `--env` explícito, mostram ambiente/banco antes de agir e recusam combinações incoerentes. Um teste confere que esses nomes batem com `worker/wrangler.toml`.
+
 ## Credenciais de operação (fora do repositório)
 
 - **Cloudflare:** `wrangler login` ou `CLOUDFLARE_API_TOKEN` com escopo mínimo (Workers e D1 do ambiente). É a "credencial administrativa" que permite emitir licenças no banco remoto.

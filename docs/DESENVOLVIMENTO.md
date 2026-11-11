@@ -34,7 +34,7 @@ Sem `VITE_API_URL`, o app funciona inteiro neste dispositivo (IndexedDB). A pág
    ```
 3. Emita uma licença de conta para o seu e-mail de teste:
    ```bash
-   npm run licenses -- issue --local --email voce@exemplo.com --label "dev"
+   npm run licenses -- issue --env local --email voce@exemplo.com --label "dev"
    ```
 4. Suba o Worker e o app. Use o **mesmo nome de host** nos dois (aqui, `localhost`), pois o cookie de sessão é `SameSite=Lax`:
    ```bash
@@ -55,9 +55,10 @@ O estado local do D1 fica em `worker/.wrangler/` (ignorado pelo git). Apague a p
 | `npm run typecheck` | Só a verificação de tipos |
 | `npm run audit` | Auditoria de dependências (severidade alta ou crítica) |
 | `npm run check:secrets` | Procura segredos acidentais nos arquivos versionados |
-| `npm run worker:migrate` | Aplica as migrações no D1 **local** |
+| `npm run worker:migrate` | Aplica as migrações no D1 **local** (igual a `npm run d1 -- migrate --env local`) |
+| `npm run d1 -- <comando> --env <ambiente>` | Migrar, exportar e restaurar o D1 com ambiente explícito (veja `BACKUP_E_RECUPERACAO.md`) |
 | `npm run worker:dev` | Worker local com D1 local |
-| `npm run licenses -- <comando>` | Emite, consulta e revoga licenças (veja `worker/README.md`) |
+| `npm run licenses -- <comando> --env local\|staging\|production` | Emite, consulta e revoga licenças; o ambiente é sempre explícito (veja `worker/README.md`) |
 
 ## Estrutura
 

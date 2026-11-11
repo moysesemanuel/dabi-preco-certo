@@ -42,11 +42,11 @@ O acesso do app passa a ser por **conta + sessão**; a chave de licença deixa d
 
 Rotas: `POST /api/auth/request-code`, `POST /api/auth/verify-code`, `GET /api/auth/session`, `POST /api/auth/logout`, `GET /api/sessions`, `DELETE /api/sessions/:id`.
 
-**E-mail:** nenhum provedor de produção foi escolhido ou contratado. `src/email.ts` define a interface `EmailSender`. Sem `EMAIL_ADAPTER` o login responde `503 EMAIL_NOT_CONFIGURED` (nada finge ter sido entregue). `EMAIL_ADAPTER=dev` só imprime o código no terminal local. **Decisão pendente:** escolher o provedor (opções gratuitas ou baratas a avaliar) e escrever o adaptador.
+**E-mail:** `src/email.ts` define a interface `EmailSender` e o adaptador **Resend** (`EMAIL_ADAPTER=resend`, segredo `RESEND_API_KEY`, remetente em `EMAIL_FROM`). Sem configuração completa o login responde `503 EMAIL_NOT_CONFIGURED` (nada finge ter sido entregue). `EMAIL_ADAPTER=dev` só imprime o código no terminal e só vale com origens locais.
 
 Segredos: `AUTH_SECRET` em `wrangler secret put AUTH_SECRET` (produção) ou `worker/.dev.vars` (desenvolvimento; veja `.dev.vars.example`).
 
-Emissão: `npm run licenses -- issue --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`.
+Emissão: `npm run licenses -- issue --env <ambiente> --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`. O ambiente é sempre explícito (veja "Fluxo de emissão manual").
 
 ## Dados online e sincronização (Etapa 1, Fase 3)
 
@@ -85,25 +85,43 @@ As cotas são aplicadas em **um único `INSERT … SELECT … WHERE`** e a limit
 
 ### Fluxo de emissão manual
 
-Pré-requisito: Node 22.18+ (o CLI executa TypeScript) e, para o banco real, as credenciais da Cloudflare do operador (`CLOUDFLARE_API_TOKEN` ou `wrangler login`). **Essas credenciais são a credencial administrativa**: sem elas não é possível emitir no banco remoto, e elas nunca devem ficar no repositório nem no app.
+Pré-requisito: Node 22.18+ (o CLI executa TypeScript) e, para bancos remotos, as credenciais da Cloudflare do operador (`CLOUDFLARE_API_TOKEN` ou `wrangler login`). **Essas credenciais são a credencial administrativa**: sem elas não é possível emitir no banco remoto, e elas nunca devem ficar no repositório nem no app.
+
+**O ambiente é sempre explícito** (`--env local|staging|production`; `--local` é sinônimo de `--env local`). `--remote` sozinho é **recusado**. Cada ambiente tem o seu banco e o seu `--env` do Wrangler:
+
+| `--env` | Banco D1 | Wrangler |
+|---|---|---|
+| `local` | `dabi-orcamentos` (arquivo local) | `--local` |
+| `staging` (homologação) | `dabi-orcamentos-staging` | `--env staging --remote` |
+| `production` | `dabi-orcamentos-producao` | `--env production --remote` |
+
+Antes de qualquer operação o CLI imprime **ambiente, banco e destino**. Combinações incoerentes (`--local` com `--env staging`, opções que não pertencem ao comando, id malformado…) param antes de tocar em qualquer banco.
 
 ```bash
 # desenvolvimento (D1 local)
 npm run worker:migrate
-npm run licenses -- issue --local --label "Pedido 123" [--quota-active 100] [--quota-daily 30]
+npm run licenses -- issue --env local --email voce@exemplo.com --label "dev" [--quota-active 100] [--quota-daily 30]
 
-# produção (D1 remoto; escreve no banco real)
-npm run licenses -- issue --remote --label "Pedido 123"
+# homologação (D1 dabi-orcamentos-staging, remoto)
+npm run licenses -- issue --env staging --email teste1@seudominio --label "homologação"
 
-npm run licenses -- list   --local|--remote
-npm run licenses -- status   <lic_id> --local|--remote
-npm run licenses -- revoke   <lic_id> --local|--remote [--revoke-quotes]
-npm run licenses -- activate <lic_id> --local|--remote
+# produção (D1 dabi-orcamentos-producao, dados reais) — só com aprovação
+npm run licenses -- issue --env production --email comprador@exemplo.com --label "Pedido 123"
+
+npm run licenses -- list   --env staging
+npm run licenses -- status   <lic_id> --env staging
+npm run licenses -- activate <lic_id> --env staging
+npm run licenses -- revoke   <lic_id> --env staging [--revoke-quotes]
+npm run licenses -- revoke-sessions <lic_id> --env staging
 ```
+
+**Produção, operações destrutivas** (`revoke`, `revoke-sessions`): exigem confirmação adicional, específica da licença. Interativo: o CLI pede para digitar o `lic_…`. Automação autorizada (sem terminal): `--confirm-production <lic_id>` com o **mesmo** id do comando; sem isso, nada é executado. Fora de produção a confirmação não existe e `--confirm-production` é erro.
+
+**Migrações, backup e restauração** usam o mesmo controle (`npm run d1 -- <comando> --env <ambiente>`): `migrate`, `export --output arquivo.sql`, `restore-file --file arquivo.sql` (nunca em produção; use `time-travel-restore`), `time-travel-info`, `time-travel-restore --timestamp`. Em produção, `migrate`, `restore-file` e `time-travel-restore` pedem confirmação com o **nome do banco** (`--confirm-production dabi-orcamentos-producao`). Veja `docs/BACKUP_E_RECUPERACAO.md`.
 
 1. O comando gera a chave, calcula o SHA-256 e envia **apenas o hash** ao D1 (a chave não vai em linha de comando nem em logs do Wrangler).
 2. A chave completa é exibida **uma única vez** no terminal. Entregue-a ao comprador por um canal seguro e guarde só o ID interno (`lic_…`). Ela não pode ser recuperada; em caso de perda ou vazamento, emita outra e revogue a antiga.
-3. O destino (`--local` ou `--remote`) é obrigatório. Rótulos e identificadores são validados por padrão estrito antes de entrar no SQL.
+3. O ambiente (`--env`) é obrigatório. Rótulos e identificadores são validados por padrão estrito antes de entrar no SQL.
 
 ## Dados e privacidade
 
@@ -132,7 +150,7 @@ O estado local do D1 fica em `worker/.wrangler/` (ignorado pelo git).
 O Worker **não está pronto para produção**: as cotas, a autorização por proprietário e a limitação de taxa estão implementadas e testadas, mas faltam itens operacionais.
 
 1. **Proteção contra inundação de requisições sem licença.** O limite de taxa é por licença; chaves inválidas só passam pela checagem de formato antes de uma consulta ao D1. Configurar uma regra de limitação de taxa por IP no WAF da Cloudflare para `/api/*` (e, se necessário, Turnstile).
-2. **Deploy:** criar o D1 real, trocar o `database_id` placeholder, aplicar as migrações com `--remote`, configurar rota/domínio e DNS, e definir `ALLOWED_ORIGINS` com a origem real do app.
+2. **Deploy:** criar o D1 real, trocar o `database_id` placeholder, aplicar as migrações (`npm run d1 -- migrate --env staging|production`), configurar rota/domínio e DNS, e definir `ALLOWED_ORIGINS` com a origem real do app.
 3. **Token administrativo da Cloudflare** com escopo mínimo (apenas D1) e guardado fora do repositório. Não há trilha de auditoria de emissões além de `created_at` e do rótulo; considerar registrar quem emitiu e quando.
 4. **Limite de taxa em janela fixa:** permite rajadas de até 2× o limite na virada do minuto. Aceitável para esta etapa; usar janela deslizante se virar problema.
 5. **Chave no `localStorage`** é legível por scripts da mesma origem. Manter o app livre de scripts de terceiros e de `dangerouslySetInnerHTML`.

@@ -15,7 +15,7 @@ O que existe no banco: usuários, sessões, licenças, dados sincronizados (ingr
 ### Backup manual (exportação SQL)
 
 ```bash
-npx wrangler d1 export dabi-orcamentos-producao --remote --env production --config worker/wrangler.toml --output backup-AAAA-MM-DD.sql
+npm run d1 -- export --env production --output backup-AAAA-MM-DD.sql   # somente leitura; mostra ambiente e banco antes
 ```
 
 - Guarde o arquivo em local seguro e **privado**: ele contém e-mails e dados dos clientes. O hash das chaves de licença também está nele.
@@ -26,20 +26,24 @@ npx wrangler d1 export dabi-orcamentos-producao --remote --env production --conf
 O D1 oferece recuperação a um instante anterior (a retenção depende do plano: **confirme na documentação atual da Cloudflare**):
 
 ```bash
-npx wrangler d1 time-travel info dabi-orcamentos-producao --env production --config worker/wrangler.toml
-npx wrangler d1 time-travel restore dabi-orcamentos-producao --timestamp=<ISO-8601> --env production --config worker/wrangler.toml
+npm run d1 -- time-travel-info --env production
+npm run d1 -- time-travel-restore --env production --timestamp <ISO-8601 em UTC, ex.: 2026-11-12T15:00:00Z>
 ```
 
-Restaurar **substitui o estado atual do banco**: avise os usuários e anote o horário.
+Restaurar **substitui o estado atual do banco**: avise os usuários e anote o horário. Em produção o comando pede confirmação extra (digitar o nome do banco, ou `--confirm-production dabi-orcamentos-producao` em execução não interativa autorizada). O mesmo vale para `migrate`.
 
 ### Restaurar de um arquivo `.sql`
 
 Prefira restaurar **primeiro num banco novo** (homologação), conferir e só então decidir:
 
 ```bash
-npx wrangler d1 create dabi-orcamentos-restauracao
-npx wrangler d1 execute dabi-orcamentos-restauracao --remote --file backup-AAAA-MM-DD.sql
+npx wrangler d1 create dabi-orcamentos-restauracao          # depois troque SUBSTITUIR-PELO-ID-DO-D1-DE-RESTAURACAO em [env.restore] de worker/wrangler.toml
+npm run d1 -- migrate --env restore                        # só se o dump não trouxer o esquema
+npm run d1 -- restore-file --env restore --file backup-AAAA-MM-DD.sql
 ```
+
+`restore-file` **não aceita produção** (restaurar um `.sql` por cima do banco real não é permitido por este comando; para produção use Time Travel). Aceita `local`, `staging` e `restore`.
+
 
 **Ensaio já realizado (local):** exportar o D1 local e restaurá-lo em um banco novo preservou as 12 tabelas e os dados (licença e e-mail conferidos). Repita o ensaio em homologação antes de depender do procedimento em produção.
 

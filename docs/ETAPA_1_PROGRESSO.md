@@ -175,3 +175,14 @@ Decisões aprovadas: login sem senha por código; contas só com licença ativa;
 - Plano gratuito do Resend tem limites diários/mensais de envio: falha vira 503 com `Retry-After`; acompanhe o consumo.
 - Tolerância offline é verificada no cliente (localStorage): serve para continuidade, não é controle de segurança.
 - E-mail de teste real (entregabilidade, SPF/DKIM/spam) só pode ser validado em homologação.
+
+## Correção: seleção explícita de ambiente nos CLIs de administração
+
+Problema: `licenses.ts` usava sempre o banco `dabi-orcamentos` sem `--env`, então `--remote` não garantia o D1 de homologação.
+
+- `worker/scripts/targets.ts`: fonte única dos ambientes (`local`, `staging`, `production`, `restore`) com banco e `--env` do Wrangler; `--remote` sozinho e combinações contraditórias são recusados; o destino é impresso antes de agir.
+- `licenses` (`licensesCli.ts`) e o novo `npm run d1` (`d1Cli.ts`: migrate, export, restore-file, time-travel) usam essa tabela; `worker:migrate` agora é `d1 migrate --env local`.
+- Produção: `revoke`, `revoke-sessions`, `migrate`, `restore-file`/`time-travel-restore` exigem confirmação extra (digitada, ou `--confirm-production <lic_id|nome-do-banco>` sem terminal); `restore-file` nunca vale para produção.
+- Novo `[env.restore]` em `wrangler.toml` para ensaiar restauração sem tocar nos bancos reais.
+- `tests/admin-cli.test.ts` (62 testes) valida os argumentos exatos passados ao Wrangler (com `exec` simulado, sem acessar banco algum), as recusas e a coerência com `wrangler.toml`/`package.json`.
+- Exemplos corrigidos em README, `worker/README.md`, `DESENVOLVIMENTO`, `IMPLANTACAO_HOMOLOGACAO`, `BACKUP_E_RECUPERACAO` e `AMBIENTES_E_VARIAVEIS`. O restore antigo (`d1 execute dabi-orcamentos-restauracao` sem config) também estava incorreto: o banco não existia no `wrangler.toml`.
