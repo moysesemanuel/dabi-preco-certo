@@ -8,6 +8,7 @@ import { convert, conversionErrorMessage } from '../features/measurement/convert
 import { RecipeTextImporter, type ImportConfirm } from '../features/recipe-import/components/RecipeTextImporter';
 import { MeasurementConverter, type ConverterUse } from '../features/measurement/components/MeasurementConverter';
 import { formatQuantity, friendlyAmount, UNIT_ORDER, UNITS, unitText } from '../features/measurement/units';
+import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
 import { cupSizeOf, newId, parse, priceRecipe, type PageProps } from '../utils';
 
 export function RecipesPage({ data, update, inform }: PageProps) {
@@ -36,8 +37,8 @@ export function RecipesPage({ data, update, inform }: PageProps) {
   }
   function saveRecipe(e: FormEvent) {
     e.preventDefault();
-    const yieldNum = parse(yieldQty), pack = parse(packaging), lab = parse(labor), extra = parse(extras), m = parse(margin);
-    if (!name.trim() || !(yieldNum > 0) || !items.length || items.some(i => !(i.quantity > 0) || !data.ingredients.some(x => x.id === i.ingredientId)) || ![pack, lab, extra, m].every(Number.isFinite) || [pack, lab, extra, m].some(x => x < 0) || m >= 100) return inform('Revise rendimento, ingredientes e custos. Margem: 0 até menos de 100%.');
+    const yieldNum = parse(yieldQty), pack = toCents2(parse(packaging)), lab = toCents2(parse(labor)), extra = toCents2(parse(extras)), m = parse(margin);
+    if (!name.trim() || !isPositiveQuantity(yieldNum) || !items.length || items.some(i => !isPositiveQuantity(i.quantity) || !data.ingredients.some(x => x.id === i.ingredientId)) || ![pack, lab, extra].every(isMoney) || !Number.isFinite(m) || m < 0 || m >= 100) return inform('Revise rendimento, ingredientes e custos. Margem: 0 até menos de 100%.');
     const values = { name: name.trim(), yield: yieldNum, items, packagingPerUnit: pack, laborTotal: lab, extraTotal: extra, desiredMargin: m };
     try { recipeCost({ id: editingId ?? 'novo', ...values }, data.ingredients, cupSizeMl); } catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível calcular o custo desta receita.'); }
     if (editingId) {

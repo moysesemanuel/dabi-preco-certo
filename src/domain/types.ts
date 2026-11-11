@@ -9,6 +9,14 @@ export type Ingredient = { id: string; name: string; purchaseQuantity: number; u
 /** unit ausente = mesma unidade de compra do ingrediente (dados anteriores à conversão). */
 export type RecipeItem = { ingredientId: string; quantity: number; unit?: MeasureUnit };
 export type Recipe = { id: string; name: string; yield: number; items: RecipeItem[]; packagingPerUnit: number; laborTotal: number; extraTotal: number; desiredMargin: number };
-export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string };
+/**
+ * Custo unitário da receita NO MOMENTO em que a encomenda foi registrada. Nunca é recalculado com preços atuais.
+ * Ausente em encomendas anteriores ao registro de custos (ou quando o custo não era calculável): nesses casos
+ * o app só pode ESTIMAR pelo custo atual e deve deixar isso claro.
+ */
+export type CostSnapshot = { costPerUnit: number; capturedAt: string };
+export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; costSnapshot?: CostSnapshot };
 export type Settings = { cupSizeMl: number };
-export type DataSet = { schemaVersion: 1; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; settings?: Settings };
+/** Versão 2: encomendas podem ter `costSnapshot`. Versão 1 (sem snapshot) é migrada sem inventar custos históricos. */
+export const CURRENT_SCHEMA_VERSION = 2;
+export type DataSet = { schemaVersion: 2; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; settings?: Settings };

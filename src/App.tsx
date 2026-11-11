@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ArchiveRestore, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
 import type { DataSet } from './domain/types';
 import { emptyData, loadData, saveData } from './storage/db';
+import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
 import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
@@ -22,9 +23,12 @@ export default function App() {
   const [data, setData] = useState<DataSet>(emptyData);
   const [ready, setReady] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const queue = useRef(createSaveQueue<DataSet>(saveData));
 
   useEffect(() => { let alive = true; loadData().then(d => { if (alive) { setData(d); setReady(true); } }).catch(() => { if (alive) { setFeedback('Armazenamento indisponível. Suas alterações não serão persistidas.'); setReady(true); } }); return () => { alive = false; }; }, []);
-  useEffect(() => { if (!ready) return; saveData(data).catch(() => setFeedback('Não foi possível salvar neste navegador. Exporte um backup dos dados.')); }, [data, ready]);
+  useEffect(() => { if (!ready) return; queue.current.enqueue(data).catch(() => setFeedback('Não foi possível salvar neste navegador. Exporte um backup dos dados.')); }, [data, ready]);
+  /** Restaura um backup: atualiza a tela e grava pela MESMA fila, para não competir com gravações em andamento. */
+  const replaceData = (next: DataSet) => { setData(next); return queue.current.enqueue(next); };
 
   const inform = (msg: string) => { setFeedback(msg); window.setTimeout(() => setFeedback(''), 4500); };
   const focus = (p: Page) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); };
@@ -39,7 +43,7 @@ export default function App() {
       {page === 'orders' && <OrdersPage {...props} />}
       {page === 'converter' && <ConverterPage {...props} />}
       {page === 'settings' && <SettingsPage {...props} />}
-      {page === 'backup' && <BackupPage {...props} replaceData={setData} />}
+      {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}
     </div></main>{feedback && <div className="toast" role="status">{feedback}</div>}
   </div>;
 }

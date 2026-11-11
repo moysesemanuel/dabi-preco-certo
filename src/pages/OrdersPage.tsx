@@ -1,6 +1,8 @@
 import { useMemo, useState, type FormEvent } from 'react';
 import { ClipboardCheck, FileText, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { removeOrder, updateOrder } from '../domain/edit';
+import { captureCostSnapshot, orderUnitCost } from '../domain/orderCost';
+import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
 import { money } from '../domain/pricing';
 import type { Order } from '../domain/types';
 import { Field } from '../components/Field';
@@ -32,14 +34,17 @@ export function OrdersPage({ data, update, inform }: PageProps) {
   }
   function saveOrder(e: FormEvent) {
     e.preventDefault();
-    const q = parse(qty), price = parse(unitPrice), dep = parse(deposit);
-    if (!customer.trim() || !recipeId || !date || !(q > 0) || !(price >= 0) || !(dep >= 0) || dep > q * price || ![q, price, dep].every(Number.isFinite)) return inform('Revise cliente, receita, data, quantidade, preço e sinal.');
+    const q = parse(qty), price = toCents2(parse(unitPrice)), dep = toCents2(parse(deposit));
+    if (!customer.trim() || !recipeId || !date || !isPositiveQuantity(q) || !isMoney(price) || !isMoney(dep) || dep > toCents2(q * price)) return inform('Revise cliente, receita, data, quantidade, preço e sinal.');
     if (editingId) {
       try { update(d => updateOrder(d, editingId, { customer, recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep })); } catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível atualizar a encomenda.'); }
       resetForm(); inform('Encomenda atualizada. Status e data de criação foram mantidos.');
       return;
     }
-    const order: Order = { id: newId(), customer: customer.trim(), recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep, status: 'Orçamento', createdAt: new Date().toISOString() };
+    const now = new Date();
+    // Registra o custo de hoje: ele não muda quando ingredientes ou a receita forem alterados depois.
+    const snapshot = captureCostSnapshot(data.recipes.find(r => r.id === recipeId)!, data, now);
+    const order: Order = { id: newId(), customer: customer.trim(), recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep, status: 'Orçamento', createdAt: now.toISOString(), ...(snapshot ? { costSnapshot: snapshot } : {}) };
     update(d => ({ ...d, orders: [...d.orders, order] }));
     setCustomer(''); setDeposit('0'); inform('Encomenda cadastrada.');
   }
@@ -72,6 +77,7 @@ export function OrdersPage({ data, update, inform }: PageProps) {
         {data.orders.length ? <div className="stack" style={{ marginTop: 16 }}>{data.orders.slice().reverse().map(o => <div key={o.id} style={{ border: '1px solid #e6eaf0', borderRadius: 12, padding: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', gap: 9 }}><div><strong>{o.customer}</strong><p className="muted">{data.recipes.find(r => r.id === o.recipeId)?.name ?? 'Receita indisponível'} · {o.quantity} un.</p></div><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span className="tag">{o.status}</span><button aria-label={`Editar encomenda de ${o.customer}`} title="Editar" className="inline-icon" onClick={() => startEdit(o.id)}><Pencil size={15} /></button><button aria-label={`Excluir encomenda de ${o.customer}`} title="Excluir" className="inline-icon" onClick={() => deleteOrder(o)}><Trash2 size={15} /></button></div></div>
           <div className="formula-row" style={{ margin: '10px 0' }}><span>Valor: {money(o.quantity * o.unitPrice)}</span><strong>Entrega: {brDate(o.deliveryDate)}</strong></div>
+          {(() => { const c = orderUnitCost(o, data); return <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>{c.basis === 'recorded' ? `Custo registrado no pedido: ${money(c.costPerUnit)} por unidade.` : c.basis === 'estimated' ? `Custo estimado com os preços atuais: ${money(c.costPerUnit)} por unidade (pedido sem custo registrado).` : 'Custo indisponível para este pedido.'}</p>; })()}
           <div className="form-grid">
             <Field label="Status"><select value={o.status} onChange={e => update(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, status: e.target.value as Order['status'] } : x) }))}>{statuses.map(s => <option key={s}>{s}</option>)}</select></Field>
             <div style={{ alignSelf: 'end' }}><button className="secondary" onClick={() => copyQuote(o)} style={{ width: '100%' }}><FileText size={16} /> Copiar orçamento</button></div>

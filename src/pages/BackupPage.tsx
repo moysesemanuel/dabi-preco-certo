@@ -1,10 +1,10 @@
 import { Download, Upload } from 'lucide-react';
 import type { DataSet } from '../domain/types';
 import { Field } from '../components/Field';
-import { saveData, validateBackup } from '../storage/db';
+import { validateBackup } from '../storage/db';
 import type { PageProps } from '../utils';
 
-export function BackupPage({ data, inform, replaceData }: PageProps & { replaceData: (d: DataSet) => void }) {
+export function BackupPage({ data, inform, replaceData }: PageProps & { replaceData: (d: DataSet) => Promise<void> }) {
   function exportBackup() {
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -19,7 +19,7 @@ export function BackupPage({ data, inform, replaceData }: PageProps & { replaceD
       if (file.size > 5_000_000) throw new Error('Arquivo acima do limite de 5 MB.');
       const incoming = validateBackup(JSON.parse(await file.text()));
       if (!confirm('Restaurar este backup substituirá os dados atuais. Deseja continuar?')) return;
-      await saveData(incoming); replaceData(incoming); inform('Backup restaurado com sucesso.');
+      await replaceData(incoming); inform('Backup restaurado com sucesso.');
     } catch (e) { inform(e instanceof Error ? e.message : 'Falha ao importar backup.'); }
   }
   return <>

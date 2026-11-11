@@ -1,18 +1,20 @@
 import { ArrowRight, CalendarDays, ChartNoAxesCombined, CheckCircle2, ClipboardCheck, Plus, Wallet } from 'lucide-react';
 import { money } from '../domain/pricing';
-import { brDate, priceRecipe, type Page, type PageProps } from '../utils';
+import { orderUnitCost } from '../domain/orderCost';
+import { brDate, type Page, type PageProps } from '../utils';
 
 export function DashboardPage({ data, focus }: PageProps) {
   const confirmed = data.orders.filter(o => o.status !== 'Orçamento');
   const totalRevenue = confirmed.reduce((s, o) => s + o.quantity * o.unitPrice, 0);
   const amountToReceive = confirmed.reduce((s, o) => s + Math.max(0, o.quantity * o.unitPrice - o.deposit), 0);
   const openOrders = data.orders.filter(o => o.status !== 'Entregue');
-  let estimatedCost = 0;
-  let costUnavailable = false;
+  // Custo REGISTRADO (histórico) quando existe; senão, estimativa pelo custo atual, sinalizada ao usuário.
+  let estimatedCost = 0, withoutRecord = 0, costUnavailable = false;
   for (const o of confirmed) {
-    const r = data.recipes.find(x => x.id === o.recipeId);
-    const priced = r ? priceRecipe(r, data) : null;
-    if (priced?.ok) estimatedCost += priced.cost.costPerUnit * o.quantity; else costUnavailable = true;
+    const c = orderUnitCost(o, data);
+    if (c.basis === 'unavailable') { costUnavailable = true; continue; }
+    if (c.basis === 'estimated') withoutRecord++;
+    estimatedCost += c.costPerUnit * o.quantity;
   }
   const steps: { label: string; ok: boolean; pg: Page }[] = [
     { label: 'Cadastre seus ingredientes', ok: data.ingredients.length > 0, pg: 'ingredients' },
@@ -33,6 +35,6 @@ export function DashboardPage({ data, focus }: PageProps) {
       <section className="card"><h2 className="section-title">Últimas encomendas</h2><p className="muted">Pedidos cadastrados recentemente</p>{data.orders.length ? <div className="table-wrap"><table><thead><tr><th>Cliente</th><th>Entrega</th><th>Valor</th><th>Status</th></tr></thead><tbody>{data.orders.slice(-5).reverse().map(o => <tr key={o.id}><td>{o.customer}</td><td>{brDate(o.deliveryDate)}</td><td>{money(o.quantity * o.unitPrice)}</td><td><span className="tag">{o.status}</span></td></tr>)}</tbody></table></div> : <div className="empty"><ClipboardCheck size={30} />Nenhuma encomenda cadastrada ainda.</div>}</section>
       <section className="card"><h2 className="section-title">Primeiros passos</h2><p className="muted">Configure suas informações para começar</p><div className="stack" style={{ marginTop: 23 }}>{steps.map(x => <button key={x.label} className="secondary" onClick={() => focus(x.pg)} style={{ justifyContent: 'space-between', width: '100%', textAlign: 'left' }}>{x.label}{x.ok ? <CheckCircle2 size={18} color="#16794a" /> : <ArrowRight size={16} />}</button>)}</div></section>
     </div>
-    <p className="footnote">*Indicadores estimados: saldos ainda não representam lucro líquido, fluxo de caixa nem impostos efetivos. Para esta versão, o sinal recebido é usado apenas no valor a receber.{costUnavailable ? ' O saldo estimado não é exibido porque há receita de pedido confirmado sem custo calculável (falta alguma equivalência de medida).' : ''}</p>
+    <p className="footnote">*Indicadores estimados: saldos ainda não representam lucro líquido, fluxo de caixa nem impostos efetivos. Para esta versão, o sinal recebido é usado apenas no valor a receber.{costUnavailable ? ' O saldo estimado não é exibido porque há receita de pedido confirmado sem custo calculável (falta alguma equivalência de medida).' : ''}{!costUnavailable && withoutRecord > 0 ? ` ${withoutRecord} pedido(s) antigo(s) não têm custo registrado e entram com o custo atual da receita (estimativa).` : ''}</p>
   </>;
 }

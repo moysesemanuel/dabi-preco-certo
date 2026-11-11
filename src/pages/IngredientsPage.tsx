@@ -6,6 +6,7 @@ import type { Unit } from '../domain/types';
 import { Field } from '../components/Field';
 import { densityToGramsPerCup, findReference, gramsPerCupToDensity, referenceDensity, REFERENCE_DISCLAIMER } from '../features/measurement/densities';
 import { formatQuantity } from '../features/measurement/units';
+import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
 import { cupSizeOf, newId, parse, units, type PageProps } from '../utils';
 
 export function IngredientsPage({ data, update, inform }: PageProps) {
@@ -31,8 +32,8 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
   }
   function saveIngredient(e: FormEvent) {
     e.preventDefault();
-    const quantity = parse(qty), p = parse(price);
-    if (!name.trim() || !(quantity > 0) || !(p >= 0) || !Number.isFinite(p)) return inform('Preencha nome, quantidade positiva e preço válido.');
+    const quantity = parse(qty), p = toCents2(parse(price));
+    if (!name.trim() || !isPositiveQuantity(quantity) || !isMoney(p)) return inform('Preencha nome, quantidade positiva e preço válido.');
     const cupValue = cupGrams.trim() ? parse(cupGrams) : undefined;
     const unitValue = unitGrams.trim() ? parse(unitGrams) : undefined;
     if ((cupValue !== undefined && !(cupValue > 0)) || (unitValue !== undefined && !(unitValue > 0))) return inform('Os pesos de equivalência devem ser maiores que zero (ou deixe em branco).');

@@ -1,3 +1,4 @@
+import { captureCostSnapshot } from './orderCost';
 import type { DataSet, Ingredient, Order, Recipe } from './types';
 
 export type IngredientPatch = Omit<Ingredient, 'id'>;
@@ -17,14 +18,30 @@ export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): Dat
 
 export type OrderPatch = Pick<Order, 'customer' | 'recipeId' | 'quantity' | 'unitPrice' | 'deliveryDate' | 'deposit'>;
 
-/** Atualiza os dados de uma encomenda. Status, data de criação e id são preservados. */
-export function updateOrder(data: DataSet, id: string, patch: OrderPatch): DataSet {
+/**
+ * Atualiza os dados de uma encomenda. Status, data de criação e id são preservados.
+ * O custo registrado (`costSnapshot`) é mantido; só é refeito se a RECEITA da encomenda mudar, porque aí o
+ * pedido passa a ser de outro produto (se o custo não puder ser calculado, o registro é removido: nunca se inventa custo).
+ */
+export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: Date = new Date()): DataSet {
   if (!data.orders.some(o => o.id === id)) throw new Error('Encomenda não encontrada.');
   if (!data.recipes.some(r => r.id === patch.recipeId)) throw new Error('Receita não encontrada.');
   if (!patch.customer.trim() || !patch.deliveryDate) throw new Error('Informe cliente e data de entrega.');
   if (![patch.quantity, patch.unitPrice, patch.deposit].every(Number.isFinite) || !(patch.quantity > 0) || patch.unitPrice < 0 || patch.deposit < 0) throw new Error('Quantidade, preço ou sinal inválido.');
   if (patch.deposit > patch.quantity * patch.unitPrice) throw new Error('O sinal não pode ser maior que o total.');
-  return { ...data, orders: data.orders.map(o => (o.id === id ? { ...o, ...patch, customer: patch.customer.trim() } : o)) };
+  const current = data.orders.find(o => o.id === id)!;
+  const recipeChanged = current.recipeId !== patch.recipeId;
+  return {
+    ...data,
+    orders: data.orders.map(o => {
+      if (o.id !== id) return o;
+      const { costSnapshot, ...rest } = o;
+      const next = { ...rest, ...patch, customer: patch.customer.trim() };
+      if (!recipeChanged) return costSnapshot ? { ...next, costSnapshot } : next;
+      const snap = captureCostSnapshot(data.recipes.find(r => r.id === patch.recipeId)!, data, now);
+      return snap ? { ...next, costSnapshot: snap } : next;
+    }),
+  };
 }
 
 /** Remove uma encomenda. Receitas e ingredientes não são alterados (a receita volta a poder ser excluída se não tiver outras encomendas). */
