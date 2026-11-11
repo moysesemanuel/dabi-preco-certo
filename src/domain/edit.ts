@@ -28,7 +28,12 @@ export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: D
   if (!data.recipes.some(r => r.id === patch.recipeId)) throw new Error('Receita não encontrada.');
   if (!patch.customer.trim() || !patch.deliveryDate) throw new Error('Informe cliente e data de entrega.');
   if (![patch.quantity, patch.unitPrice, patch.deposit].every(Number.isFinite) || !(patch.quantity > 0) || patch.unitPrice < 0 || patch.deposit < 0) throw new Error('Quantidade, preço ou sinal inválido.');
-  if (patch.deposit > patch.quantity * patch.unitPrice) throw new Error('O sinal não pode ser maior que o total.');
+  const existing = data.orders.find(o => o.id === id)!;
+  const total = Math.round(patch.quantity * patch.unitPrice * 100) / 100;
+  if (patch.deposit > total + 0.005) throw new Error('O sinal não pode ser maior que o total.');
+  // Sem crédito nem reembolso: o novo total não pode ficar abaixo do que já foi recebido.
+  const received = Math.round((patch.deposit + (existing.payments ?? []).reduce((s, p) => s + p.amount, 0)) * 100) / 100;
+  if (received > total + 0.005) throw new Error('O total não pode ficar abaixo do que já foi recebido.');
   const current = data.orders.find(o => o.id === id)!;
   const recipeChanged = current.recipeId !== patch.recipeId;
   return {

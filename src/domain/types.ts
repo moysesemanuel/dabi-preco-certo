@@ -15,8 +15,17 @@ export type Recipe = { id: string; name: string; yield: number; items: RecipeIte
  * o app só pode ESTIMAR pelo custo atual e deve deixar isso claro.
  */
 export type CostSnapshot = { costPerUnit: number; capturedAt: string };
-export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; costSnapshot?: CostSnapshot };
+export const PAYMENT_METHODS = ['Pix', 'Dinheiro', 'Cartão', 'Transferência', 'Outro'] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+/** Um recebimento (parcial ou final) de uma encomenda. O total recebido nunca ultrapassa o total do pedido. */
+export type Payment = { id: string; amount: number; /** AAAA-MM-DD */ receivedAt: string; method?: PaymentMethod; note?: string };
+export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; costSnapshot?: CostSnapshot;
+  /** Recebimentos posteriores ao sinal (`deposit`). Ausente = nenhum. */
+  payments?: Payment[] };
 export type Settings = { cupSizeMl: number };
-/** Versão 2: encomendas podem ter `costSnapshot`. Versão 1 (sem snapshot) é migrada sem inventar custos históricos. */
-export const CURRENT_SCHEMA_VERSION = 2;
-export type DataSet = { schemaVersion: 2; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; settings?: Settings };
+/**
+ * Versão 2: encomendas podem ter `costSnapshot` (versão 1, sem snapshot, é migrada sem inventar custos históricos).
+ * Versão 3: encomendas podem ter `payments` (sem mudança nos dados existentes: o sinal continua em `deposit`).
+ */
+export const CURRENT_SCHEMA_VERSION = 3;
+export type DataSet = { schemaVersion: 3; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; settings?: Settings };

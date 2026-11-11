@@ -1,6 +1,6 @@
 import { parseIngredient, parseOrder, parseRecipe, parseSettings } from '../../shared/dataset';
 import { countChanges, KINDS, sameEntity, SYNC_LIMITS, type Conflict, type Kind, type PullEntity, type PullResponse, type PushOk, type PushRequest } from '../../shared/sync';
-import type { Ingredient, Order, Recipe, Settings } from '../../src/domain/types';
+import type { Ingredient, Order, Payment, Recipe, Settings } from '../../src/domain/types';
 import type { BoundStatement, D1Like } from './store';
 
 /** Aplica/lê dados de UM usuário. Toda consulta filtra por user_id e usa parâmetros; nada é concatenado no SQL. */
@@ -11,7 +11,8 @@ type Row = Record<string, unknown>;
 const num = (v: unknown) => v as number;
 const ingredientOf = (r: Row): Ingredient => ({ id: r.id as string, name: r.name as string, unit: r.unit as Ingredient['unit'], purchaseQuantity: num(r.purchase_quantity), purchasePrice: num(r.purchase_price), ...(r.density_g_per_ml !== null ? { densityGPerMl: num(r.density_g_per_ml) } : {}), ...(r.grams_per_unit !== null ? { gramsPerUnit: num(r.grams_per_unit) } : {}) });
 const recipeOf = (r: Row, items: Row[]): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })) });
-const orderOf = (r: Row): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}) });
+const paymentOf = (p: Row): Payment => ({ id: p.id as string, amount: num(p.amount), receivedAt: p.received_at as string, ...(p.method !== null ? { method: p.method as NonNullable<Payment['method']> } : {}), ...(p.note !== null ? { note: p.note as string } : {}) });
+const orderOf = (r: Row, pays: Row[] = []): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}) });
 
 const same = sameEntity;
 
@@ -30,18 +31,27 @@ const itemsOf = async (db: D1Like, userId: string, recipeIds: string[]): Promise
   return map;
 };
 
+const paymentsFor = async (db: D1Like, userId: string, orderIds: string[]): Promise<Map<string, Row[]>> => {
+  const map = new Map<string, Row[]>();
+  if (!orderIds.length) return map;
+  const r = await db.prepare('SELECT order_id, position, id, amount, received_at, method, note FROM order_payments WHERE user_id = ?1 AND order_id IN (SELECT value FROM json_each(?2)) ORDER BY order_id, position').bind(userId, JSON.stringify(orderIds)).all<Row>();
+  for (const row of r.results) { const k = row.order_id as string; map.set(k, [...(map.get(k) ?? []), row]); }
+  return map;
+};
+
 /** Alterações com revisão > `since` (inclui exclusões lógicas). `since = 0` devolve tudo. */
 export async function pull(db: D1Like, userId: string, since: number, now: string): Promise<PullResponse> {
   const state = await getState(db, userId, now);
   const q = (table: string) => db.prepare(`SELECT * FROM ${table} WHERE user_id = ?1 AND rev > ?2 ORDER BY rev, id`).bind(userId, since).all<Row>();
   const [ing, rec, ord] = await Promise.all([q('ingredients'), q('recipes'), q('orders')]);
   const items = await itemsOf(db, userId, rec.results.filter(r => r.deleted_at === null).map(r => r.id as string));
+  const pays = await paymentsFor(db, userId, ord.results.filter(r => r.deleted_at === null).map(r => r.id as string));
   const entity = <T,>(r: Row, data: () => T): PullEntity<T> => (r.deleted_at !== null ? { id: r.id as string, rev: num(r.rev), deleted: true } : { id: r.id as string, rev: num(r.rev), deleted: false, data: data() });
   return {
     revision: state.revision,
     ingredients: ing.results.map(r => entity(r, () => ingredientOf(r))),
     recipes: rec.results.map(r => entity(r, () => recipeOf(r, items.get(r.id as string) ?? []))),
-    orders: ord.results.map(r => entity(r, () => orderOf(r))),
+    orders: ord.results.map(r => entity(r, () => orderOf(r, pays.get(r.id as string) ?? []))),
     ...(state.settings && state.settingsRev > since ? { settings: { rev: state.settingsRev, data: state.settings } } : {}),
   };
 }
@@ -109,10 +119,12 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   const [exIng, exRec, exOrd] = await Promise.all([
     existing(db, userId, 'ingredients', [...ids(ingredients), ...req.deletes.ingredients], ingredientOf),
     existing(db, userId, 'recipes', [...ids(recipes), ...req.deletes.recipes], r => r as unknown as Recipe),
-    existing(db, userId, 'orders', [...ids(orders), ...req.deletes.orders], orderOf),
+    existing(db, userId, 'orders', [...ids(orders), ...req.deletes.orders], r => r as unknown as Order),
   ]);
   const recItems = await itemsOf(db, userId, [...exRec.keys()]);
   for (const [id, e] of exRec) e.entity = recipeOf(e.entity as unknown as Row, recItems.get(id) ?? []);
+  const ordPays = await paymentsFor(db, userId, [...exOrd.keys()]);
+  for (const [id, e] of exOrd) e.entity = orderOf(e.entity as unknown as Row, ordPays.get(id) ?? []);
 
   const conflicts: Conflict[] = [];
   const toUpsert = { ingredients: [] as Ingredient[], recipes: [] as Recipe[], orders: [] as Order[] };
@@ -184,13 +196,19 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
       ON CONFLICT (user_id, id) DO UPDATE SET customer = excluded.customer, recipe_id = excluded.recipe_id, quantity = excluded.quantity, unit_price = excluded.unit_price, deposit = excluded.deposit,
         delivery_date = excluded.delivery_date, status = excluded.status, created_at = excluded.created_at, cost_per_unit = excluded.cost_per_unit, cost_captured_at = excluded.cost_captured_at, rev = excluded.rev, deleted_at = NULL`,
       userId, o.id, o.customer, o.recipeId, o.quantity, o.unitPrice, o.deposit, o.deliveryDate, o.status, o.createdAt, o.costSnapshot?.costPerUnit ?? null, o.costSnapshot?.capturedAt ?? null, rev, newPushId));
+    batch.push(p(`DELETE FROM order_payments WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, o.id, newPushId));
+    if (o.payments?.length) batch.push(p(`INSERT INTO order_payments (user_id, order_id, position, id, amount, received_at, method, note)
+      SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.id'), json_extract(j.value, '$.amount'), json_extract(j.value, '$.receivedAt'), json_extract(j.value, '$.method'), json_extract(j.value, '$.note') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, o.id, JSON.stringify(o.payments), newPushId));
   }
   for (const id of toDelete.ingredients) batch.push(p(`UPDATE ingredients SET deleted_at = ?3, rev = ?4 WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND ${g('?1', '?5')}`, userId, id, now, rev, newPushId));
   for (const id of toDelete.recipes) {
     batch.push(p(`UPDATE recipes SET deleted_at = ?3, rev = ?4 WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND ${g('?1', '?5')}`, userId, id, now, rev, newPushId));
     batch.push(p(`DELETE FROM recipe_items WHERE user_id = ?1 AND recipe_id = ?2 AND ${g('?1', '?3')}`, userId, id, newPushId));
   }
-  for (const id of toDelete.orders) batch.push(p(`UPDATE orders SET deleted_at = ?3, rev = ?4 WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND ${g('?1', '?5')}`, userId, id, now, rev, newPushId));
+  for (const id of toDelete.orders) {
+    batch.push(p(`UPDATE orders SET deleted_at = ?3, rev = ?4 WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND ${g('?1', '?5')}`, userId, id, now, rev, newPushId));
+    batch.push(p(`DELETE FROM order_payments WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, id, newPushId));
+  }
   if (settingsChanged && settings) batch.push(p('UPDATE sync_state SET settings_json = ?2, settings_rev = ?3 WHERE user_id = ?1 AND last_push_id = ?4', userId, JSON.stringify(settings), rev, newPushId));
 
   const results = await db.batch(batch);

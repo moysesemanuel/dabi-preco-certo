@@ -3,8 +3,9 @@ import type { PullResponse, PushRequest } from '../shared/sync';
 import { SYNC_LIMITS } from '../shared/sync';
 import type { DataSet, Ingredient, Order, Recipe } from '../src/domain/types';
 import { createHttpSyncApi } from '../src/sync/api';
+import { Device } from './helpers/device';
 import { applyPull, buildPushes, emptyDataSet, emptyMeta, findDanglingRefs, rebaseLocal, SyncError, syncOnce, type SyncApi, type SyncMeta } from '../src/sync/engine';
-import { BASE, makeServer, ORIGIN, type Server, type Session } from './helpers/server';
+import { BASE, makeServer, type Server } from './helpers/server';
 
 const ing = (id: string, over: Partial<Ingredient> = {}): Ingredient => ({ id, name: `Ingrediente ${id}`, unit: 'g', purchaseQuantity: 1000, purchasePrice: 6, ...over });
 const rec = (id: string, ingredientId: string, over: Partial<Recipe> = {}): Recipe => ({ id, name: `Receita ${id}`, yield: 10, items: [{ ingredientId, quantity: 500, unit: 'g' }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 20, ...over });
@@ -138,32 +139,6 @@ describe('Motor: mesclagem (3 vias)', () => {
 // ---------------------------------------------------------------------------------------------------------------
 // Integração: dispositivos reais (motor + cliente HTTP) conversando com o Worker real
 // ---------------------------------------------------------------------------------------------------------------
-class Device {
-  data: DataSet = emptyDataSet();
-  meta: SyncMeta = emptyMeta();
-  offline = false;
-  dropNextPushResponse = false;
-  status401 = false;
-  readonly api: SyncApi;
-  constructor(private server: Server, private session: Session) {
-    const fetchImpl = (async (url: string, init: RequestInit = {}) => {
-      if (this.offline) throw new TypeError('Failed to fetch');
-      const isPush = String(url).endsWith('/api/sync/push');
-      const res = await server.handle(new Request(url, { ...init, headers: { ...(init.headers as Record<string, string>), cookie: this.status401 ? 'dabi_session=invalida' : session.cookie, origin: ORIGIN } }), server.env);
-      if (isPush && this.dropNextPushResponse) { this.dropNextPushResponse = false; throw new TypeError('rede caiu depois do servidor gravar'); }
-      return res;
-    }) as typeof fetch;
-    this.api = createHttpSyncApi({ baseUrl: BASE, getCsrfToken: () => session.csrf, fetchImpl });
-  }
-  edit(fn: (d: DataSet) => DataSet) { this.data = fn(this.data); }
-  async sync(opts: { allowInitialMerge?: boolean } = {}) {
-    const started = this.data;
-    const r = await syncOnce(this.api, started, this.meta, opts);
-    if (r.status === 'synced' || r.status === 'offline' || r.status === 'needs-attention' || r.status === 'error') { this.data = rebaseLocal(this.data, started, r.local); this.meta = r.meta; }
-    return r;
-  }
-}
-
 let srv: Server;
 const device = async (email = 'bia@exemplo.com', label = 'Celular') => new Device(srv, await srv.login(email, label));
 beforeEach(async () => { srv = makeServer(); await srv.issueFor('bia@exemplo.com'); });
