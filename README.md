@@ -18,7 +18,7 @@ npm run build
 npm test
 ```
 
-**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 120/120. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
+**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 163/163. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
 
 ## Estrutura
 
@@ -31,7 +31,8 @@ npm test
 - `src/pages/`: uma página por arquivo (`DashboardPage`, `IngredientsPage`, `RecipesPage`, `OrdersPage`, `ConverterPage`, `BackupPage`), cada uma com seu próprio estado de formulário.
 - `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `priceRecipe`, `cupSizeOf`, tipos `Page`/`PageProps`).
 - `src/features/recipe-import/`: importação de receita por texto. `parse.ts` (só lê o texto, sem conversões), `resolve.ts` (liga o texto ao motor de conversão, às referências e aos ingredientes cadastrados; `analyzeRow` e `buildImport`) e `components/RecipeTextImporter.tsx`.
-- `tests/`: `pricing.test.ts`, `convert.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `edit.test.ts` e `backup.test.ts`.
+- `shared/publicQuote.ts` e `worker/`: contrato público do orçamento e Worker de compartilhamento (ver seção acima).
+- `tests/`: `pricing.test.ts`, `convert.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `edit.test.ts` e `backup.test.ts`.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
 
@@ -57,6 +58,14 @@ npm test
 - O resumo financeiro mostra valores estimados e não substitui contabilidade.
 - O backup faz validação estrutural básica. Regras relacionais, migrações e proteção contra arquivos adulterados precisam de reforço para lançamento.
 - Não há cálculos de impostos, perdas, taxas de pagamento e capacidade de produção por lote no MVP.
+
+## Compartilhamento de orçamentos por link (Worker + D1) — em preparação
+
+O app continua local-first. Existe um serviço remoto **mínimo**, em `worker/` (Cloudflare Workers + D1), só para publicar e consultar orçamentos por link curto (ex.: `https://orcamento.dabitech.com.br/o/K7mP9x...`). Os dados do orçamento **não** vão na URL e nada do IndexedDB é enviado além da cópia pública do orçamento (sem custos, margens ou dados do cliente).
+
+**Estado:** a leitura pública (página `/o/:id` e `GET /api/quotes/:id`) está pronta e testada. Os endpoints de criar, atualizar e revogar estão implementados, mas **bloqueados** (`501`) até existir autenticação de compradores, e o app **não tem** botão "Gerar link". Não há deploy nem DNS configurados. Detalhes, pendências e opções de autenticação em [`worker/README.md`](worker/README.md).
+
+Comandos: `npm run worker:migrate` (D1 local) e `npm run worker:dev` (Worker local).
 
 ## Limitações da importação por texto
 

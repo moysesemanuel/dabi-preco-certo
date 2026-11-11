@@ -1,0 +1,17 @@
+# Worker de compartilhamento de orçamentos do DaBi Preço Certo.
+# Nenhum deploy nem DNS foi configurado: este arquivo serve para desenvolvimento local (wrangler dev / d1 --local).
+name = "dabi-orcamentos"
+main = "src/index.ts"
+compatibility_date = "2025-09-01"
+workers_dev = false
+
+[vars]
+# Origem usada para montar os links curtos devolvidos pela API (quando a publicação for habilitada).
+PUBLIC_BASE_URL = "https://orcamento.dabitech.com.br"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "dabi-orcamentos"
+# Placeholder para uso local. Antes de qualquer deploy, crie o banco no Cloudflare e substitua pelo ID real.
+database_id = "00000000-0000-0000-0000-000000000000"
+migrations_dir = "migrations"

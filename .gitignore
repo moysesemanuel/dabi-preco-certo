@@ -3,3 +3,6 @@ dist
 *.tsbuildinfo
 .DS_Store
 .env*
+
+.wrangler
+.dev.vars
