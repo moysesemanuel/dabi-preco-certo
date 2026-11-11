@@ -9,10 +9,11 @@ Serviço remoto **mínimo** do DaBi Preço Certo. Ele existe só para publicar e
 | `GET /o/:id` página pública (HTML, sem JavaScript, mobile-first) | pronta, **sem autenticação** |
 | `GET /api/quotes/:id` JSON público + totais calculados | pronta, **sem autenticação** |
 | `POST /api/quotes`, `PUT /api/quotes/:id`, `DELETE /api/quotes/:id` | pronta, exige **chave de licença** |
-| `GET /api/license` (verificar licença e ver o uso das cotas) | pronta, exige chave de licença |
+| `GET /api/license` (verificar licença e ver o uso das cotas) | pronta, exige sessão (ou chave, se `LEGACY_KEY_AUTH=on`) |
+| `GET /api/quotes` (listar os próprios links, com status e total) | pronta, exige sessão |
 | Emissão, revogação e consulta de licenças | CLI local (`npm run licenses`); **não há endpoint público** |
-| Tela Configurações no app (informar, verificar e remover a chave) | pronta |
-| Botão "Gerar link" no app (montar o orçamento e publicar) | **não existe ainda** |
+| Tela Configurações no app (conta, dispositivos, sincronização, links publicados) | pronta |
+| "Orçamento por link" no app (prévia, publicar, copiar, WhatsApp, revogar) | pronto |
 
 ## Estrutura
 

@@ -69,3 +69,28 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 - `GET /api/sync?since=0` devolve tudo de uma vez (até ~5 mil itens); paginação fica para depois.
 - A restauração automática de itens excluídos em outro dispositivo é uma escolha de segurança de dados; avaliar na prática se surpreende o usuário.
 - Várias abas no mesmo navegador continuam podendo disputar o IndexedDB; a sincronização reconcilia pelo servidor.
+
+## Fase 4 — Funcionalidades operacionais: CONCLUÍDA
+
+**4a Recebimentos** (esquema v3): pagamentos parciais com data, meio opcional e observação; histórico, total recebido e saldo pendente; o total recebido (sinal + recebimentos) nunca passa do total da encomenda e o total não pode ser reduzido abaixo do recebido (sem crédito/reembolso). Validação no backup, tabela `order_payments` e sincronização.
+
+**4b Agenda e prazo:** página Agenda (atrasados, hoje, próximos dias, adiante; status editável; saldo a receber). Tempo de produção por receita + capacidade diária e dias de trabalho nas Configurações geram a carga acumulada por entrega (folga/apertado/sobrecarga) e uma dica ao registrar a encomenda, **sempre rotulada como estimativa** ("não garante a entrega"); sem dados suficientes o resultado é "desconhecido" com o motivo, nunca um chute.
+
+**4c Conta, sincronização e orçamentos por link na interface:**
+- Painel da conta (login por código, troca de dispositivo, remoção, sair), painel de sincronização (estado, decisões, conflitos preservados) e lista de links publicados com revogação.
+- Sincronização ligada ao app (`AccountProvider`): só roda com licença ativa, **nunca antes de carregar os dados locais**, em pausa após edições, ao voltar a internet e manualmente; bloqueia dados de outra conta no mesmo dispositivo até o usuário decidir.
+- Orçamento por link: nome/telefone do negócio, prévia, aviso das limitações com confirmação, publicar, copiar (tratando falhas) e WhatsApp. `GET /api/quotes` lista os próprios links.
+- Chave de licença antiga removida da interface (o modo continua no servidor, desligado por padrão).
+
+**Verificações:** testes automatizados (390) e fluxo completo no navegador contra o Worker real: login por código → sincronização (dados no D1) → publicar → página pública sem dados internos e sem scripts → revogar (410).
+
+**Defeitos encontrados e corrigidos nesta fase:** formulário de "Negócio" não recarregava quando as configurações vinham da sincronização (mostraria valores velhos e um "Salvar" sobrescreveria o servidor); reenvio após resposta perdida pedia decisão ao usuário sem necessidade (agora só pede se o servidor tiver algo diferente do local).
+
+**Decisões**
+- Recebimentos separados do sinal (`deposit` mantido) para não migrar dados nem quebrar fixtures.
+- Análise de prazo propositalmente simples (carga acumulada vs capacidade), sem planejamento de produção.
+- Mapeamento de links por encomenda não é guardado: a lista vem do servidor (fonte única).
+
+**Pendências / riscos**
+- Dois dispositivos registrando recebimentos no mesmo pedido ao mesmo tempo geram conflito (o servidor vence e o recebimento perdido fica guardado em "alterações substituídas"). Aceitável para beta; fusão por campo/lista é uma melhoria futura.
+- Interface sem testes automatizados de componentes (ver Fase 5).

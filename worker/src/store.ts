@@ -88,3 +88,9 @@ export async function insertQuoteWithinQuotas(
   if ((usage?.active ?? 0) >= row.quotaActive) return { ok: false, reason: 'ACTIVE', used: usage?.active ?? 0, limit: row.quotaActive };
   return { ok: false, reason: 'DAILY', used: usage?.today ?? 0, limit: row.quotaDaily };
 }
+
+/** Orçamentos publicados por um proprietário (mais recentes primeiro). O payload é validado de novo ao ser lido. */
+export async function listQuotesByOwner(db: D1Like, ownerId: string, limit = 200): Promise<QuoteRow[]> {
+  const r = await db.prepare('SELECT id, payload, created_at, updated_at, revoked_at, owner_id FROM quotes WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?').bind(ownerId, limit).all<QuoteRow>();
+  return r.results;
+}

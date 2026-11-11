@@ -1,5 +1,5 @@
 import { useMemo, useState, type FormEvent } from 'react';
-import { ClipboardCheck, FileText, Pencil, Plus, Save, Trash2, Wallet, X } from 'lucide-react';
+import { ClipboardCheck, FileText, Link2, Pencil, Plus, Save, Trash2, Wallet, X } from 'lucide-react';
 import { removeOrder, updateOrder } from '../domain/edit';
 import { captureCostSnapshot, orderUnitCost } from '../domain/orderCost';
 import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
@@ -7,12 +7,13 @@ import { money } from '../domain/pricing';
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../domain/payments';
 import { PAYMENT_METHODS, type Order, type PaymentMethod } from '../domain/types';
 import { Field } from '../components/Field';
+import { QuoteSharePanel } from '../features/sharing/QuoteSharePanel';
 import { FORECAST_DISCLAIMER, forecastUntil, formatMinutes } from '../domain/schedule';
 import { brDate, localToday, newId, parse, priceRecipe, type PageProps } from '../utils';
 
 const statuses: Order['status'][] = ['Orçamento', 'Confirmado', 'Produção', 'Entregue'];
 
-export function OrdersPage({ data, update, inform }: PageProps) {
+export function OrdersPage({ data, update, inform, focus }: PageProps) {
   const [customer, setCustomer] = useState('');
   const [recipeId, setRecipeId] = useState('');
   const [qty, setQty] = useState('1');
@@ -21,6 +22,7 @@ export function OrdersPage({ data, update, inform }: PageProps) {
   const [date, setDate] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [payingId, setPayingId] = useState<string | null>(null);
+  const [quotingId, setQuotingId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState('');
   const [payDate, setPayDate] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('');
@@ -126,8 +128,9 @@ export function OrdersPage({ data, update, inform }: PageProps) {
           {(() => { const c = orderUnitCost(o, data); return <p className="muted" style={{ fontSize: 12, margin: '0 0 8px' }}>{c.basis === 'recorded' ? `Custo registrado no pedido: ${money(c.costPerUnit)} por unidade.` : c.basis === 'estimated' ? `Custo estimado com os preços atuais: ${money(c.costPerUnit)} por unidade (pedido sem custo registrado).` : 'Custo indisponível para este pedido.'}</p>; })()}
           <div className="form-grid">
             <Field label="Status"><select value={o.status} onChange={e => update(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, status: e.target.value as Order['status'] } : x) }))}>{statuses.map(s => <option key={s}>{s}</option>)}</select></Field>
-            <div style={{ alignSelf: 'end' }}><button className="secondary" onClick={() => copyQuote(o)} style={{ width: '100%' }}><FileText size={16} /> Copiar orçamento</button></div>
+            <div style={{ alignSelf: 'end', display: 'grid', gap: 6 }}><button className="secondary" onClick={() => copyQuote(o)} style={{ width: '100%' }}><FileText size={16} /> Copiar orçamento</button><button className="secondary" onClick={() => setQuotingId(quotingId === o.id ? null : o.id)} style={{ width: '100%' }}><Link2 size={16} /> {quotingId === o.id ? 'Fechar orçamento' : 'Orçamento por link'}</button></div>
           </div>
+          {quotingId === o.id && <QuoteSharePanel order={o} data={data} inform={inform} focus={focus} onClose={() => setQuotingId(null)} />}
         </div>)}</div> : <div className="empty"><ClipboardCheck size={30} />Nenhum pedido cadastrado.</div>}
       </section>
     </div>

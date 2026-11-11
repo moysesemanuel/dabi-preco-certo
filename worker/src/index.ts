@@ -6,7 +6,7 @@ import { currentSession, logout, requestCode, sessionRevoke, sessionsList, verif
 import { createEmailSender, type EmailSender } from './email';
 import { createCompositeAuthorizer } from './session';
 import { syncPull, syncPush } from './syncRoutes';
-import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
+import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, listQuotesByOwner, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
   DB: D1Like;
@@ -107,6 +107,21 @@ export function createHandler(options: Options) {
     return json({ id, updated: true });
   }
 
+  /** GET /api/quotes: os orçamentos publicados pelo próprio usuário (para consultar e revogar links). */
+  async function listMine(request: Request, env: Env): Promise<Response> {
+    const auth = await options.authorize(request, env, { scope: 'verify', now: now() });
+    if (!auth.ok) return authFailure(auth);
+    const today = todayInBrazil(now());
+    const rows = await listQuotesByOwner(env.DB, auth.ownerId);
+    const quotes = rows.flatMap(row => {
+      const quote = readStored(row);
+      if (!quote) return [];
+      const status = row.revoked_at ? 'revoked' : quote.validUntil && quote.validUntil < today ? 'expired' : 'active';
+      return [{ id: row.id, status, quoteNumber: quote.quoteNumber, businessName: quote.businessName, issuedAt: quote.issuedAt, validUntil: quote.validUntil ?? null, totalCents: computeTotals(quote).totalCents, createdAt: row.created_at, updatedAt: row.updated_at, ...(env.PUBLIC_BASE_URL ? { url: `${env.PUBLIC_BASE_URL}/o/${row.id}` } : {}) }];
+    });
+    return json({ quotes });
+  }
+
   /** Verifica a licença e informa o uso das cotas. Usada pelo botão "Ativar/verificar" do app. */
   async function verifyLicense(request: Request, env: Env): Promise<Response> {
     const auth = await options.authorize(request, env, { scope: 'verify', now: now() });
@@ -161,6 +176,7 @@ export function createHandler(options: Options) {
       const api = pathname.match(/^\/api\/quotes(?:\/([^/]+))?\/?$/);
       if (api) {
         const id = api[1];
+        if (method === 'GET' && id === undefined) return await listMine(request, env);
         if (method === 'GET' && id !== undefined) return await readQuote(env, id, false, true); // leitura pública: sem autenticação
         if ((method === 'POST' && id === undefined) || ((method === 'PUT' || method === 'DELETE') && id !== undefined)) return await write(request, env, method, id);
         return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');

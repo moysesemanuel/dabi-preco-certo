@@ -24,6 +24,8 @@ export type SyncMeta = {
   baseline: DataSet;
   /** Alterações locais que o servidor substituiu. Ficam aqui até o usuário dispensar. */
   conflicts: ConflictRecord[];
+  /** Conta a que estes dados pertencem. Impede misturar dados de contas diferentes no mesmo dispositivo. */
+  userId?: string;
 };
 export const emptyDataSet = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [] });
 export const emptyMeta = (): SyncMeta => ({ revision: 0, revs: { ingredients: {}, recipes: {}, orders: {} }, baseline: emptyDataSet(), conflicts: [] });

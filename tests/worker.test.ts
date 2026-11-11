@@ -99,7 +99,8 @@ describe('Leitura pública', () => {
     expect((await readOnly(req('GET', '/'), env)).status).toBe(404);
     expect((await readOnly(req('GET', '/admin'), env)).status).toBe(404);
     expect((await readOnly(req('POST', `/o/${ID_A}`, {}), env)).status).toBe(405);
-    expect((await readOnly(req('GET', '/api/quotes'), env)).status).toBe(405);
+    expect((await readOnly(req('GET', '/api/quotes'), env)).status).toBe(401); // a listagem dos próprios links exige autenticação
+    expect((await readOnly(req('PUT', '/api/quotes'), env)).status).toBe(405);
     expect((await readOnly(req('GET', '/healthz'), env)).status).toBe(200);
   });
 });

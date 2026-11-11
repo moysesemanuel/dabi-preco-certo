@@ -18,7 +18,7 @@ npm run build
 npm test
 ```
 
-**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 380/380. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
+**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 390/390. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
 
 ## Estrutura
 
@@ -32,7 +32,7 @@ npm test
 - `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `priceRecipe`, `cupSizeOf`, tipos `Page`/`PageProps`).
 - `src/features/recipe-import/`: importação de receita por texto. `parse.ts` (só lê o texto, sem conversões), `resolve.ts` (liga o texto ao motor de conversão, às referências e aos ingredientes cadastrados; `analyzeRow` e `buildImport`) e `components/RecipeTextImporter.tsx`.
 - `shared/publicQuote.ts` e `worker/`: contrato público do orçamento e Worker de compartilhamento (ver seção acima).
-- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `payments.test.ts`, `schedule.test.ts`, `settings-schedule.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `worker-auth.test.ts`, `sync-server.test.ts`, `sync-engine.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
+- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `account-client.test.ts`, `quotes-client.test.ts`, `payments.test.ts`, `schedule.test.ts`, `settings-schedule.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `worker-auth.test.ts`, `sync-server.test.ts`, `sync-engine.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
 
@@ -64,13 +64,15 @@ npm test
 - O backup faz validação estrutural básica. Regras relacionais, migrações e proteção contra arquivos adulterados precisam de reforço para lançamento.
 - Não há cálculos de impostos, perdas, taxas de pagamento e capacidade de produção por lote no MVP.
 
-## Compartilhamento de orçamentos por link (Worker + D1) — em preparação
+## Conta, sincronização e orçamentos por link (Worker + D1)
 
-O app continua local-first. Existe um serviço remoto **mínimo**, em `worker/` (Cloudflare Workers + D1), só para publicar e consultar orçamentos por link curto (ex.: `https://orcamento.dabitech.com.br/o/K7mP9x...`). Os dados do orçamento **não** vão na URL e nada do IndexedDB é enviado além da cópia pública do orçamento (sem custos, margens ou dados do cliente).
+O app é local-first e **funciona inteiro sem conta e sem internet**. Existe um serviço remoto mínimo, em `worker/` (Cloudflare Workers + D1), usado só quando a pessoa entra em uma conta liberada pela sua licença:
 
-**Estado:** a leitura pública (página `/o/:id`) está pronta. Criar, atualizar e revogar links exigem uma **chave de licença individual** (192 bits; o servidor guarda apenas o SHA-256), com cotas e limitação de taxa por licença. As licenças são emitidas manualmente por CLI (`npm run licenses`); não há endpoint público de emissão. Em **Configurações** o vendedor informa, verifica e remove a chave (guardada no `localStorage`, fora dos backups e sem proteção forte contra acesso ao dispositivo). A licença só é necessária para o compartilhamento: precificação, receitas e encomendas seguem sem rede e sem licença. O botão "Gerar link" ainda não existe, e não há deploy nem DNS. **Ainda não está pronto para produção**; veja o fluxo de emissão, os limites e as pendências em [`worker/README.md`](worker/README.md).
+- **Conta** (Configurações): login sem senha por código de 8 dígitos enviado ao e-mail da compra, até **2 dispositivos** (o terceiro pode substituir um dos antigos), remoção de dispositivos e sessão em cookie `HttpOnly` com proteção CSRF.
+- **Sincronização:** o servidor guarda a versão oficial dos dados e o dispositivo mantém cópia offline. Alterações offline são enviadas depois; edições do mesmo item em dois dispositivos nunca se perdem em silêncio (a versão do servidor vale e a sua fica guardada para você refazer). Dados de outra conta no mesmo dispositivo exigem decisão do usuário.
+- **Orçamento por link** (botão "Orçamento por link" em cada encomenda): prévia, avisos de limitação, publicação em link curto (`/o/<id>`), copiar e compartilhar no WhatsApp; em Configurações, lista dos links publicados e **revogação**. O orçamento público nunca leva custo, margem nem dados do cliente.
 
-Comandos: `npm run worker:migrate`, `npm run worker:dev`, `npm run licenses -- <comando>`.
+Sem `VITE_API_URL` o app roda só localmente. **Ainda não está pronto para produção** (falta o provedor de e-mail, deploy, DNS e outras pendências); veja [`worker/README.md`](worker/README.md) e `docs/ETAPA_1_PROGRESSO.md`. Comandos: `npm run worker:migrate`, `npm run worker:dev`, `npm run licenses -- <comando>`.
 
 ## Limitações da importação por texto
 

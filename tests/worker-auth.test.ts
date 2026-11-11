@@ -403,6 +403,32 @@ describe('Operações protegidas com sessão (CSRF e isolamento)', () => {
   });
 });
 
+describe('Listagem dos próprios links (GET /api/quotes)', () => {
+  it('lista só os orçamentos do dono, com status e total, sem dados internos; outra conta não vê', async () => {
+    await issueFor('bia@exemplo.com'); await issueFor('ana@exemplo.com');
+    const bia = await login('bia@exemplo.com'); const ana = await login('ana@exemplo.com');
+    const mk = async (n: string, over: Partial<PublicQuote> = {}) => { clock = new Date(clock.getTime() + 60_000); const r = await call('POST', '/api/quotes', { ...asUser(bia), body: { ...quote(), quoteNumber: n, ...over } }); expect(r.status).toBe(201); return r; };
+    const first = await (await mk('A1', { validUntil: '2026-11-13' })).json() as { id: string };
+    const second = await (await mk('A2', { validUntil: '2026-11-11', deliveryFeeCents: 1000 })).json() as { id: string }; // hoje (12/11) já passou da validade
+    const third = await (await mk('A3')).json() as { id: string };
+    await call('DELETE', `/api/quotes/${third.id}`, asUser(bia));
+    await call('POST', '/api/quotes', { ...asUser(ana), body: { ...quote(), quoteNumber: 'ANA' } });
+    const list = await (await call('GET', '/api/quotes', asUser(bia))).json() as { quotes: Record<string, unknown>[] };
+    expect(list.quotes.map(q => [q.quoteNumber, q.status])).toEqual([['A3', 'revoked'], ['A2', 'expired'], ['A1', 'active']]); // mais recentes primeiro
+    expect(list.quotes.find(q => q.id === second.id)).toMatchObject({ totalCents: 6000, url: `${BASE}/o/${second.id}` });
+    expect(list.quotes.some(q => q.id === first.id)).toBe(true);
+    expect(JSON.stringify(list)).not.toMatch(/owner|payload|ANA|csrf|token/i);
+    const mine = await (await call('GET', '/api/quotes', asUser(ana))).json() as { quotes: { quoteNumber: string }[] };
+    expect(mine.quotes.map(q => q.quoteNumber)).toEqual(['ANA']);
+  });
+  it('sem sessão: 401; leitura não exige CSRF', async () => {
+    expect((await call('GET', '/api/quotes')).status).toBe(401);
+    await issueFor('bia@exemplo.com');
+    const s = await login('bia@exemplo.com');
+    expect((await call('GET', '/api/quotes', { cookie: s.cookie })).status).toBe(200);
+  });
+});
+
 describe('Rotas e cabeçalhos', () => {
   it('rotas desconhecidas e métodos errados', async () => {
     expect((await call('GET', '/api/auth/request-code')).status).toBe(404);

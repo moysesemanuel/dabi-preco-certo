@@ -27,3 +27,8 @@ export const withSettings = (d: DataSet, patch: Partial<NonNullable<DataSet['set
 
 /** Data de hoje (AAAA-MM-DD) no fuso do dispositivo. */
 export const localToday = (now: Date = new Date()): string => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+/** Copia para a área de transferência, tratando falhas (navegador sem permissão ou sem suporte). */
+export async function copyText(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}

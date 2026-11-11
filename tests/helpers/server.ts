@@ -37,6 +37,9 @@ export function makeServer(start = new Date('2026-11-12T15:00:00Z')) {
     const body = await res.json() as { csrfToken: string; sessionId: string };
     return { cookie: res.headers.get('set-cookie')!.split(';')[0], csrf: body.csrfToken, sessionId: body.sessionId };
   }
-  return { db, env, mail, state, handle, issueFor, request, login, table: (name: string) => db.raw.prepare(`SELECT * FROM ${name}`).all() as Record<string, unknown>[] };
+  /** `fetch` que entrega as requisições direto ao Worker de teste, levando o cookie e a origem do app (como o navegador faria). */
+  const fetchFor = (session?: Session): typeof fetch => (async (url: string, init: RequestInit = {}) =>
+    handle(new Request(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(session ? { cookie: session.cookie } : {}), origin: ORIGIN } }), env)) as typeof fetch;
+  return { db, env, mail, state, handle, issueFor, request, login, fetchFor, table: (name: string) => db.raw.prepare(`SELECT * FROM ${name}`).all() as Record<string, unknown>[] };
 }
 export type Server = ReturnType<typeof makeServer>;

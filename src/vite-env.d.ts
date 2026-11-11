@@ -1,5 +1,7 @@
 /// <reference types="vite/client" />
 interface ImportMetaEnv {
-  /** Endereço do serviço de compartilhamento de orçamentos (Worker), ex.: https://orcamento.dabitech.com.br */
+  /** Endereço da API (Worker): contas, sincronização e orçamentos compartilhados. Ex.: https://api.exemplo.com */
+  readonly VITE_API_URL?: string;
+  /** Nome antigo de VITE_API_URL (ainda aceito). */
   readonly VITE_QUOTES_API_URL?: string;
 }

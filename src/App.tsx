@@ -4,6 +4,7 @@ import type { DataSet } from './domain/types';
 import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
+import { AccountProvider } from './account/AccountContext';
 import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
 import { RecipesPage } from './pages/RecipesPage';
@@ -35,7 +36,7 @@ export default function App() {
   const focus = (p: Page) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const props: PageProps = { data, update: setData, inform, focus };
 
-  return <div className="app">
+  return <AccountProvider data={data} setData={setData} ready={ready}><div className="app">
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><ClipboardCheck size={22} /></div><span>Pedido<span style={{ color: '#ff982b' }}>Certo</span></span></div><nav className="nav" aria-label="Navegação principal">{pages.map(p => { const Icon = p.icon; return <button key={p.id} className={page === p.id ? 'active' : ''} onClick={() => focus(p.id)}><Icon size={18} />{p.label}</button>; })}</nav><div className="sidebar-foot"><strong style={{ color: 'white' }}>Versão inicial · 0.1</strong><br />Seus dados ficam neste navegador. Exporte backups regularmente.</div></aside>
     <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><span>Primeira versão · dados locais</span><div className="avatar"><ChefHat size={16} /></div></header><div className="content">
       {page === 'dashboard' && <DashboardPage {...props} />}
@@ -47,5 +48,5 @@ export default function App() {
       {page === 'settings' && <SettingsPage {...props} />}
       {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}
     </div></main>{feedback && <div className="toast" role="status">{feedback}</div>}
-  </div>;
+  </div></AccountProvider>;
 }
