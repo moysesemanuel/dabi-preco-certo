@@ -40,7 +40,7 @@ LEGACY_KEY_AUTH = "off"
 # E-mail pelo Resend. Sem o segredo RESEND_API_KEY o login responde 503 (nada finge ser enviado).
 # Segredo: `wrangler secret put RESEND_API_KEY --env staging`. EMAIL_FROM precisa ser um remetente de domínio verificado no Resend.
 EMAIL_ADAPTER = "resend"
-EMAIL_FROM = "PedidoCerto <acesso@exemplo.com.br>"
+EMAIL_FROM = "DaBi Preço Certo <acesso@mail.dabitech.com.br>"
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -58,7 +58,7 @@ ALLOWED_ORIGINS = "https://app.exemplo.com.br"
 LEGACY_KEY_AUTH = "off"
 # Segredo: `wrangler secret put RESEND_API_KEY --env production`.
 EMAIL_ADAPTER = "resend"
-EMAIL_FROM = "PedidoCerto <acesso@exemplo.com.br>"
+EMAIL_FROM = "DaBi Preço Certo <acesso@mail.dabitech.com.br>"
 
 [[env.production.d1_databases]]
 binding = "DB"

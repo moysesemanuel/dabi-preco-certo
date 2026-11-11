@@ -9,13 +9,36 @@
  * item excluído lá, o item é restaurado em vez de deixar referência quebrada.
  */
 import { emptyPush, KINDS, SYNC_LIMITS, sameEntity, type Kind, type PullResponse, type PushRequest, type RevMap } from '../../shared/sync';
-import type { DataSet, Ingredient, Order, Recipe } from '../domain/types';
+import type { DataSet, Ingredient, Order, Payment, Recipe } from '../domain/types';
 import { CURRENT_SCHEMA_VERSION } from '../domain/types';
 
 type Entity = Ingredient | Recipe | Order;
 type KindMaps = { ingredients: Map<string, Ingredient>; recipes: Map<string, Recipe>; orders: Map<string, Order> };
 
-export type ConflictRecord = { id: string; kind: Kind | 'settings'; entityId: string; at: string; reason: 'edited-elsewhere' | 'deleted-elsewhere' | 'restored'; local: unknown | null; server: unknown | null };
+/** O que este dispositivo fez com o DINHEIRO de uma encomenda e o servidor não tem. Exige reconciliação explícita. */
+export type FinancialDiff = { addedPayments: Payment[]; removedPayments: Payment[]; deposit?: { local: number; server: number | null } };
+export type ConflictRecord = { id: string; kind: Kind | 'settings'; entityId: string; at: string; reason: 'edited-elsewhere' | 'deleted-elsewhere' | 'restored'; local: unknown | null; server: unknown | null;
+  /** Só em encomendas: recebimentos/sinal alterados aqui e não refletidos no servidor. Nunca é descartado sem escolha do usuário. */
+  financial?: FinancialDiff;
+  /** Preenchido quando o usuário resolveu a pendência financeira. */
+  resolution?: { action: 'merge' | 'keep-server'; at: string } };
+/** Pendência financeira ainda sem decisão do usuário. */
+export const isOpenFinancial = (c: ConflictRecord): boolean => !!c.financial && !c.resolution;
+
+/**
+ * Diferença financeira que ESTE dispositivo criou em relação ao baseline e que o servidor não tem:
+ * recebimentos lançados aqui, recebimentos removidos aqui (e ainda existentes no servidor) e mudança do sinal.
+ * Vazio (undefined) quando a perda de uma versão local não envolve dinheiro (ex.: só mudou o nome do cliente).
+ */
+export function financialDiff(local: Order, baseline: Order | undefined, server: Order | undefined): FinancialDiff | undefined {
+  const ids = (list?: Payment[]) => new Set((list ?? []).map(p => p.id));
+  const baseIds = ids(baseline?.payments), serverIds = ids(server?.payments), localIds = ids(local.payments);
+  const addedPayments = (local.payments ?? []).filter(p => !baseIds.has(p.id) && !serverIds.has(p.id));
+  const removedPayments = (baseline?.payments ?? []).filter(p => !localIds.has(p.id) && serverIds.has(p.id));
+  const depositChanged = local.deposit !== (baseline?.deposit ?? 0) && local.deposit !== (server?.deposit ?? 0);
+  if (!addedPayments.length && !removedPayments.length && !depositChanged) return undefined;
+  return { addedPayments, removedPayments, ...(depositChanged ? { deposit: { local: local.deposit, server: server?.deposit ?? null } } : {}) };
+}
 export type SyncMeta = {
   /** Revisão do servidor refletida no baseline. */
   revision: number;
@@ -72,7 +95,8 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
         if (sameOpt(lo, ba)) { // sem alteração local: aceita o servidor
           if (server) Lk.set(ent.id, server); else { Lk.delete(ent.id); if (kind !== 'orders' && lo) (removed[kind] as Map<string, Entity>).set(ent.id, lo); }
         } else { // alterado aqui E no servidor: o servidor vence e a versão local fica guardada
-          conflicts.push({ id: `${kind}:${ent.id}:${ent.rev}`, kind, entityId: ent.id, at, reason: server ? 'edited-elsewhere' : 'deleted-elsewhere', local: lo ?? null, server: server ?? null });
+          const financial = kind === 'orders' && lo ? financialDiff(lo as Order, ba as Order | undefined, server as Order | undefined) : undefined;
+          conflicts.push({ id: `${kind}:${ent.id}:${ent.rev}`, kind, entityId: ent.id, at, reason: server ? 'edited-elsewhere' : 'deleted-elsewhere', local: lo ?? null, server: server ?? null, ...(financial ? { financial } : {}) });
           if (server) Lk.set(ent.id, server); else { Lk.delete(ent.id); if (kind !== 'orders' && lo) (removed[kind] as Map<string, Entity>).set(ent.id, lo); }
         }
       }
@@ -128,7 +152,7 @@ export function buildPushes(local: DataSet, meta: SyncMeta): PushRequest[] {
 }
 const revOf = (meta: SyncMeta, kind: Kind, id: string): number | undefined => meta.revs[kind][id];
 
-export type SyncStatus = 'synced' | 'offline' | 'unauthorized' | 'needs-attention' | 'needs-decision' | 'error';
+export type SyncStatus = 'synced' | 'offline' | 'unauthorized' | 'forbidden' | 'needs-attention' | 'needs-decision' | 'error';
 export type SyncResult = { status: SyncStatus; message?: string; local: DataSet; meta: SyncMeta; pulled: number; pushed: number; newConflicts: ConflictRecord[] };
 
 const isEmpty = (d: DataSet) => !d.ingredients.length && !d.recipes.length && !d.orders.length;
@@ -172,7 +196,7 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
     }
     return result('error', 'Não foi possível concluir a sincronização. Tente novamente.');
   } catch (e) {
-    if (e instanceof SyncError) return result(e.kind === 'offline' ? 'offline' : e.kind === 'unauthorized' ? 'unauthorized' : e.kind === 'rejected' ? 'needs-attention' : 'error', e.message);
+    if (e instanceof SyncError) return result(e.kind === 'offline' ? 'offline' : e.kind === 'unauthorized' ? 'unauthorized' : e.kind === 'forbidden' ? 'forbidden' : e.kind === 'rejected' ? 'needs-attention' : 'error', e.message);
     throw e;
   }
 }

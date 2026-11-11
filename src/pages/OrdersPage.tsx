@@ -1,3 +1,4 @@
+import { useAccount } from '../account/AccountContext';
 import { useMemo, useState, type FormEvent } from 'react';
 import { ClipboardCheck, FileText, Link2, Pencil, Plus, Save, Trash2, Wallet, X } from 'lucide-react';
 import { removeOrder, updateOrder } from '../domain/edit';
@@ -12,6 +13,13 @@ import { FORECAST_DISCLAIMER, forecastUntil, formatMinutes } from '../domain/sch
 import { brDate, localToday, newId, parse, priceRecipe, tryApply, type PageProps } from '../utils';
 
 const statuses: Order['status'][] = ['Orçamento', 'Confirmado', 'Produção', 'Entregue'];
+
+/** Aviso permanente enquanto houver recebimentos lançados aqui que ainda aguardam reconciliação. */
+function FinancialPendingNotice({ focus }: { focus: PageProps['focus'] }) {
+  const acc = useAccount();
+  if (!acc.openFinancial) return null;
+  return <div className="notice warn" role="alert"><strong>{acc.openFinancial === 1 ? 'Há um recebimento aguardando reconciliação.' : `Há ${acc.openFinancial} encomendas com recebimentos aguardando reconciliação.`}</strong> Foram lançados neste dispositivo, mas a encomenda mudou em outro. Nada foi descartado. <button className="secondary" onClick={() => focus('settings')}>Resolver em Configurações</button></div>;
+}
 
 export function OrdersPage({ data, update, inform, focus }: PageProps) {
   const [customer, setCustomer] = useState('');
@@ -83,6 +91,7 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
 
   return <>
     <div className="head"><div><div className="eyebrow">Atendimento e organização</div><h1>Encomendas</h1><p className="muted">Cadastre pedidos, acompanhe estados e copie orçamentos.</p></div></div>
+    <FinancialPendingNotice focus={focus} />
     <div className="two">
       <section className="card"><h2 className="section-title">{editingId ? 'Editar encomenda' : 'Nova encomenda'}</h2>
         <form className="stack" onSubmit={saveOrder} style={{ marginTop: 19 }}>

@@ -11,7 +11,7 @@ import { createTestD1 } from './helpers/d1';
 
 // API do Resend SIMULADA: nenhum teste faz requisição de rede, usa token real nem envia e-mail.
 const TOKEN = 're_token_falso_somente_para_teste_123456';
-const FROM = 'PedidoCerto <acesso@exemplo.test>';
+const FROM = 'DaBi Preço Certo <acesso@mail.dabitech.com.br>'; // remetente real do domínio verificado (só o texto; nada é enviado)
 const msg = { to: 'bia@exemplo.test', subject: 'Seu código de acesso', text: 'Seu código de acesso: 12345678' };
 const ok = () => new Response(JSON.stringify({ id: 'abc' }), { status: 200 });
 type Call = { url: string; init: RequestInit };

@@ -3,7 +3,8 @@ import type { DataSet } from '../domain/types';
 import { createQuotesClient, type QuotesClient } from '../features/sharing/quotes';
 import { loadSyncMeta, saveSyncMeta } from '../storage/db';
 import { createHttpSyncApi } from '../sync/api';
-import { emptyDataSet, emptyMeta, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { emptyDataSet, emptyMeta, isOpenFinancial, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
 import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
 import { API_URL, safeApiBase } from './http';
 
@@ -26,7 +27,11 @@ type Ctx = {
   chooseMerge(): Promise<void>;
   adoptAccountData(): Promise<void>;
   conflicts: ConflictRecord[];
+  /** Remove os avisos já tratados. Pendências FINANCEIRAS sem decisão nunca são dispensadas. */
   dismissConflicts(): void;
+  /** Resolve uma pendência financeira. Lança Error com a explicação se a regra de negócio impedir (ex.: passaria do total). */
+  resolveFinancial(conflictId: string, action: ReconcileAction): void;
+  openFinancial: number;
 };
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
@@ -85,20 +90,29 @@ export function AccountProvider({ data, setData, ready, children }: Props) {
       const api = createHttpSyncApi({ baseUrl: base, getCsrfToken: () => csrfRef.current });
       const r = await syncOnce(api, started, meta, opts);
       if (r.status === 'needs-decision') { block('needs-decision', r.message); return; }
-      if (r.status !== 'unauthorized') {
+      if (r.status !== 'unauthorized' && r.status !== 'forbidden') {
         meta = { ...r.meta, userId: sess.user.id };
         metaRef.current = meta; setConflicts(meta.conflicts);
         setData(cur => { const next = rebaseLocal(cur, started, r.local); lastApplied.current = next; return next; });
         await saveSyncMeta(meta).catch(() => undefined);
       }
       if (r.status === 'unauthorized') { setSession(undefined); setSync({ phase: 'idle', blocked: null }); return; }
+      if (r.status === 'forbidden') {
+        // Licença revogada (ou conta sem licença): relê a sessão para o app refletir a perda do direito. Os dados locais ficam intactos.
+        const cur = await auth?.currentSession();
+        if (cur?.ok) setSession(cur.value); else if (cur && cur.reason === 'unauthorized') setSession(undefined);
+        setSync({ phase: 'attention', message: r.message, blocked: null });
+        return;
+      }
       blockedRef.current = null;
+      const pendingMoney = meta.conflicts.filter(isOpenFinancial).length;
+      if (pendingMoney > 0 && r.status === 'synced') { setSync({ phase: 'attention', message: 'Há recebimentos aguardando a sua reconciliação (veja em Configurações).', lastSyncedAt: new Date().toISOString(), blocked: null }); return; }
       setSync({ phase: r.status === 'synced' ? 'synced' : r.status === 'offline' ? 'offline' : r.status === 'needs-attention' ? 'attention' : 'error', message: r.status === 'synced' ? undefined : r.message, lastSyncedAt: r.status === 'synced' ? new Date().toISOString() : undefined, blocked: null });
     } finally {
       running.current = false;
       if (again.current) { again.current = false; void run(); }
     }
-  }, [base, setData, setSession]);
+  }, [base, auth, setData, setSession]);
 
   // Sincroniza ao entrar, depois de mudanças locais (com pausa) e quando a internet volta.
   useEffect(() => { if (entitled && ready) void run(); }, [entitled, ready, run]);
@@ -131,7 +145,21 @@ export function AccountProvider({ data, setData, ready, children }: Props) {
       await run();
     },
     conflicts,
-    dismissConflicts() { if (metaRef.current) { metaRef.current = { ...metaRef.current, conflicts: [] }; void saveSyncMeta(metaRef.current).catch(() => undefined); } setConflicts([]); },
+    dismissConflicts() {
+      if (!metaRef.current) return;
+      const kept = metaRef.current.conflicts.filter(isOpenFinancial); // dinheiro pendente nunca some em silêncio
+      metaRef.current = { ...metaRef.current, conflicts: kept }; void saveSyncMeta(metaRef.current).catch(() => undefined); setConflicts(kept);
+    },
+    openFinancial: conflicts.filter(isOpenFinancial).length,
+    resolveFinancial(conflictId, action) {
+      const meta = metaRef.current; const c = meta?.conflicts.find(x => x.id === conflictId);
+      if (!meta || !c) throw new Error('Pendência não encontrada.');
+      const now = new Date(), copyId = crypto.randomUUID();
+      const res = reconcileFinancial(dataRef.current, c, action, now, () => copyId); // lança se a regra impedir; nada é alterado antes disso
+      setData(cur => { try { return reconcileFinancial(cur, c, action, now, () => copyId).data; } catch { return cur; } });
+      const nextMeta = { ...meta, conflicts: meta.conflicts.map(x => (x.id === conflictId ? res.conflict : x)) };
+      metaRef.current = nextMeta; setConflicts(nextMeta.conflicts); void saveSyncMeta(nextMeta).catch(() => undefined);
+    },
   };
   return <AccountCtx.Provider value={value}>{children}</AccountCtx.Provider>;
 }

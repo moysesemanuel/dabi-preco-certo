@@ -27,8 +27,9 @@ function TopbarStatus() {
   const text = acc.status !== 'signed-in' ? 'Dados salvos neste dispositivo'
     : !acc.entitled ? `${acc.session?.user.email} · sem licença ativa`
     : acc.sync.blocked ? `${acc.session?.user.email} · precisa da sua decisão`
+    : acc.openFinancial > 0 ? `${acc.session?.user.email} · recebimentos a reconciliar`
     : ({ idle: 'aguardando', syncing: 'sincronizando…', synced: 'sincronizado', offline: 'sem conexão (será enviado depois)', attention: 'precisa de atenção', error: 'falha ao sincronizar' } as const)[acc.sync.phase];
-  return <span role="status" aria-live="polite">{acc.status === 'signed-in' && acc.entitled && !acc.sync.blocked ? `${acc.session?.user.email} · ${text}` : text}</span>;
+  return <span role="status" aria-live="polite">{acc.status === 'signed-in' && acc.entitled && !acc.sync.blocked && acc.openFinancial === 0 ? `${acc.session?.user.email} · ${text}` : text}</span>;
 }
 
 export default function App() {
