@@ -1,4 +1,4 @@
-import type { DataSet, Ingredient, Recipe } from './types';
+import type { DataSet, Ingredient, Order, Recipe } from './types';
 
 export type IngredientPatch = Omit<Ingredient, 'id'>;
 export type RecipePatch = Omit<Recipe, 'id'>;
@@ -13,6 +13,18 @@ export function updateIngredient(data: DataSet, id: string, patch: IngredientPat
 export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): DataSet {
   if (!data.recipes.some(r => r.id === id)) throw new Error('Receita não encontrada.');
   return { ...data, recipes: data.recipes.map(r => (r.id === id ? { ...patch, id } : r)) };
+}
+
+export type OrderPatch = Pick<Order, 'customer' | 'recipeId' | 'quantity' | 'unitPrice' | 'deliveryDate' | 'deposit'>;
+
+/** Atualiza os dados de uma encomenda. Status, data de criação e id são preservados. */
+export function updateOrder(data: DataSet, id: string, patch: OrderPatch): DataSet {
+  if (!data.orders.some(o => o.id === id)) throw new Error('Encomenda não encontrada.');
+  if (!data.recipes.some(r => r.id === patch.recipeId)) throw new Error('Receita não encontrada.');
+  if (!patch.customer.trim() || !patch.deliveryDate) throw new Error('Informe cliente e data de entrega.');
+  if (![patch.quantity, patch.unitPrice, patch.deposit].every(Number.isFinite) || !(patch.quantity > 0) || patch.unitPrice < 0 || patch.deposit < 0) throw new Error('Quantidade, preço ou sinal inválido.');
+  if (patch.deposit > patch.quantity * patch.unitPrice) throw new Error('O sinal não pode ser maior que o total.');
+  return { ...data, orders: data.orders.map(o => (o.id === id ? { ...o, ...patch, customer: patch.customer.trim() } : o)) };
 }
 
 /** Grava equivalências de referência em ingredientes, preenchendo só o que ainda está em branco (nunca sobrescreve). */

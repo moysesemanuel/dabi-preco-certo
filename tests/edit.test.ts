@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unitChangeAffectsRecipes, updateIngredient, updateRecipe } from '../src/domain/edit';
+import { unitChangeAffectsRecipes, updateIngredient, updateOrder, updateRecipe } from '../src/domain/edit';
 import { recipeCost } from '../src/domain/pricing';
 import type { DataSet } from '../src/domain/types';
 
@@ -39,5 +39,25 @@ describe('Edição de cadastros', () => {
   it('não avisa quando os itens da receita já guardam a própria unidade', () => {
     const explicit = { ...data, recipes: [{ ...data.recipes[0], items: [{ ingredientId: 'f', quantity: 500, unit: 'g' as const }] }] };
     expect(unitChangeAffectsRecipes(explicit, 'f', 'kg')).toBe(false);
+  });
+
+  const base = { customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 5, deliveryDate: '2026-12-01', deposit: 0 };
+  it('atualiza a encomenda preservando id, status e data de criação', () => {
+    const withStatus = { ...data, orders: [{ ...data.orders[0], status: 'Produção' as const }] };
+    const next = updateOrder(withStatus, 'o', { ...base, customer: '  Ana Martins ', quantity: 4, unitPrice: 6, deposit: 10, deliveryDate: '2026-12-10' });
+    expect(next.orders[0]).toMatchObject({ id: 'o', status: 'Produção', createdAt: '2026-11-11T00:00:00Z', customer: 'Ana Martins', quantity: 4, unitPrice: 6, deposit: 10, deliveryDate: '2026-12-10' });
+    expect(withStatus.orders[0].quantity).toBe(2);
+  });
+  it('rejeita encomenda ou receita inexistente', () => {
+    expect(() => updateOrder(data, 'nada', base)).toThrow('Encomenda');
+    expect(() => updateOrder(data, 'o', { ...base, recipeId: 'nada' })).toThrow('Receita');
+  });
+  it('rejeita valores inválidos e sinal maior que o total', () => {
+    expect(() => updateOrder(data, 'o', { ...base, quantity: 0 })).toThrow();
+    expect(() => updateOrder(data, 'o', { ...base, unitPrice: -1 })).toThrow();
+    expect(() => updateOrder(data, 'o', { ...base, quantity: NaN })).toThrow();
+    expect(() => updateOrder(data, 'o', { ...base, customer: '  ' })).toThrow();
+    expect(() => updateOrder(data, 'o', { ...base, deposit: 11 })).toThrow('sinal');
+    expect(updateOrder(data, 'o', { ...base, deposit: 10 }).orders[0].deposit).toBe(10);
   });
 });
