@@ -10,6 +10,10 @@ workers_dev = false
 PUBLIC_BASE_URL = "https://orcamento.dabitech.com.br"
 # Origens do app autorizadas a chamar a API (CORS). Valores de DESENVOLVIMENTO: troque pela origem real do app antes do deploy.
 ALLOWED_ORIGINS = "http://localhost:5174,http://127.0.0.1:5174"
+# Autenticação antiga por chave de licença (Bearer). Desligada por padrão; use "on" apenas para migrar clientes antigos.
+LEGACY_KEY_AUTH = "off"
+# Segredos (NÃO ficam aqui): AUTH_SECRET -> `wrangler secret put AUTH_SECRET`; em desenvolvimento, worker/.dev.vars (veja .dev.vars.example).
+# EMAIL_ADAPTER: sem valor = sem envio (login responde 503). "dev" = imprime no terminal, só para desenvolvimento.
 
 [[d1_databases]]
 binding = "DB"

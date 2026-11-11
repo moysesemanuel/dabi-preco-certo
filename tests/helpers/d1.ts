@@ -19,6 +19,7 @@ export function createTestD1() {
           return {
             first: async <T,>() => { const row = stmt.get(...params); return (row ? { ...row } : null) as T | null; },
             run: async () => ({ meta: { changes: Number(stmt.run(...params).changes) } }),
+            all: async <T,>() => ({ results: stmt.all(...params).map(r => ({ ...r })) as T[] }),
           };
         },
       };

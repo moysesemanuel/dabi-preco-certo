@@ -133,11 +133,14 @@ describe('Autorização por licença', () => {
     }
     expect((await worker.fetch(new Request(`${BASE}/o/AAAAAAAAAAAAAAAAAAAAAA`), env)).status).toBe(200);
   });
-  it('o Worker exportado usa licenças: sem chave 401; com chave válida publica', async () => {
+  it('no Worker exportado a chave antiga vem DESLIGADA por padrão e só vale com LEGACY_KEY_AUTH=on', async () => {
     const { key } = await issue();
+    const post = () => new Request(`${BASE}/api/quotes`, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: JSON.stringify(quote()) });
     expect((await worker.fetch(new Request(`${BASE}/api/quotes`, { method: 'POST', body: JSON.stringify(quote()) }), env)).status).toBe(401);
-    const ok = await worker.fetch(new Request(`${BASE}/api/quotes`, { method: 'POST', headers: { authorization: `Bearer ${key}` }, body: JSON.stringify(quote()) }), env);
-    expect(ok.status).toBe(201);
+    expect((await worker.fetch(post(), env)).status).toBe(401); // padrão: desligada
+    expect((await worker.fetch(post(), { ...env, LEGACY_KEY_AUTH: 'off' })).status).toBe(401);
+    expect((await worker.fetch(post(), { ...env, LEGACY_KEY_AUTH: 'on' })).status).toBe(201);
+    expect(quoteCount()).toBe(1);
   });
 });
 
@@ -319,7 +322,9 @@ describe('CORS para o app', () => {
     const res = await call('GET', '/api/license', key, undefined, handle, { origin: 'http://localhost:5174' });
     expect(res.headers.get('access-control-allow-origin')).toBe('http://localhost:5174');
     expect((await call('GET', '/api/license', key, undefined, handle, { origin: 'https://evil.example' })).headers.get('access-control-allow-origin')).toBeNull();
-    expect(res.headers.get('access-control-allow-credentials')).toBeNull();
+    expect(res.headers.get('access-control-allow-credentials')).toBe('true'); // cookie de sessão, só para origens autorizadas
+    expect(pre.headers.get('access-control-allow-headers')).toContain('X-CSRF-Token');
+    expect(bad.headers.get('access-control-allow-credentials')).toBeNull();
   });
   it('sem ALLOWED_ORIGINS nenhuma origem é liberada', async () => {
     const res = await handle(new Request(`${BASE}/api/license`, { method: 'OPTIONS', headers: { origin: 'http://localhost:5174' } }), { DB: db.d1 });

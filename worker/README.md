@@ -26,7 +26,28 @@ Serviço remoto **mínimo** do DaBi Preço Certo. Ele existe só para publicar e
 - `scripts/licenses.ts`: CLI administrativo.
 - `migrations/`: `0001_quotes.sql` (orçamentos) e `0002_licenses.sql` (licenças, contadores de taxa e índices).
 
-## Licenças (opção A: chave individual)
+## Contas e sessões (Etapa 1, Fase 2)
+
+O acesso do app passa a ser por **conta + sessão**; a chave de licença deixa de ser o fator de autenticação (o modo antigo continua no código, **desligado por padrão**, e só vale com `LEGACY_KEY_AUTH=on`).
+
+- **Login sem senha:** o comprador informa o e-mail, recebe um **código de 8 dígitos** (válido por 10 minutos, uso único, no máximo 5 tentativas) e o digita. Não há senhas para armazenar nem vazar, e a **recuperação de acesso é o próprio login** (pedir novo código). O servidor guarda só um **HMAC-SHA256** do código (com o segredo `AUTH_SECRET`), pois 8 dígitos não resistiriam a um hash simples. Só existe um código ativo por e-mail.
+- **Só entra quem tem licença:** a conta nasce no primeiro login verificado, e apenas para e-mails com uma licença ativa emitida (`licenses issue --email`). Não há cadastro aberto. Pedir código para um e-mail sem licença devolve **a mesma resposta** e não envia nada (não revela quem é cliente).
+- **Sessão:** token aleatório de 256 bits em cookie `HttpOnly`, `SameSite=Lax` e, em https, `Secure` com prefixo `__Host-`. O servidor guarda só o SHA-256 do token. Validade de 30 dias; revogável.
+- **CSRF:** operações que alteram dados exigem uma origem autorizada (`Origin` em `ALLOWED_ORIGINS`) **e** o token da sessão no cabeçalho `X-CSRF-Token` (obtido em `GET /api/auth/session`).
+- **Até 2 dispositivos:** o terceiro login recebe `409 DEVICE_LIMIT` com a lista (sem tokens); o código continua válido e pode ser reenviado com `replaceSessionId` para trocar um dispositivo. A vaga é reservada de forma atômica (sem corrida entre logins simultâneos). `DELETE /api/sessions/:id` remove um dispositivo da **própria** conta.
+- **Proteção contra tentativas repetidas:** a defesa principal é **por e-mail** (5 pedidos/hora; 15 verificações/hora) e **por código** (5 tentativas). O limite por IP (30 e 60/hora) é só uma rede de proteção ampla e **nunca é o único bloqueio**: trocar de IP não contorna o limite do e-mail, e um IP isolado não impede um e-mail de entrar por outro IP. Limitar por e-mail permite que alguém atrapalhe o login de outro (negação de serviço); isso **não derruba sessões já abertas**.
+- **Licença revogada:** o CLI `revoke` encerra também as sessões. Se só a licença for revogada, as operações protegidas respondem `403 LICENSE_REVOKED`.
+- **Isolamento:** o dono dos orçamentos é a licença da conta; outra conta recebe `404`.
+
+Rotas: `POST /api/auth/request-code`, `POST /api/auth/verify-code`, `GET /api/auth/session`, `POST /api/auth/logout`, `GET /api/sessions`, `DELETE /api/sessions/:id`.
+
+**E-mail:** nenhum provedor de produção foi escolhido ou contratado. `src/email.ts` define a interface `EmailSender`. Sem `EMAIL_ADAPTER` o login responde `503 EMAIL_NOT_CONFIGURED` (nada finge ter sido entregue). `EMAIL_ADAPTER=dev` só imprime o código no terminal local. **Decisão pendente:** escolher o provedor (opções gratuitas ou baratas a avaliar) e escrever o adaptador.
+
+Segredos: `AUTH_SECRET` em `wrangler secret put AUTH_SECRET` (produção) ou `worker/.dev.vars` (desenvolvimento; veja `.dev.vars.example`).
+
+Emissão: `npm run licenses -- issue --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`.
+
+## Licenças por chave (modo antigo, desligado por padrão)
 
 - **Chave:** `dabi_lic_` + 24 bytes aleatórios em base64url (**192 bits**), 41 caracteres. Gerada com Web Crypto.
 - **Armazenamento:** o D1 guarda somente o **SHA-256 (hex)** da chave em `licenses.key_hash`, mais um identificador interno do proprietário (`lic_` + 16 hex), status (`active`/`revoked`), cotas e rótulo administrativo. A chave nunca é gravada, registrada em log, colocada em URL nem devolvida em respostas.

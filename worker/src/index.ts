@@ -1,6 +1,10 @@
-import { computeTotals, LIMITS, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
+import { computeTotals, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
+import { apiError, html, json, readJsonBody, respond, SECURITY_HEADERS } from './http';
 import { renderMessagePage, renderQuotePage } from './render';
 import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authorizer } from './auth';
+import { currentSession, logout, requestCode, sessionRevoke, sessionsList, verifyCode, type AuthEnv } from './authRoutes';
+import { createEmailSender, type EmailSender } from './email';
+import { createCompositeAuthorizer } from './session';
 import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
@@ -9,26 +13,17 @@ export interface Env {
   PUBLIC_BASE_URL?: string;
   /** Origens do app autorizadas a chamar a API (CORS), separadas por vírgula. Vazio = nenhuma. */
   ALLOWED_ORIGINS?: string;
+  /** SEGREDO do servidor (wrangler secret) usado para proteger os códigos de acesso. Sem ele, o login responde 503. */
+  AUTH_SECRET?: string;
+  /** `dev` imprime o e-mail no terminal (apenas desenvolvimento). Sem valor, não há envio e o login responde 503. */
+  EMAIL_ADAPTER?: string;
+  /** `on` reativa a autenticação antiga por chave de licença (Bearer). Padrão: desligada. */
+  LEGACY_KEY_AUTH?: string;
 }
 
 export type { Authorizer, AuthResult };
 
-type Options = { authorize: Authorizer; now?: () => Date; newId?: () => string };
-
-const SECURITY_HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'no-referrer',
-  'X-Robots-Tag': 'noindex, nofollow',
-  'Cache-Control': 'no-store',
-};
-
-function respond(body: BodyInit | null, status: number, contentType: string, extra: Record<string, string> = {}): Response {
-  return new Response(body, { status, headers: { ...SECURITY_HEADERS, 'Content-Type': contentType, ...extra } });
-}
-const json = (data: unknown, status = 200) => respond(JSON.stringify(data), status, 'application/json; charset=utf-8');
-const apiError = (status: number, error: string, message: string) => json({ error, message }, status);
-const html = (body: string, status = 200, head = false) => respond(head ? null : body, status, 'text/html; charset=utf-8');
+type Options = { authorize: Authorizer; now?: () => Date; newId?: () => string; email?: (env: Env) => EmailSender };
 
 /** Data de hoje no Brasil (UTC-3, sem horário de verão), para decidir se a validade encerrou. */
 const todayInBrazil = (now: Date) => new Date(now.getTime() - 3 * 3600_000).toISOString().slice(0, 10);
@@ -50,18 +45,10 @@ function readStored(row: QuoteRow): PublicQuote | undefined {
   } catch { return undefined; }
 }
 
-/** Lê o corpo JSON com limite real de tamanho (não confia só no Content-Length). */
-async function readJsonBody(request: Request): Promise<{ ok: true; data: unknown } | { ok: false; status: number; error: string }> {
-  const declared = Number(request.headers.get('content-length') ?? '0');
-  if (declared > LIMITS.maxBodyBytes) return { ok: false, status: 413, error: 'BODY_TOO_LARGE' };
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > LIMITS.maxBodyBytes) return { ok: false, status: 413, error: 'BODY_TOO_LARGE' };
-  try { return { ok: true, data: JSON.parse(text) }; } catch { return { ok: false, status: 400, error: 'INVALID_JSON' }; }
-}
-
 export function createHandler(options: Options) {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? generateId;
+  const authDeps = { now, email: options.email ?? ((env: AuthEnv) => createEmailSender(env)) };
 
   async function readQuote(env: Env, id: string, head: boolean, wantJson: boolean): Promise<Response> {
     const notFound = () => (wantJson ? apiError(404, 'NOT_FOUND', 'Orçamento não encontrado.') : html(renderMessagePage('Orçamento não encontrado', 'Verifique se o link está completo ou peça um novo link ao vendedor.'), 404, head));
@@ -135,6 +122,7 @@ export function createHandler(options: Options) {
     if (origin && allowed.includes(origin)) {
       response.headers.set('Access-Control-Allow-Origin', origin);
       response.headers.set('Access-Control-Expose-Headers', 'Retry-After');
+      response.headers.set('Access-Control-Allow-Credentials', 'true'); // cookie de sessão (somente origens autorizadas)
       response.headers.append('Vary', 'Origin');
     }
     return response;
@@ -149,6 +137,17 @@ export function createHandler(options: Options) {
       if (page) {
         if (method !== 'GET' && method !== 'HEAD') return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
         return await readQuote(env, page[1], method === 'HEAD', false);
+      }
+      if (pathname.startsWith('/api/auth/') || pathname.startsWith('/api/sessions')) {
+        const r = pathname.replace(/\/+$/, '');
+        if (r === '/api/auth/request-code' && method === 'POST') return await requestCode(request, env, authDeps);
+        if (r === '/api/auth/verify-code' && method === 'POST') return await verifyCode(request, env, authDeps);
+        if (r === '/api/auth/session' && method === 'GET') return await currentSession(request, env, authDeps);
+        if (r === '/api/auth/logout' && method === 'POST') return await logout(request, env, authDeps);
+        if (r === '/api/sessions' && method === 'GET') return await sessionsList(request, env, authDeps);
+        const del = r.match(/^\/api\/sessions\/([^/]+)$/);
+        if (del && method === 'DELETE') return await sessionRevoke(request, env, authDeps, del[1]);
+        return apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
       }
       if (/^\/api\/license\/?$/.test(pathname)) {
         return method === 'GET' ? await verifyLicense(request, env) : apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
@@ -171,15 +170,15 @@ export function createHandler(options: Options) {
   return async function handle(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
     if (request.method.toUpperCase() === 'OPTIONS' && pathname.startsWith('/api/')) {
-      const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
+      const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-CSRF-Token', 'Access-Control-Max-Age': '600' } });
       return withCors(request, env, preflight);
     }
     return withCors(request, env, await route(request, env));
   };
 }
 
-// O Worker publicado autoriza SOMENTE por chave de licença individual (veja auth.ts).
-const handler = createHandler({ authorize: createLicenseAuthorizer() });
+// O Worker publicado autoriza por SESSÃO de conta (cookie + CSRF). A chave de licença antiga só vale com LEGACY_KEY_AUTH=on.
+const handler = createHandler({ authorize: createCompositeAuthorizer(createLicenseAuthorizer()) });
 export default {
   fetch: (request: Request, env: Env) => handler(request, env),
 };

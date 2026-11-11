@@ -18,7 +18,7 @@ npm run build
 npm test
 ```
 
-**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 241/241. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
+**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 288/288. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
 
 ## Estrutura
 
@@ -32,7 +32,7 @@ npm test
 - `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `priceRecipe`, `cupSizeOf`, tipos `Page`/`PageProps`).
 - `src/features/recipe-import/`: importação de receita por texto. `parse.ts` (só lê o texto, sem conversões), `resolve.ts` (liga o texto ao motor de conversão, às referências e aos ingredientes cadastrados; `analyzeRow` e `buildImport`) e `components/RecipeTextImporter.tsx`.
 - `shared/publicQuote.ts` e `worker/`: contrato público do orçamento e Worker de compartilhamento (ver seção acima).
-- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
+- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `worker-auth.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
 

@@ -1,0 +1,4 @@
+# Copie para worker/.dev.vars (ignorado pelo git) para desenvolvimento local. NUNCA coloque segredos reais em arquivos versionados.
+AUTH_SECRET=troque-por-um-valor-aleatorio-longo-apenas-para-desenvolvimento
+# Imprime o código de login no terminal do `wrangler dev`; NÃO entrega e-mail. Não use em produção.
+EMAIL_ADAPTER=dev

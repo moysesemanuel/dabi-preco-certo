@@ -4,6 +4,7 @@ export interface D1Like {
     bind(...values: unknown[]): {
       first<T = Record<string, unknown>>(): Promise<T | null>;
       run(): Promise<{ meta: { changes?: number } }>;
+      all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
     };
   };
 }
@@ -47,7 +48,7 @@ export const getLicenseByHash = (db: D1Like, keyHash: string) =>
  * Conta uma operação na janela atual de forma ATÔMICA (um único UPSERT): se o contador já atingiu o limite,
  * a cláusula WHERE impede o incremento e nenhuma linha é devolvida. Requisições concorrentes não ultrapassam o limite.
  */
-export async function consumeRateLimit(db: D1Like, licenseId: string, scope: 'write' | 'verify', limit: number, windowSeconds: number, nowMs: number): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+export async function consumeRateLimit(db: D1Like, licenseId: string, scope: string, limit: number, windowSeconds: number, nowMs: number): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   const nowSec = Math.floor(nowMs / 1000);
   const windowStart = nowSec - (nowSec % windowSeconds);
   const row = await db.prepare(
