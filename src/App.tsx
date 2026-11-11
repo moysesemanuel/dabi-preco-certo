@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArchiveRestore, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
 import type { DataSet } from './domain/types';
 import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
@@ -8,13 +8,14 @@ import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
 import { RecipesPage } from './pages/RecipesPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { AgendaPage } from './pages/AgendaPage';
 import { ConverterPage } from './pages/ConverterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BackupPage } from './pages/BackupPage';
 
 const pages: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }, { id: 'ingredients', label: 'Ingredientes', icon: ShoppingBasket },
-  { id: 'recipes', label: 'Receitas e preços', icon: ChefHat }, { id: 'orders', label: 'Encomendas', icon: ClipboardCheck },
+  { id: 'recipes', label: 'Receitas e preços', icon: ChefHat }, { id: 'orders', label: 'Encomendas', icon: ClipboardCheck }, { id: 'agenda', label: 'Agenda', icon: CalendarDays },
   { id: 'converter', label: 'Conversor', icon: Ruler }, { id: 'backup', label: 'Backup', icon: ArchiveRestore }, { id: 'settings', label: 'Configurações', icon: Settings },
 ];
 
@@ -41,6 +42,7 @@ export default function App() {
       {page === 'ingredients' && <IngredientsPage {...props} />}
       {page === 'recipes' && <RecipesPage {...props} />}
       {page === 'orders' && <OrdersPage {...props} />}
+      {page === 'agenda' && <AgendaPage {...props} />}
       {page === 'converter' && <ConverterPage {...props} />}
       {page === 'settings' && <SettingsPage {...props} />}
       {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}

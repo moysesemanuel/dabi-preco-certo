@@ -10,7 +10,7 @@ const GUARD = (userIdParam: string, pushParam: string) => `EXISTS (SELECT 1 FROM
 type Row = Record<string, unknown>;
 const num = (v: unknown) => v as number;
 const ingredientOf = (r: Row): Ingredient => ({ id: r.id as string, name: r.name as string, unit: r.unit as Ingredient['unit'], purchaseQuantity: num(r.purchase_quantity), purchasePrice: num(r.purchase_price), ...(r.density_g_per_ml !== null ? { densityGPerMl: num(r.density_g_per_ml) } : {}), ...(r.grams_per_unit !== null ? { gramsPerUnit: num(r.grams_per_unit) } : {}) });
-const recipeOf = (r: Row, items: Row[]): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })) });
+const recipeOf = (r: Row, items: Row[]): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), ...(r.prep_minutes !== null ? { prepMinutes: num(r.prep_minutes) } : {}), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })) });
 const paymentOf = (p: Row): Payment => ({ id: p.id as string, amount: num(p.amount), receivedAt: p.received_at as string, ...(p.method !== null ? { method: p.method as NonNullable<Payment['method']> } : {}), ...(p.note !== null ? { note: p.note as string } : {}) });
 const orderOf = (r: Row, pays: Row[] = []): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}) });
 
@@ -182,10 +182,10 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
         density_g_per_ml = excluded.density_g_per_ml, grams_per_unit = excluded.grams_per_unit, rev = excluded.rev, deleted_at = NULL`, userId, i.id, i.name, i.unit, i.purchaseQuantity, i.purchasePrice, i.densityGPerMl ?? null, i.gramsPerUnit ?? null, rev, newPushId));
   }
   for (const r of toUpsert.recipes) {
-    batch.push(p(`INSERT INTO recipes (user_id, id, name, yield, packaging_per_unit, labor_total, extra_total, desired_margin, rev, deleted_at)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL WHERE ${g('?1', '?10')}
+    batch.push(p(`INSERT INTO recipes (user_id, id, name, yield, packaging_per_unit, labor_total, extra_total, desired_margin, prep_minutes, rev, deleted_at)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, NULL WHERE ${g('?1', '?11')}
       ON CONFLICT (user_id, id) DO UPDATE SET name = excluded.name, yield = excluded.yield, packaging_per_unit = excluded.packaging_per_unit, labor_total = excluded.labor_total,
-        extra_total = excluded.extra_total, desired_margin = excluded.desired_margin, rev = excluded.rev, deleted_at = NULL`, userId, r.id, r.name, r.yield, r.packagingPerUnit, r.laborTotal, r.extraTotal, r.desiredMargin, rev, newPushId));
+        extra_total = excluded.extra_total, desired_margin = excluded.desired_margin, prep_minutes = excluded.prep_minutes, rev = excluded.rev, deleted_at = NULL`, userId, r.id, r.name, r.yield, r.packagingPerUnit, r.laborTotal, r.extraTotal, r.desiredMargin, r.prepMinutes ?? null, rev, newPushId));
     batch.push(p(`DELETE FROM recipe_items WHERE user_id = ?1 AND recipe_id = ?2 AND ${g('?1', '?3')}`, userId, r.id, newPushId));
     batch.push(p(`INSERT INTO recipe_items (user_id, recipe_id, position, ingredient_id, quantity, unit)
       SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.ingredientId'), json_extract(j.value, '$.quantity'), json_extract(j.value, '$.unit') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, r.id, JSON.stringify(r.items), newPushId));

@@ -7,7 +7,8 @@ import { money } from '../domain/pricing';
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../domain/payments';
 import { PAYMENT_METHODS, type Order, type PaymentMethod } from '../domain/types';
 import { Field } from '../components/Field';
-import { brDate, newId, parse, priceRecipe, type PageProps } from '../utils';
+import { FORECAST_DISCLAIMER, forecastUntil, formatMinutes } from '../domain/schedule';
+import { brDate, localToday, newId, parse, priceRecipe, type PageProps } from '../utils';
 
 const statuses: Order['status'][] = ['Orçamento', 'Confirmado', 'Produção', 'Entregue'];
 
@@ -87,6 +88,15 @@ export function OrdersPage({ data, update, inform }: PageProps) {
             <Field label="Data da entrega"><input type="date" value={date} onChange={e => setDate(e.target.value)} required /></Field>
             <Field label="Sinal recebido (R$)"><input type="number" min="0" step="any" value={deposit} onChange={e => setDeposit(e.target.value)} required /></Field>
           </div>
+          {(() => {
+            const q = parse(qty);
+            if (!recipeId || !date || !isPositiveQuantity(q)) return null;
+            const f = forecastUntil({ ...data, orders: data.orders.filter(o => o.id !== editingId) }, localToday(), date, { recipeId, quantity: q });
+            const text = f.status === 'unknown'
+              ? ({ 'no-capacity': 'Informe a capacidade diária em Configurações para estimar o prazo.', 'no-prep-time': 'Informe o tempo de produção na receita para estimar o prazo.', 'past-date': 'A data de entrega já passou.', invalid: 'Data inválida.' })[f.reason ?? 'invalid']
+              : `${({ ok: 'Com folga', tight: 'Apertado', overload: 'Sobrecarga' })[f.status]}: carga de ${formatMinutes(f.requiredMinutes)} para ${formatMinutes(f.availableMinutes)} disponíveis até essa data.`;
+            return <div className={f.status === 'overload' ? 'notice error' : f.status === 'tight' ? 'notice warn' : 'notice'}><strong>Estimativa de prazo.</strong> {text} <span style={{ opacity: .8 }}>{FORECAST_DISCLAIMER}</span></div>;
+          })()}
           {recipeId && orderCost?.ok && <div className="notice">Custo estimado por unidade: <strong>{money(orderCost.cost.costPerUnit)}</strong>. Valor unitário pode ser ajustado conforme a negociação.</div>}
           {recipeId && orderCost && !orderCost.ok && <div className="notice warn"><strong>Custo indisponível.</strong> {orderCost.message} Informe o preço unitário manualmente ou corrija o cadastro.</div>}
           <div style={{ display: 'flex', gap: 8 }}><button className="primary" disabled={!data.recipes.length} type="submit">{editingId ? <><Save size={17} /> Salvar alterações</> : <><Plus size={17} /> Registrar encomenda</>}</button>{editingId && <button className="secondary" type="button" onClick={resetForm}><X size={16} /> Cancelar</button>}</div>

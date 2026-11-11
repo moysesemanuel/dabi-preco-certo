@@ -8,7 +8,7 @@
  *  - Dados já gravados no navegador são migrados de forma tolerante (`migrateStored`), para nunca tornar dados antigos ilegíveis.
  *  - Backups importados e payloads de sincronização passam por `validateDataSet` (estrito).
  */
-import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem } from '../src/domain/types';
+import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
 import { isMoney, isPositiveQuantity } from '../src/domain/money';
 
 export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, itemsPerRecipe: 200, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
@@ -90,7 +90,8 @@ function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<s
     if (it.unit !== undefined && (typeof it.unit !== 'string' || !MEASURES.includes(it.unit))) return fail(`${at}: item ${k + 1} com medida inválida.`);
     return { ingredientId: it.ingredientId, quantity: it.quantity, ...(it.unit !== undefined ? { unit: it.unit as RecipeItem['unit'] } : {}) };
   });
-  return { id: r.id, name: r.name.trim(), yield: r.yield, items, packagingPerUnit: r.packagingPerUnit as number, laborTotal: r.laborTotal as number, extraTotal: r.extraTotal as number, desiredMargin: r.desiredMargin };
+  if (r.prepMinutes !== undefined && (typeof r.prepMinutes !== 'number' || !Number.isFinite(r.prepMinutes) || r.prepMinutes <= 0 || r.prepMinutes > 10_080)) return fail(`${at}: tempo de produção inválido.`);
+  return { id: r.id, name: r.name.trim(), yield: r.yield, items, packagingPerUnit: r.packagingPerUnit as number, laborTotal: r.laborTotal as number, extraTotal: r.extraTotal as number, desiredMargin: r.desiredMargin, ...(r.prepMinutes !== undefined ? { prepMinutes: r.prepMinutes } : {}) };
 }
 
 function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string>): Order {
@@ -146,9 +147,7 @@ export function validateDataSet(value: unknown): DataSet {
 
   const result: DataSet = { schemaVersion: CURRENT_SCHEMA_VERSION, ingredients, recipes, orders };
   if (value.settings !== undefined) {
-    const s = value.settings;
-    if (!isObj(s) || typeof s.cupSizeMl !== 'number' || !Number.isFinite(s.cupSizeMl) || s.cupSizeMl <= 0 || s.cupSizeMl > 1000) return fail('Configurações inválidas no backup.');
-    result.settings = { cupSizeMl: s.cupSizeMl };
+    try { result.settings = parseSettings(value.settings); } catch { return fail('Configurações inválidas no backup.'); }
   }
   return result;
 }
@@ -157,7 +156,25 @@ export function validateDataSet(value: unknown): DataSet {
 export const parseIngredient = (raw: unknown): Ingredient => ingredientOf(raw, 0, new Set());
 export const parseRecipe = (raw: unknown, ingredientIds: Set<string>): Recipe => recipeOf(raw, 0, new Set(), ingredientIds);
 export const parseOrder = (raw: unknown, recipeIds: Set<string>): Order => orderOf(raw, 0, new Set(), recipeIds);
-export function parseSettings(raw: unknown): { cupSizeMl: number } {
+export function parseSettings(raw: unknown): Settings {
   if (!isObj(raw) || typeof raw.cupSizeMl !== 'number' || !Number.isFinite(raw.cupSizeMl) || raw.cupSizeMl <= 0 || raw.cupSizeMl > 1000) return fail('Configurações inválidas.');
-  return { cupSizeMl: raw.cupSizeMl };
+  const out: Settings = { cupSizeMl: raw.cupSizeMl };
+  if (raw.businessName !== undefined) {
+    if (typeof raw.businessName !== 'string' || raw.businessName.trim().length > 80) return fail('Configurações inválidas: nome do negócio.');
+    if (raw.businessName.trim()) out.businessName = raw.businessName.trim().normalize('NFC');
+  }
+  if (raw.businessPhone !== undefined) {
+    if (typeof raw.businessPhone !== 'string' || (raw.businessPhone !== '' && !/^\d{10,15}$/.test(raw.businessPhone))) return fail('Configurações inválidas: telefone do negócio.');
+    if (raw.businessPhone) out.businessPhone = raw.businessPhone;
+  }
+  if (raw.dailyCapacityMinutes !== undefined) {
+    if (typeof raw.dailyCapacityMinutes !== 'number' || !Number.isInteger(raw.dailyCapacityMinutes) || raw.dailyCapacityMinutes < 0 || raw.dailyCapacityMinutes > 1440) return fail('Configurações inválidas: capacidade diária.');
+    out.dailyCapacityMinutes = raw.dailyCapacityMinutes;
+  }
+  if (raw.workWeekdays !== undefined) {
+    const w = raw.workWeekdays;
+    if (!Array.isArray(w) || w.length < 1 || w.length > 7 || !w.every(d => Number.isInteger(d) && d >= 0 && d <= 6) || new Set(w).size !== w.length) return fail('Configurações inválidas: dias de trabalho.');
+    out.workWeekdays = [...(w as number[])].sort((a, b) => a - b);
+  }
+  return out;
 }

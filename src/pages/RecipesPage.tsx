@@ -9,7 +9,7 @@ import { RecipeTextImporter, type ImportConfirm } from '../features/recipe-impor
 import { MeasurementConverter, type ConverterUse } from '../features/measurement/components/MeasurementConverter';
 import { formatQuantity, friendlyAmount, UNIT_ORDER, UNITS, unitText } from '../features/measurement/units';
 import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
-import { cupSizeOf, newId, parse, priceRecipe, type PageProps } from '../utils';
+import { cupSizeOf, newId, parse, priceRecipe, withSettings, type PageProps } from '../utils';
 
 export function RecipesPage({ data, update, inform }: PageProps) {
   const [name, setName] = useState('');
@@ -19,6 +19,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
   const [labor, setLabor] = useState('0');
   const [extras, setExtras] = useState('0');
   const [margin, setMargin] = useState('30');
+  const [prep, setPrep] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConverter, setShowConverter] = useState(false);
@@ -26,20 +27,22 @@ export function RecipesPage({ data, update, inform }: PageProps) {
   const cupSizeMl = cupSizeOf(data);
 
   function resetForm() {
-    setEditingId(null); setName(''); setYieldQty('10'); setItems([]); setPackaging('0'); setLabor('0'); setExtras('0'); setMargin('30');
+    setEditingId(null); setName(''); setYieldQty('10'); setItems([]); setPackaging('0'); setLabor('0'); setExtras('0'); setMargin('30'); setPrep('');
   }
   function startEdit(id: string) {
     const r = data.recipes.find(x => x.id === id);
     if (!r) return;
     setEditingId(r.id); setName(r.name); setYieldQty(String(r.yield)); setItems(r.items.map(i => ({ ...i, unit: i.unit ?? data.ingredients.find(x => x.id === i.ingredientId)?.unit })));
-    setPackaging(String(r.packagingPerUnit)); setLabor(String(r.laborTotal)); setExtras(String(r.extraTotal)); setMargin(String(r.desiredMargin));
+    setPackaging(String(r.packagingPerUnit)); setLabor(String(r.laborTotal)); setExtras(String(r.extraTotal)); setMargin(String(r.desiredMargin)); setPrep(r.prepMinutes ? String(r.prepMinutes) : '');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   function saveRecipe(e: FormEvent) {
     e.preventDefault();
     const yieldNum = parse(yieldQty), pack = toCents2(parse(packaging)), lab = toCents2(parse(labor)), extra = toCents2(parse(extras)), m = parse(margin);
     if (!name.trim() || !isPositiveQuantity(yieldNum) || !items.length || items.some(i => !isPositiveQuantity(i.quantity) || !data.ingredients.some(x => x.id === i.ingredientId)) || ![pack, lab, extra].every(isMoney) || !Number.isFinite(m) || m < 0 || m >= 100) return inform('Revise rendimento, ingredientes e custos. Margem: 0 até menos de 100%.');
-    const values = { name: name.trim(), yield: yieldNum, items, packagingPerUnit: pack, laborTotal: lab, extraTotal: extra, desiredMargin: m };
+    const prepNum = prep.trim() ? parse(prep) : undefined;
+    if (prepNum !== undefined && !(prepNum > 0 && prepNum <= 10080)) return inform('O tempo de produção deve ser maior que zero (em minutos) ou ficar em branco.');
+    const values = { name: name.trim(), yield: yieldNum, items, packagingPerUnit: pack, laborTotal: lab, extraTotal: extra, desiredMargin: m, ...(prepNum !== undefined ? { prepMinutes: prepNum } : {}) };
     try { recipeCost({ id: editingId ?? 'novo', ...values }, data.ingredients, cupSizeMl); } catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível calcular o custo desta receita.'); }
     if (editingId) {
       update(d => updateRecipe(d, editingId, values));
@@ -110,13 +113,14 @@ export function RecipesPage({ data, update, inform }: PageProps) {
             <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setShowImport(v => !v)}><ClipboardPaste size={16} /> Colar lista</button>
             <button type="button" className="secondary" onClick={() => setShowConverter(v => !v)}><Ruler size={16} /> {showConverter ? 'Fechar conversor' : 'Conversor de medidas'}</button>
             </div>
-            {showConverter && <div className="card" style={{ marginTop: 12, background: '#fbfaf7' }}><MeasurementConverter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onCupSizeChange={n => update(d => ({ ...d, settings: { cupSizeMl: n } }))} onUse={useConversion} /></div>}
+            {showConverter && <div className="card" style={{ marginTop: 12, background: '#fbfaf7' }}><MeasurementConverter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onCupSizeChange={n => update(d => withSettings(d, { cupSizeMl: n }))} onUse={useConversion} /></div>}
           </div>
           <div className="form-grid">
             <Field label="Embalagem por unidade (R$)"><input type="number" min="0" step="0.01" value={packaging} onChange={e => setPackaging(e.target.value)} /></Field>
             <Field label="Mão de obra por receita (R$)"><input type="number" min="0" step="0.01" value={labor} onChange={e => setLabor(e.target.value)} /></Field>
             <Field label="Outros custos por receita (R$)"><input type="number" min="0" step="0.01" value={extras} onChange={e => setExtras(e.target.value)} /></Field>
             <Field label="Margem desejada (%)"><input type="number" min="0" max="99.99" step="any" value={margin} onChange={e => setMargin(e.target.value)} /></Field>
+            <Field label="Tempo de produção, em minutos (opcional)"><input type="number" min="1" max="10080" step="any" value={prep} onChange={e => setPrep(e.target.value)} placeholder="Ex.: 120" /></Field>
           </div>
           <div style={{ display: 'flex', gap: 8 }}><button type="submit" className="primary" disabled={!data.ingredients.length}><Save size={17} /> {editingId ? 'Salvar alterações' : 'Salvar receita'}</button>{editingId && <button type="button" className="secondary" onClick={resetForm}><X size={16} /> Cancelar</button>}</div>
         </form>

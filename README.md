@@ -18,7 +18,7 @@ npm run build
 npm test
 ```
 
-**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 341/341. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
+**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 380/380. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`), o motor de conversão e `validateBackup`; a interface não tem testes automatizados (o fluxo do conversor e da importação de receitas foi verificado manualmente no navegador).
 
 ## Estrutura
 
@@ -32,7 +32,7 @@ npm test
 - `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `priceRecipe`, `cupSizeOf`, tipos `Page`/`PageProps`).
 - `src/features/recipe-import/`: importação de receita por texto. `parse.ts` (só lê o texto, sem conversões), `resolve.ts` (liga o texto ao motor de conversão, às referências e aos ingredientes cadastrados; `analyzeRow` e `buildImport`) e `components/RecipeTextImporter.tsx`.
 - `shared/publicQuote.ts` e `worker/`: contrato público do orçamento e Worker de compartilhamento (ver seção acima).
-- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `worker-auth.test.ts`, `sync-server.test.ts`, `sync-engine.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
+- `tests/`: `pricing.test.ts`, `convert.test.ts`, `dataset.test.ts`, `payments.test.ts`, `schedule.test.ts`, `settings-schedule.test.ts`, `save-queue.test.ts`, `order-cost.test.ts`, `recipe-parse.test.ts`, `recipe-import.test.ts`, `public-quote.test.ts`, `worker.test.ts`, `worker-license.test.ts`, `worker-auth.test.ts`, `sync-server.test.ts`, `sync-engine.test.ts`, `license-client.test.ts`, `edit.test.ts` e `backup.test.ts`.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
 
@@ -46,6 +46,10 @@ npm test
 - Cadastro e **edição** de encomendas (cliente, receita, quantidade, preço unitário, data e sinal), mudança de status e cópia do texto de orçamento para WhatsApp. Editar uma encomenda mantém o status e a data de criação, não sobrescreve o preço negociado ao trocar a receita e rejeita sinal maior que o total. Encomendas podem ser **excluídas** (com confirmação mostrando cliente e valor); isso libera a exclusão da receita, que continua bloqueada enquanto houver pedidos ligados a ela.
 - **Importação de receita por texto** (botão "Colar lista" na página de receitas): cole os ingredientes copiados da internet, um por linha. O interpretador (`features/recipe-import/parse.ts`) entende quantidades como `2`, `0,5`, `1/2`, `½`, `1 ½`, `1 1/2`, `1,5`, `meia`, `duas` e intervalos (`2 a 3`, usa o menor valor e avisa); unidades como xícara, xícara (chá), colher (sopa), colher de chá, g, kg, mL, L e unidade (com variações de escrita); e trata "a gosto", "quanto baste", "q.b." e "óleo para fritar" como quantidade indefinida. Os nomes são ligados aos ingredientes cadastrados por nome ou sinônimo (ex.: "fermento em pó", "fermento químico" e "pó Royal" são o mesmo). Uma **tabela editável** mostra quantidade, medida, ingrediente cadastrado, peso/volume convertido (≈ quando aproximado) e a referência usada; linhas incompletas ficam em "Revisar" e **não entram** na receita. Só ao clicar em "Adicionar" os itens vão para o formulário da receita (com a medida original preservada) e só ao "Salvar receita" são guardados. Se o ingrediente cadastrado não tem densidade/peso por unidade e há referência, ela é gravada no cadastro ao confirmar (a tela avisa quais). Sem IA externa e sem bibliotecas de parsing.
 - **Custo histórico por encomenda:** o custo unitário é registrado ao criar o pedido e não muda quando ingredientes ou receitas são alterados. Pedidos anteriores sem registro aparecem como "custo estimado com os preços atuais". Gravações no IndexedDB são serializadas (a mais antiga nunca sobrescreve a mais nova), e backups são validados com rigor (ids duplicados, relacionamentos, valores e datas). Veja `docs/ETAPA_1_PROGRESSO.md`.
+- **Recebimentos:** além do sinal, cada encomenda aceita pagamentos parciais (valor, data, meio opcional, observação), com histórico e saldo pendente. O total recebido nunca passa do total da encomenda (não há crédito nem reembolso) e o total do pedido não pode ser reduzido abaixo do que já foi recebido.
+- **Agenda:** entregas atrasadas, de hoje e dos próximos dias, com status editável e saldo a receber; orçamentos ficam de fora por padrão.
+- **Análise de prazo (estimativa):** com o tempo de produção da receita e a capacidade diária (Configurações), mostra a carga acumulada por entrega (folga, apertado, sobrecarga) e uma dica ao registrar o pedido. É uma **estimativa simples, não uma garantia de entrega**; pedidos sem tempo informado não entram na conta.
+- **Configurações do negócio:** nome e telefone (usados nos orçamentos), capacidade diária e dias de trabalho.
 - Armazenamento local no IndexedDB e exportação/importação de backup JSON.
 - Testes unitários do domínio de precificação, das funções de edição e da validação de backup.
 

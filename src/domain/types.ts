@@ -8,7 +8,7 @@ export type MeasureUnit = Unit | 'xic' | 'cs' | 'cc';
 export type Ingredient = { id: string; name: string; purchaseQuantity: number; unit: Unit; purchasePrice: number; densityGPerMl?: number; gramsPerUnit?: number };
 /** unit ausente = mesma unidade de compra do ingrediente (dados anteriores à conversão). */
 export type RecipeItem = { ingredientId: string; quantity: number; unit?: MeasureUnit };
-export type Recipe = { id: string; name: string; yield: number; items: RecipeItem[]; packagingPerUnit: number; laborTotal: number; extraTotal: number; desiredMargin: number };
+export type Recipe = { id: string; name: string; yield: number; items: RecipeItem[]; packagingPerUnit: number; laborTotal: number; extraTotal: number; desiredMargin: number; /** Minutos para produzir UMA receita (rendimento completo); opcional, usado só na análise de prazo. */ prepMinutes?: number };
 /**
  * Custo unitário da receita NO MOMENTO em que a encomenda foi registrada. Nunca é recalculado com preços atuais.
  * Ausente em encomendas anteriores ao registro de custos (ou quando o custo não era calculável): nesses casos
@@ -22,7 +22,17 @@ export type Payment = { id: string; amount: number; /** AAAA-MM-DD */ receivedAt
 export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; costSnapshot?: CostSnapshot;
   /** Recebimentos posteriores ao sinal (`deposit`). Ausente = nenhum. */
   payments?: Payment[] };
-export type Settings = { cupSizeMl: number };
+export type Settings = {
+  cupSizeMl: number;
+  /** Dados do negócio, usados nos orçamentos compartilhados. */
+  businessName?: string;
+  /** Somente dígitos, com DDI/DDD (ex.: 5541999990000). */
+  businessPhone?: string;
+  /** Minutos de produção disponíveis por dia de trabalho. */
+  dailyCapacityMinutes?: number;
+  /** Dias de trabalho (0 = domingo … 6 = sábado). Padrão: segunda a sábado. */
+  workWeekdays?: number[];
+};
 /**
  * Versão 2: encomendas podem ter `costSnapshot` (versão 1, sem snapshot, é migrada sem inventar custos históricos).
  * Versão 3: encomendas podem ter `payments` (sem mudança nos dados existentes: o sinal continua em `deposit`).

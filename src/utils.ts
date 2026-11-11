@@ -2,7 +2,7 @@ import { recipeCost } from './domain/pricing';
 import type { DataSet, Recipe, Unit } from './domain/types';
 import { DEFAULT_CUP_ML } from './features/measurement/convert';
 
-export type Page = 'dashboard' | 'ingredients' | 'recipes' | 'orders' | 'converter' | 'settings' | 'backup';
+export type Page = 'dashboard' | 'ingredients' | 'recipes' | 'orders' | 'agenda' | 'converter' | 'settings' | 'backup';
 export type PageProps = {
   data: DataSet;
   update: (fn: (prev: DataSet) => DataSet) => void;
@@ -21,3 +21,9 @@ export function priceRecipe(r: Recipe, d: DataSet): Priced {
   try { return { ok: true, cost: recipeCost(r, d.ingredients, cupSizeOf(d)) }; }
   catch (e) { return { ok: false, message: e instanceof Error ? e.message : 'Não foi possível calcular o custo.' }; }
 }
+
+/** Atualiza parte das configurações sem perder as demais (nome do negócio, capacidade, xícara...). */
+export const withSettings = (d: DataSet, patch: Partial<NonNullable<DataSet['settings']>>): DataSet => ({ ...d, settings: { cupSizeMl: DEFAULT_CUP_ML, ...d.settings, ...patch } });
+
+/** Data de hoje (AAAA-MM-DD) no fuso do dispositivo. */
+export const localToday = (now: Date = new Date()): string => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
