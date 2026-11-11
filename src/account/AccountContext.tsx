@@ -36,6 +36,8 @@ type Ctx = {
   syncNow(): Promise<void>;
   chooseMerge(): Promise<void>;
   adoptAccountData(): Promise<void>;
+  /** Aviso a mostrar na tela de entrada quando a sessão foi perdida (por exemplo, o servidor não reconheceu o cookie). */
+  authNotice: string;
   conflicts: ConflictRecord[];
   /** Remove os avisos já tratados. Pendências FINANCEIRAS sem decisão nunca são dispensadas. */
   dismissConflicts(): void;
@@ -64,6 +66,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const [sync, setSync] = useState<SyncState>({ phase: 'idle', blocked: null });
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [networkDown, setNetworkDown] = useState(false);
+  const [authNotice, setAuthNotice] = useState('');
 
   const dataRef = useRef(data); dataRef.current = data;
   const metaRef = useRef<SyncMeta | null>(null); // null = ainda não carregado: não sincroniza
@@ -74,7 +77,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const sessionRef = useRef<SessionInfo | undefined>(undefined);
   sessionRef.current = session;
 
-  const setSession = useCallback((s: SessionInfo | undefined) => { csrfRef.current = s?.csrfToken; setSessionState(s); setStatus(s ? 'signed-in' : 'signed-out'); }, []);
+  const setSession = useCallback((s: SessionInfo | undefined) => { if (s) setAuthNotice(''); csrfRef.current = s?.csrfToken; setSessionState(s); setStatus(s ? 'signed-in' : 'signed-out'); }, []);
   const entitled = status === 'signed-in' && session?.license?.status === 'active';
 
   useEffect(() => { loadSyncMeta().then(m => { metaRef.current = m; setConflicts(m.conflicts); }).catch(() => { metaRef.current = emptyMeta(); }); }, []);
@@ -122,7 +125,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
         setData(cur => { const next = rebaseLocal(cur, started, r.local); lastApplied.current = next; return next; });
         await saveSyncMeta(meta).catch(() => undefined);
       }
-      if (r.status === 'unauthorized') { setSession(undefined); setSync({ phase: 'idle', blocked: null }); return; }
+      if (r.status === 'unauthorized') { setSession(undefined); setAuthNotice('Sua sessão não foi reconhecida pelo servidor (expirou, foi encerrada ou o navegador não enviou o cookie). Entre novamente.'); setSync({ phase: 'idle', blocked: null }); return; }
       if (r.status === 'forbidden') {
         // Licença revogada (ou conta sem licença): relê a sessão para o app refletir a perda do direito. Os dados locais ficam intactos.
         const cur = await auth?.currentSession();
@@ -170,7 +173,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
       setSync(s => ({ ...s, blocked: null }));
       await run();
     },
-    conflicts,
+    authNotice, conflicts,
     dismissConflicts() {
       if (!metaRef.current) return;
       const kept = metaRef.current.conflicts.filter(isOpenFinancial); // dinheiro pendente nunca some em silêncio

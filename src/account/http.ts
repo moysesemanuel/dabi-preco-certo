@@ -8,7 +8,9 @@ export const REQUIRE_LOGIN: boolean = import.meta.env.VITE_REQUIRE_LOGIN === 'on
 export function safeApiBase(url: string | undefined): string | undefined {
   if (!url) return undefined;
   try {
-    const u = new URL(url);
+    // `same-origin`: a API é servida na MESMA origem do app (proxy do Vite em desenvolvimento, ou rota do próprio site). O cookie de
+    // sessão fica no mesmo site do app, sem depender de cookies entre sites. Vale a mesma regra de https/localhost.
+    const u = url.trim() === 'same-origin' ? new URL(window.location.origin) : new URL(url);
     const local = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
     if (u.protocol !== 'https:' && !(u.protocol === 'http:' && local)) return undefined;
     return u.origin;

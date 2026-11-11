@@ -46,6 +46,18 @@ Sem `VITE_API_URL`, o app funciona inteiro neste dispositivo (IndexedDB). A pág
 
 O estado local do D1 fica em `worker/.wrangler/` (ignorado pelo git). Apague a pasta para recomeçar do zero.
 
+## Testar contra a homologação a partir do computador local
+
+Não use `VITE_API_URL=https://...workers.dev` direto com o app em `127.0.0.1`: são **sites diferentes** e o cookie de sessão (`HttpOnly; Secure; SameSite=Lax`) não acompanha as chamadas entre sites. O código é aceito, mas a sessão não é reconhecida e a sincronização devolve 401 (foi a causa do login "que volta para a tela de entrada").
+
+Use o proxy do Vite (só desenvolvimento), que deixa app e API na mesma origem:
+
+```bash
+npm run dev:staging      # http://127.0.0.1:5174  →  /api repassado para a API de homologação
+```
+
+Equivale a `DEV_API_PROXY_TARGET=<url da API> VITE_API_URL=same-origin VITE_REQUIRE_LOGIN=on vite --host 127.0.0.1`. O proxy só troca o nome do cookie (`__Host-dabi_session` ↔ `dabi_session`) e remove `Secure` na ida, porque o navegador local fala http; `HttpOnly`, `SameSite=Lax`, a checagem de `Origin` e o token CSRF continuam valendo. Abra sempre pelo **mesmo endereço** (`127.0.0.1` **ou** `localhost`, não os dois alternados: o cookie é por nome de host) e confirme que a origem usada está em `ALLOWED_ORIGINS` da API (`http://127.0.0.1:5174` e/ou `http://localhost:5174`). Para outra API, use as variáveis acima manualmente.
+
 ## Comandos úteis
 
 | Comando | Para quê |

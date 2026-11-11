@@ -41,7 +41,12 @@ export function AccountPanel({ inform }: { inform: (m: string) => void }) {
     setBusy(true); setError('');
     const r = await acc.auth.verifyCode({ email: email.trim(), code: code.trim(), deviceLabel: label.trim() || undefined, ...(replaceSessionId ? { replaceSessionId } : {}) });
     setBusy(false);
-    if (r.ok) { acc.setSession(r.value); setStep('email'); setCode(''); inform('Você entrou na sua conta.'); return; }
+    if (r.ok) {
+      // Só vale como "entrou" se o navegador realmente guardou a sessão: confirma lendo a sessão atual (cookie) ANTES de avisar o sucesso.
+      const check = await acc.auth.currentSession();
+      if (!check.ok) { setError(check.reason === 'network' ? AUTH_MESSAGES.network : AUTH_MESSAGES['session-not-kept']); return; }
+      acc.setSession(check.value); setStep('email'); setCode(''); inform('Você entrou na sua conta.'); return;
+    }
     if (r.reason === 'device-limit') { setLimitDevices(r.sessions); setStep('devices'); return; }
     setError(AUTH_MESSAGES[r.reason]);
   }
@@ -85,5 +90,6 @@ export function AccountPanel({ inform }: { inform: (m: string) => void }) {
       <button type="button" className="secondary" onClick={() => { setStep('email'); setError(''); }}>Cancelar</button>
     </div>}
     {error && <div className="notice error" role="alert">{error}</div>}
+    {!error && acc.authNotice && <div className="notice warn" role="alert">{acc.authNotice}</div>}
   </section>;
 }

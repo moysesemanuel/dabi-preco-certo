@@ -186,3 +186,14 @@ Problema: `licenses.ts` usava sempre o banco `dabi-orcamentos` sem `--env`, ent�
 - Novo `[env.restore]` em `wrangler.toml` para ensaiar restauração sem tocar nos bancos reais.
 - `tests/admin-cli.test.ts` (62 testes) valida os argumentos exatos passados ao Wrangler (com `exec` simulado, sem acessar banco algum), as recusas e a coerência com `wrangler.toml`/`package.json`.
 - Exemplos corrigidos em README, `worker/README.md`, `DESENVOLVIMENTO`, `IMPLANTACAO_HOMOLOGACAO`, `BACKUP_E_RECUPERACAO` e `AMBIENTES_E_VARIAVEIS`. O restore antigo (`d1 execute dabi-orcamentos-restauracao` sem config) também estava incorreto: o banco não existia no `wrangler.toml`.
+
+## Correção: login aceito, mas a tela de login continuava (homologação)
+
+**Causa raiz (comprovada por teste):** app em `http://127.0.0.1:5174` e API em `*.workers.dev` são sites diferentes. O servidor aceitava o código e devolvia a sessão no corpo, mas o cookie `SameSite=Lax` não acompanhava as chamadas seguintes (fetch entre sites). Resultado: o app mostrava "Você entrou", a sincronização seguinte recebia 401 e o `AccountProvider` tratava isso como sessão encerrada, voltando ao login sem explicação. O servidor, o CORS e o CSRF estavam corretos; não houve alteração neles.
+
+**Correção**
+- `vite.config.ts`: proxy `/api` **só no `vite dev`** (`DEV_API_PROXY_TARGET`), com `VITE_API_URL=same-origin`; reescreve nome do cookie e `Secure` apenas na ida/volta local, sem tocar em `HttpOnly`, `SameSite`, `Origin` nem CSRF. Comando: `npm run dev:staging`.
+- Login: depois do código aceito, o app confirma a sessão (`GET /api/auth/session`) **antes** de abrir o app e de avisar o sucesso; se o navegador não guardou o cookie, mostra o motivo.
+- Sessão recusada na sincronização: volta ao login **com explicação** (sem toast falso, sem loop).
+- Testes: `tests/ui/login-flow.test.tsx` (3 dos 5 falham no código antigo; cookie guardado/ não guardado/ perdido, recarregar a página, `same-origin`) e `tests/dev-proxy.test.ts`. Verificado também no Chrome contra o Worker local através do proxy (login, cookie HttpOnly invisível ao JavaScript, recarregar mantém a sessão, sincronizado).
+- Produção: nada foi afrouxado. Aviso: app e API de homologação/produção precisam estar no mesmo site (domínios próprios do mesmo domínio registrável).

@@ -40,7 +40,7 @@ As migrações só **criam** tabelas e colunas (nenhuma apaga dados). Exporte um
 npx wrangler deploy --env staging --config worker/wrangler.toml
 VITE_API_URL=https://api-hml.seudominio VITE_REQUIRE_LOGIN=on npm run build   # gera dist/ e dist/_headers; publicar no Cloudflare Pages
 ```
-`VITE_API_URL` precisa ser a origem **exata** da API: o build a coloca em `connect-src` da CSP (`dist/_headers`). Use um subdomínio do **mesmo domínio registrável** do app (cookie `SameSite=Lax`), ex.: `app-hml.dabitech.com.br` e `api-hml.dabitech.com.br`, e coloque só a origem do app em `ALLOWED_ORIGINS`.
+`VITE_API_URL` precisa ser a origem **exata** da API: o build a coloca em `connect-src` da CSP (`dist/_headers`). Use um subdomínio do **mesmo domínio registrável** do app (cookie `SameSite=Lax`; `*.pages.dev` e `*.workers.dev` são sites **diferentes** entre si, então app e API publicados só nesses endereços não conseguem compartilhar a sessão — use domínios próprios ou o proxy local descrito em `DESENVOLVIMENTO.md`), ex.: `app-hml.dabitech.com.br` e `api-hml.dabitech.com.br`, e coloque só a origem do app em `ALLOWED_ORIGINS`.
 Cabeçalhos aplicados pelo Pages a partir de `_headers`: CSP restritiva (scripts só do próprio site, sem iframes), HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` fechada, COOP/CORP e cache longo só em `/assets/*`. As fontes são servidas localmente (sem Google Fonts).
 Configure rota/domínio do Worker e o DNS no painel da Cloudflare (manual).
 

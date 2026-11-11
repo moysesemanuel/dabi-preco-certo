@@ -3,7 +3,7 @@ import { apiCall, field } from './http';
 export type LicenseInfo = { status: 'active' | 'revoked'; quotaActive: number; quotaDaily: number };
 export type SessionInfo = { user: { id: string; email: string }; csrfToken: string; sessionId: string; license: LicenseInfo | null };
 export type DeviceInfo = { id: string; deviceLabel: string | null; createdAt: string; lastSeenAt: string; current?: boolean };
-export type AuthFailure = 'network' | 'invalid-code' | 'rate-limited' | 'no-license' | 'unauthorized' | 'email-not-configured' | 'auth-not-configured' | 'invalid-request' | 'unexpected';
+export type AuthFailure = 'network' | 'session-not-kept' | 'invalid-code' | 'rate-limited' | 'no-license' | 'unauthorized' | 'email-not-configured' | 'auth-not-configured' | 'invalid-request' | 'unexpected';
 export type AuthResult<T> = ({ ok: true; value: T }) | { ok: false; reason: AuthFailure; retryAfter?: number } | (T extends SessionInfo ? { ok: false; reason: 'device-limit'; sessions: DeviceInfo[] } : never);
 
 const isSession = (b: unknown): b is SessionInfo => !!b && typeof b === 'object' && typeof (b as SessionInfo).csrfToken === 'string' && typeof (b as SessionInfo).sessionId === 'string' && typeof (b as SessionInfo).user?.email === 'string';
@@ -61,6 +61,7 @@ export type AuthClient = ReturnType<typeof createAuthClient>;
 
 export const AUTH_MESSAGES: Record<AuthFailure | 'device-limit', string> = {
   network: 'Sem conexão com o servidor. Verifique a internet e tente de novo.',
+  'session-not-kept': 'O código foi aceito, mas este navegador não guardou a sessão (cookies bloqueados ou app e servidor em sites diferentes). Permita cookies para este site e tente de novo.',
   'invalid-code': 'Código inválido ou expirado. Peça um novo código.',
   'rate-limited': 'Muitas tentativas. Aguarde um pouco e tente novamente.',
   'no-license': 'Não há licença ativa para este e-mail.',
