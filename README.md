@@ -25,7 +25,9 @@ npm test
 - `src/domain/types.ts`: tipos `Ingredient`, `Recipe`, `Order` e `DataSet` (`schemaVersion: 1`).
 - `src/domain/pricing.ts`: `recipeCost` (custo total, unitário e preço sugerido; margem **sobre o preço de venda**: `custo / (1 − margem%)`), `normalizeQuantity` (kg↔g, l↔ml) e `money`.
 - `src/storage/db.ts`: persistência no IndexedDB (`pedidocerto-v1`) e `validateBackup`.
-- `src/App.tsx`: estado e interface das 5 páginas (Visão geral, Ingredientes, Receitas e preços, Encomendas, Backup).
+- `src/App.tsx`: casca da aplicação (carregar/salvar dados, navegação, avisos). Repassa `data`, `update`, `inform` e `focus` às páginas.
+- `src/pages/`: uma página por arquivo (`DashboardPage`, `IngredientsPage`, `RecipesPage`, `OrdersPage`, `BackupPage`), cada uma com seu próprio estado de formulário.
+- `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `canPrice`, tipos `Page`/`PageProps`).
 - `tests/pricing.test.ts`: testes unitários do domínio.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
