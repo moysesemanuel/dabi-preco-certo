@@ -5,8 +5,8 @@ Este roteiro descreve como publicar o ambiente de **homologação**. Nada daqui 
 ## 0. Decisões e pré-requisitos
 
 - [ ] Conta Cloudflare com Workers e D1 (confirme os limites do plano gratuito e o que muda no plano pago; o projeto foi pensado para custo mínimo: bundle do Worker ~81 KiB).
-- [ ] **Provedor de e-mail transacional** escolhido e adaptador escrito (`worker/src/email.ts`). Sem isso o login em homologação só funciona com `EMAIL_ADAPTER=dev` (código no terminal; **só** com `wrangler dev`, nunca em ambiente publicado).
-- [ ] Hospedagem do frontend (pasta `dist/` é estática; qualquer hospedagem estática serve). Defina os cabeçalhos de segurança dela.
+- [x] **Provedor de e-mail: Resend** (adaptador pronto em `worker/src/email.ts`, testado só com API simulada). Domínio de envio `mail.dabitech.com.br` já verificado (São Paulo, sa-east-1); remetente `DaBi Preço Certo <acesso@mail.dabitech.com.br>`. Falta apenas a **chave de API** (seção 2). O adaptador `dev` só funciona com origens locais e nunca em ambiente publicado.
+- [ ] Hospedagem do frontend: **Cloudflare Pages** (projeto estático apontando para `dist/`). O build gera `dist/_headers` (CSP, HSTS, etc.) — veja a seção 4.
 - [ ] Domínios de homologação (app e links de orçamento) no **mesmo site** (mesmo domínio registrável), por causa do cookie `SameSite=Lax`. Ex.: `app-hml.seudominio` e `orcamento-hml.seudominio`.
 
 ## 1. Banco (D1)
@@ -23,7 +23,9 @@ Edite `[env.staging.vars]` com os endereços reais (`PUBLIC_BASE_URL`, `ALLOWED_
 
 ```bash
 npx wrangler secret put AUTH_SECRET --env staging --config worker/wrangler.toml     # valor aleatório e longo
+npx wrangler secret put RESEND_API_KEY --env staging --config worker/wrangler.toml  # chave do Resend (re_...), colada no prompt
 ```
+`EMAIL_ADAPTER="resend"` e `EMAIL_FROM` já estão em `[env.staging.vars]`. **Crie a chave no Resend com permissão só de envio ("Sending access") restrita ao domínio `mail.dabitech.com.br`** e use uma chave diferente para produção. Sem `RESEND_API_KEY` (ou com `EMAIL_FROM` inválido) o login responde 503 `EMAIL_NOT_CONFIGURED`: nada finge ser enviado. Nunca coloque a chave em arquivo versionado, no app ou em `VITE_*`.
 
 ## 3. Migrações
 
@@ -36,8 +38,10 @@ As migrações só **criam** tabelas e colunas (nenhuma apaga dados). Exporte um
 
 ```bash
 npx wrangler deploy --env staging --config worker/wrangler.toml
-VITE_API_URL=https://orcamento-hml.seudominio npm run build       # publicar dist/ na hospedagem do frontend
+VITE_API_URL=https://api-hml.seudominio VITE_REQUIRE_LOGIN=on npm run build   # gera dist/ e dist/_headers; publicar no Cloudflare Pages
 ```
+`VITE_API_URL` precisa ser a origem **exata** da API: o build a coloca em `connect-src` da CSP (`dist/_headers`). Use um subdomínio do **mesmo domínio registrável** do app (cookie `SameSite=Lax`), ex.: `app-hml.dabitech.com.br` e `api-hml.dabitech.com.br`, e coloque só a origem do app em `ALLOWED_ORIGINS`.
+Cabeçalhos aplicados pelo Pages a partir de `_headers`: CSP restritiva (scripts só do próprio site, sem iframes), HSTS, `nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy` fechada, COOP/CORP e cache longo só em `/assets/*`. As fontes são servidas localmente (sem Google Fonts).
 Configure rota/domínio do Worker e o DNS no painel da Cloudflare (manual).
 
 ## 5. Dados de teste (nunca clientes reais)
@@ -50,7 +54,7 @@ npm run licenses -- issue --remote --email teste1@seudominio --label "homologaç
 ## 6. Testes de fumaça
 
 1. `GET /healthz` do Worker responde `{"ok":true}`.
-2. Login por código com o e-mail de teste (requer provedor de e-mail real).
+2. Login por código com o e-mail de teste: o e-mail chega pelo Resend (confira o painel do Resend e a pasta de spam; verifique SPF/DKIM "pass" no cabeçalho). Teste também: pedir o código duas vezes em 60 s (só 1 e-mail), código errado 5 vezes (queima o código) e e-mail sem licença (nenhum e-mail).
 3. Criar dados, sincronizar, abrir em um segundo navegador/dispositivo e conferir.
 4. Terceiro dispositivo: deve pedir para desconectar um.
 5. Publicar um orçamento, abrir o link **sem sessão** (aba anônima): sem custos, sem dados do cliente; revogar e ver `410`.
@@ -61,3 +65,6 @@ npm run licenses -- issue --remote --email teste1@seudominio --label "homologaç
 ## 7. Critérios para sair da homologação
 
 Todos os itens ⬜ de **Operação** em `SEGURANCA_CHECKLIST.md` resolvidos ou aceitos por escrito, testes de fumaça aprovados e restauração de backup ensaiada.
+
+## 8. Primeiro login real — o que precisa estar pronto
+Veja a lista objetiva em `docs/ETAPA_1_PROGRESSO.md` ("Revisão do PR #1"): bancos D1, `AUTH_SECRET`, `RESEND_API_KEY`, domínios/rotas, publicação do Worker e do Pages, migrações e uma licença de teste com o seu e-mail.

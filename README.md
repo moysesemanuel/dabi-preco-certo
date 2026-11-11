@@ -66,7 +66,7 @@ npm test
 ## Limitações deliberadas desta etapa
 
 - Não é uma PWA instalável nem há suporte offline garantido após fechar/reabrir o navegador; isso exige service worker e testes adicionais.
-- Sem login, servidor, pagamentos, licença ou sincronização entre dispositivos.
+- No modo local não há login nem servidor; pagamentos e cobrança não existem nesta versão (a conta/sincronização é opcional, veja abaixo).
 - Densidades e equivalências por unidade são informadas por ingrediente; a tabela de referências é pequena (9 itens: farinha de trigo, açúcar refinado e de confeiteiro, manteiga, óleo vegetal, água, leite integral, ovo e fermento químico, com sinônimos), aproximada e não é aplicada automaticamente no cadastro (só por clique ou ao confirmar uma importação). A equivalência por unidade na interface é só em gramas (o motor também aceita mL por unidade).
 - Xícara e colheres são convenções culinárias (240/15/5 mL), não medidas físicas exatas; por isso os resultados são marcados como aproximados (≈).
 - A exclusão de ingredientes e receitas é bloqueada enquanto houver dependentes (receitas que usam o ingrediente; encomendas que usam a receita). A exclusão de encomendas é definitiva, sem lixeira nem desfazer (a confirmação é o único aviso; exporte um backup antes de apagar dados importantes).
@@ -82,7 +82,7 @@ O app é local-first e **funciona inteiro sem conta e sem internet**. Existe um 
 - **Sincronização:** o servidor guarda a versão oficial dos dados e o dispositivo mantém cópia offline. Alterações offline são enviadas depois; edições do mesmo item em dois dispositivos nunca se perdem em silêncio (a versão do servidor vale e a sua fica guardada para você refazer). Dados de outra conta no mesmo dispositivo exigem decisão do usuário.
 - **Orçamento por link** (botão "Orçamento por link" em cada encomenda): prévia, avisos de limitação, publicação em link curto (`/o/<id>`), copiar e compartilhar no WhatsApp; em Configurações, lista dos links publicados e **revogação**. O orçamento público nunca leva custo, margem nem dados do cliente.
 
-Sem `VITE_API_URL` o app roda só localmente. **Ainda não está pronto para produção** (falta o provedor de e-mail, deploy, DNS e outras pendências); veja [`worker/README.md`](worker/README.md) e `docs/ETAPA_1_PROGRESSO.md`. Comandos: `npm run worker:migrate`, `npm run worker:dev`, `npm run licenses -- <comando>`.
+Sem `VITE_API_URL` o app roda só localmente. Com `VITE_REQUIRE_LOGIN=on` (versão comercial) o app só abre com conta e licença ativa, sem apagar dados locais ([`docs/ACESSO_E_TRANSICAO.md`](docs/ACESSO_E_TRANSICAO.md)). O e-mail dos códigos usa o **Resend** (adaptador pronto; falta a chave de API) e o build gera `dist/_headers` para o Cloudflare Pages. Recebimentos em conflito entre dispositivos exigem reconciliação explícita. **Ainda não está pronto para produção** (falta deploy, DNS, chave do Resend e outras pendências); veja [`worker/README.md`](worker/README.md) e `docs/ETAPA_1_PROGRESSO.md`. Comandos: `npm run worker:migrate`, `npm run worker:dev`, `npm run licenses -- <comando>`.
 
 ## Limitações da importação por texto
 

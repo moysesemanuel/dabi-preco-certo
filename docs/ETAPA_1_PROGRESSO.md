@@ -151,3 +151,27 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 - **Limites padrão por licença:** 100 links ativos, 30 novos links por dia, 20 escritas/min, 60 sincronizações/min; **até 2 dispositivos**.
 - **Escolha do provedor de e-mail e da hospedagem** (custos).
 - Manter ou remover o modo antigo de chave de licença no servidor (hoje desligado por padrão).
+
+---
+
+# Revisão do PR #1 (decisões aprovadas) — executada
+
+Decisões aprovadas: login sem senha por código; contas só com licença ativa; 2 dispositivos; cotas 100/30; Cloudflare Pages + Workers + D1; **Resend** (plano gratuito); chave antiga desligada; servidor autoritativo com preservação e aviso. Nada foi publicado, nenhum DNS alterado, nenhum e-mail real enviado, nenhuma credencial real usada.
+
+| # | Atividade | Resultado |
+|---|---|---|
+| 1 | Adaptador Resend | `createResendSender` (token só do segredo `RESEND_API_KEY`, `EMAIL_FROM` por variável validada, HTML responsivo + texto, limite de tempo de 8 s, 429 → `Retry-After`, erros genéricos sem chave/código/resposta). `dev` só com origens locais. Testes com `fetch` simulado (`tests/worker-email.test.ts`). |
+| 2 | Acesso sem login | `VITE_REQUIRE_LOGIN=on` fecha a interface sem conta/licença, preserva e permite exportar os dados locais, tolerância offline de 7 dias. `docs/ACESSO_E_TRANSICAO.md`; `tests/ui/gate.test.tsx`. |
+| 3 | Recebimentos concorrentes | Perda financeira vira pendência persistente (`ConflictRecord.financial`) com os valores; só sai por "Somar" (respeita o total) ou "Manter o servidor" (confirmação explícita). Encomenda excluída no outro aparelho pode ser recuperada como cópia. Aviso fixo em Encomendas e no topo; "Dispensar avisos" nunca remove pendência financeira. `tests/financial-reconcile.test.ts` (servidor real, dois dispositivos). |
+| 4 | Revogação | Testado em todas as rotas protegidas (sync, orçamentos, licença), efeito imediato, reativação, novos logins, derrubada de sessões. O cliente detecta 403 e fecha o acesso. `tests/worker-lifecycle.test.ts`. |
+| 5 | Sessões e limites | Renovação por uso (30 d de inatividade, teto 90 d); troca de dispositivo segura (código consumido antes de revogar); intervalo de 60 s entre envios; falha de envio descarta o código. |
+| 6 | Hospedagem estática | `scripts/generate-headers.mjs` gera `dist/_headers` no build (CSP com `connect-src` = origem da API, HSTS, etc.); fontes passaram a ser locais (`@fontsource-variable`), sem Google Fonts. Verificado no Chrome real com os cabeçalhos aplicados: app carrega, fontes locais, zero violações. `tests/static-headers.test.ts`. |
+| 7 | Verificações | Tipos (app e Worker) sem erros; **472 testes** (29 arquivos) passando; build; `npm audit` 0 vulnerabilidades; verificação de segredos; `wrangler deploy --dry-run --env staging` OK. |
+
+## Riscos remanescentes
+- O gate de login protege a interface, não os dados que já estão no navegador do próprio usuário (inerente ao local-first); a proteção real é o servidor.
+- Negação de login temporária por quem conhece um e-mail (cota por e-mail): mitigar com WAF/Turnstile na rota de código.
+- Remoção de recebimento feita aqui e ainda existente no servidor volta a valer (servidor vence), mas fica como pendência explícita; "somar" não repete a remoção — o usuário remove manualmente.
+- Plano gratuito do Resend tem limites diários/mensais de envio: falha vira 503 com `Retry-After`; acompanhe o consumo.
+- Tolerância offline é verificada no cliente (localStorage): serve para continuidade, não é controle de segurança.
+- E-mail de teste real (entregabilidade, SPF/DKIM/spam) só pode ser validado em homologação.

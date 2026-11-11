@@ -9,7 +9,10 @@ Estado verificado em `feat/etapa-1-beta`. ✅ = implementado e testado; ⬜ = pe
 - ✅ No máximo 2 dispositivos (atômico); revogação de sessões e de licenças.
 - ✅ Limites por e-mail e por código (defesa principal); por IP só como rede ampla; nunca bloqueio exclusivo por IP.
 - ✅ Respostas não revelam quais e-mails têm conta.
-- ⬜ Provedor de e-mail transacional (sem ele, não há login em produção).
+- ✅ Adaptador Resend (testado com API simulada: 4xx/429/5xx, rede, tempo esgotado, sem vazar chave nem código). ⬜ Falta a chave real (`RESEND_API_KEY`) por ambiente.
+- ✅ Sessão: 30 dias de inatividade, teto de 90 dias, renovação por uso, nunca reativa sessão revogada; troca de dispositivo consome o código antes de derrubar o outro; intervalo de 60 s entre envios.
+- ✅ Revogação de licença bloqueia sync, orçamentos e verificação na próxima requisição (testado em todas as rotas); acesso comercial exige login (`ACESSO_E_TRANSICAO.md`).
+- ✅ Conflito financeiro (recebimentos): nunca descartado; vira pendência que exige "somar" ou "manter o servidor" explícito.
 - ⬜ Enumeração por tempo de resposta em "pedir código" (mitigada só pelo limite por e-mail).
 
 ## Dados
@@ -24,7 +27,7 @@ Estado verificado em `feat/etapa-1-beta`. ✅ = implementado e testado; ⬜ = pe
 - ✅ Página pública sem JavaScript, com todo texto escapado; CSP sem scripts, `noindex`, `no-store`, `Referrer-Policy: no-referrer`.
 - ✅ A API só aceita `https` (ou `http` em localhost) no app; chamadas com `credentials: include`, `no-store`, sem referrer.
 - ✅ Nada de segredo em URL, log ou resposta (testes espionam o `console`).
-- ⬜ Cabeçalhos de segurança do **site do app** (CSP, etc.) dependem da hospedagem escolhida para o frontend.
+- ✅ Cabeçalhos do **site do app** gerados no build (`dist/_headers`, Cloudflare Pages): CSP restritiva, HSTS, anti-iframe etc.; fontes locais. ⬜ Conferir em homologação com o domínio real.
 
 ## Operação
 - ✅ Licenças emitidas só por CLI local (sem endpoint público); a chave de licença antiga está desligada por padrão.
