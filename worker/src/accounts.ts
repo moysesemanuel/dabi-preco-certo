@@ -1,6 +1,10 @@
 /** Primitivas criptográficas e regras das contas. Tudo com Web Crypto; nenhum protocolo próprio de autenticação. */
 export const MAX_SESSIONS = 2;
-export const SESSION_TTL_DAYS = 30;
+/** A sessão vale por 30 dias de INATIVIDADE (cada uso a renova) e nunca passa de 90 dias desde o login: depois disso, novo código. */
+export const SESSION_IDLE_DAYS = 30;
+export const SESSION_MAX_DAYS = 90;
+/** Cooldown entre pedidos de código para o mesmo e-mail: dentro dele não se envia outro (não invalida o anterior). */
+export const CODE_RESEND_COOLDOWN_SECONDS = 60;
 export const CODE_TTL_MINUTES = 10;
 export const CODE_MAX_ATTEMPTS = 5;
 export const CODE_DIGITS = 8;

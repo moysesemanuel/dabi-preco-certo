@@ -12,7 +12,7 @@ export function respond(body: BodyInit | null, status: number, contentType: stri
   return new Response(body, { status, headers: { ...SECURITY_HEADERS, 'Content-Type': contentType, ...extra } });
 }
 export const json = (data: unknown, status = 200) => respond(JSON.stringify(data), status, 'application/json; charset=utf-8');
-export const apiError = (status: number, error: string, message: string) => json({ error, message }, status);
+export const apiError = (status: number, error: string, message: string, extra: Record<string, string> = {}) => respond(JSON.stringify({ error, message }), status, 'application/json; charset=utf-8', extra);
 export const html = (body: string, status = 200, head = false) => respond(head ? null : body, status, 'text/html; charset=utf-8');
 
 /** Lê o corpo JSON com limite real de tamanho (não confia só no Content-Length). */

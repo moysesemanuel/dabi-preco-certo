@@ -165,7 +165,7 @@ describe('Verificação do código e sessão', () => {
     const s = await login('bia@exemplo.com', 'Celular da Bia');
     expect(s.res.status).toBe(200);
     const setCookie = s.res.headers.get('set-cookie')!;
-    expect(setCookie).toMatch(/^__Host-dabi_session=[\w-]{40,}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=2592000; Secure$/);
+    expect(setCookie).toMatch(/^__Host-dabi_session=[\w-]{40,}; Path=\/; HttpOnly; SameSite=Lax; Max-Age=7776000; Secure$/);
     expect(s.body).toMatchObject({ user: { email: 'bia@exemplo.com' }, license: { status: 'active', quotaActive: 7, quotaDaily: 3 } });
     expect(String(s.body.csrfToken).length).toBeGreaterThan(20);
     const [user] = table('users');

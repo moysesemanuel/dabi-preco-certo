@@ -60,6 +60,10 @@ export async function revokeSession(db: D1Like, userId: string, sessionId: strin
   const r = await db.prepare('UPDATE sessions SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL').bind(now, sessionId, userId).run();
   return (r.meta.changes ?? 0) > 0;
 }
-export async function touchSession(db: D1Like, sessionId: string, now: string): Promise<void> {
-  await db.prepare('UPDATE sessions SET last_seen_at = ? WHERE id = ?').bind(now, sessionId).run();
+/** Registra o uso e renova a validade (inatividade). Nunca reativa uma sessão revogada. */
+export async function touchSession(db: D1Like, sessionId: string, now: string, expiresAt: string): Promise<void> {
+  await db.prepare('UPDATE sessions SET last_seen_at = ?, expires_at = ? WHERE id = ? AND revoked_at IS NULL').bind(now, expiresAt, sessionId).run();
 }
+/** Código ainda válido criado depois de `since` (para o intervalo mínimo entre envios). */
+export const recentOpenCode = (db: D1Like, email: string, since: string, now: string) =>
+  db.prepare('SELECT id FROM auth_codes WHERE email = ? AND used_at IS NULL AND expires_at > ? AND created_at > ? LIMIT 1').bind(email, now, since).first<{ id: string }>();

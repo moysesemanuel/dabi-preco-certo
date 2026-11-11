@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createEmailSender, createResendSender, RESEND_URL } from '../worker/src/email';
+import { createEmailSender, createResendSender, EmailSendError, RESEND_URL } from '../worker/src/email';
+import { loginCodeEmail } from '../worker/src/emailTemplates';
 import { createHandler } from '../worker/src/index';
 import { createLicenseAuthorizer } from '../worker/src/auth';
 import { createCompositeAuthorizer, createSessionAuthorizer } from '../worker/src/session';
@@ -61,6 +62,32 @@ describe('Adaptador Resend', () => {
   });
 });
 
+describe('Modelo do e-mail de login', () => {
+  const m = loginCodeEmail('01234567', 10);
+  it('traz texto simples e HTML responsivo com o mesmo código', () => {
+    expect(m.text).toContain('01234567'); expect(m.text).toContain('10 minutos');
+    expect(m.html).toContain('0123 4567'); expect(m.html).toContain('name="viewport"'); expect(m.html).toContain('max-width:480px');
+    expect(m.html).not.toMatch(/<script|<img|<a |https?:\/\//i); // sem rastreamento, scripts nem links
+  });
+  it('só aceita código de 8 dígitos (nada de texto livre no HTML)', () => {
+    for (const bad of ['1234567', '123456789', '1234567a', '<b>123456', '']) expect(() => loginCodeEmail(bad, 10)).toThrow();
+  });
+  it('o Resend recebe html e text juntos', async () => {
+    const { f, calls } = fakeFetch(ok);
+    await createResendSender(TOKEN, FROM, f).send({ to: 'bia@exemplo.test', ...m });
+    const body = JSON.parse(calls[0].init.body as string);
+    expect(body.html).toBe(m.html); expect(body.text).toBe(m.text);
+  });
+  it('429 do Resend: repassa o tempo de espera (limitado a 1 hora) e outros erros não levam tempo', async () => {
+    const a = await createResendSender(TOKEN, FROM, fakeFetch(() => new Response('', { status: 429, headers: { 'retry-after': '30' } })).f).send(msg).catch(e => e);
+    expect(a).toBeInstanceOf(EmailSendError); expect(a.retryAfterSeconds).toBe(30);
+    const b = await createResendSender(TOKEN, FROM, fakeFetch(() => new Response('', { status: 429, headers: { 'retry-after': '999999' } })).f).send(msg).catch(e => e);
+    expect(b.retryAfterSeconds).toBe(3600);
+    const c = await createResendSender(TOKEN, FROM, fakeFetch(() => new Response('', { status: 500, headers: { 'retry-after': '30' } })).f).send(msg).catch(e => e);
+    expect(c.retryAfterSeconds).toBeUndefined();
+  });
+});
+
 describe('Escolha do adaptador a partir do ambiente', () => {
   it('sem EMAIL_ADAPTER, ou resend incompleto/inválido: não configurado (nada é enviado)', async () => {
     const { f, calls } = fakeFetch(ok);
@@ -119,6 +146,7 @@ describe('Login por código usando o Resend simulado', () => {
     const { db, calls, request } = await setup(() => new Response('{"message":"quota"}', { status: 429 }));
     const r = await request('/api/auth/request-code', { email: 'bia@exemplo.test' });
     expect(r.status).toBe(503);
+    expect(r.headers.get('retry-after')).toBeNull();
     const text = await r.text();
     expect(text).toContain('EMAIL_SEND_FAILED');
     expect(text).not.toContain(TOKEN);

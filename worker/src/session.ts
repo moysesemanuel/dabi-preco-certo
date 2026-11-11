@@ -1,4 +1,4 @@
-import { sha256Hex, timingSafeEqual, SESSION_TTL_DAYS } from './accounts';
+import { addMs, sha256Hex, timingSafeEqual, SESSION_IDLE_DAYS, SESSION_MAX_DAYS } from './accounts';
 import { getSessionByTokenHash, licenseForUser, findUserById, touchSession, type AccountLicense, type SessionRow, type UserRow } from './accountStore';
 import { DEFAULT_LIMITS, type Authorizer } from './auth';
 import { consumeRateLimit, type D1Like } from './store';
@@ -26,7 +26,9 @@ export function sessionCookie(request: Request, token: string, maxAgeSeconds: nu
   return `${sessionCookieName(request)}=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAgeSeconds}${isHttps(request) ? '; Secure' : ''}`;
 }
 export const clearSessionCookie = (request: Request) => sessionCookie(request, '', 0);
-export const sessionMaxAgeSeconds = SESSION_TTL_DAYS * 86_400;
+/** O cookie dura o máximo absoluto; quem decide a validade (inatividade e teto) é o servidor, a cada requisição. */
+export const sessionMaxAgeSeconds = SESSION_MAX_DAYS * 86_400;
+export const sessionIdleMs = SESSION_IDLE_DAYS * 86_400_000;
 
 export type SessionFailure = { ok: false; status: 401 | 403; error: string; message: string };
 export type SessionContext = { session: SessionRow; user: UserRow; license: AccountLicense | null };
@@ -37,10 +39,15 @@ export async function resolveSession(request: Request, env: SessionEnv, now: Dat
   if (!token || token.length < 20 || token.length > 128) return invalid;
   const session = await getSessionByTokenHash(env.DB, await sha256Hex(token));
   const iso = now.toISOString();
-  if (!session || session.revoked_at || session.expires_at <= iso) return invalid;
+  if (!session || session.revoked_at || session.expires_at <= iso || addMs(session.created_at, SESSION_MAX_DAYS * 86_400_000) <= iso) return invalid;
   const user = await findUserById(env.DB, session.user_id);
   if (!user || user.disabled_at) return invalid;
-  if (now.getTime() - new Date(session.last_seen_at).getTime() > TOUCH_AFTER_MS) await touchSession(env.DB, session.id, iso);
+  // Renovação por uso: a validade vai para agora + 30 dias, limitada a 90 dias desde o login. Sessão revogada ou expirada nunca é renovada.
+  if (now.getTime() - new Date(session.last_seen_at).getTime() > TOUCH_AFTER_MS) {
+    const cap = addMs(session.created_at, SESSION_MAX_DAYS * 86_400_000);
+    const next = addMs(iso, sessionIdleMs);
+    await touchSession(env.DB, session.id, iso, next < cap ? next : cap);
+  }
   return { ok: true, ctx: { session, user, license: await licenseForUser(env.DB, user.id) } };
 }
 

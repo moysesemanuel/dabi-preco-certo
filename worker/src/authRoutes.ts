@@ -1,11 +1,12 @@
-import { addMs, CODE_DIGITS, CODE_TTL_MINUTES, generateNumericCode, hmacHex, MAX_SESSIONS, newCodeId, newSessionId, newUserId, normalizeDeviceLabel, normalizeEmail, randomToken, sha256Hex, timingSafeEqual } from './accounts';
+import { addMs, CODE_DIGITS, CODE_RESEND_COOLDOWN_SECONDS, CODE_TTL_MINUTES, generateNumericCode, hmacHex, MAX_SESSIONS, newCodeId, newSessionId, newUserId, normalizeDeviceLabel, normalizeEmail, randomToken, sha256Hex, timingSafeEqual } from './accounts';
 import {
   bindLicenseToUser, claimAttempt, createVerifiedUser, discardCode, findUserByEmail, insertSessionWithinLimit, latestOpenCode, licenseForEmail,
-  listActiveSessions, markCodeUsed, replaceCode, revokeSession, type AccountLicense, type SessionRow,
+  listActiveSessions, markCodeUsed, recentOpenCode, replaceCode, revokeSession, type AccountLicense, type SessionRow,
 } from './accountStore';
-import type { EmailSender } from './email';
+import { EmailSendError, type EmailSender } from './email';
+import { loginCodeEmail } from './emailTemplates';
 import { apiError, json, readJsonBody, respond } from './http';
-import { checkCsrf, clearSessionCookie, resolveSession, sessionCookie, sessionMaxAgeSeconds, type SessionEnv } from './session';
+import { checkCsrf, clearSessionCookie, resolveSession, sessionCookie, sessionIdleMs, sessionMaxAgeSeconds, type SessionEnv } from './session';
 import { consumeRateLimit } from './store';
 
 export type AuthEnv = SessionEnv & { AUTH_SECRET?: string };
@@ -48,15 +49,18 @@ export async function requestCode(request: Request, env: AuthEnv, deps: AuthDeps
   const license = await licenseForEmail(env.DB, email);
   if (!license || license.status !== 'active') return ok(); // sem conta/licença: mesma resposta, nenhum e-mail
 
-  const code = generateNumericCode();
   const iso = now.toISOString();
+  // Intervalo mínimo: um segundo clique (ou um robô) não gera outro e-mail nem invalida o código que acabou de ser enviado.
+  if (await recentOpenCode(env.DB, email, addMs(iso, -CODE_RESEND_COOLDOWN_SECONDS * 1000), iso)) return ok();
+  const code = generateNumericCode();
   const row = { id: newCodeId(), email, code_hash: await hmacHex(env.AUTH_SECRET, `${email}|${code}`), created_at: iso, expires_at: addMs(iso, CODE_TTL_MINUTES * 60_000), attempts: 0, used_at: null };
   await replaceCode(env.DB, row, iso);
   try {
-    await sender.send({ to: email, subject: 'Seu código de acesso ao PedidoCerto', text: `Seu código de acesso: ${code}\n\nEle vale por ${CODE_TTL_MINUTES} minutos e só pode ser usado uma vez. Se você não pediu este código, ignore esta mensagem.` });
-  } catch {
+    await sender.send({ to: email, ...loginCodeEmail(code, CODE_TTL_MINUTES) });
+  } catch (e) {
     await discardCode(env.DB, row.id, iso); // não deixa um código válido que ninguém recebeu
-    return apiError(503, 'EMAIL_SEND_FAILED', 'Não foi possível enviar o e-mail agora. Tente novamente em instantes.');
+    const retry = e instanceof EmailSendError ? e.retryAfterSeconds : undefined; // limite do provedor: repassa o tempo de espera
+    return apiError(503, 'EMAIL_SEND_FAILED', 'Não foi possível enviar o e-mail agora. Tente novamente em instantes.', retry ? { 'Retry-After': String(retry) } : {});
   }
   return ok();
 }
@@ -94,17 +98,17 @@ export async function verifyCode(request: Request, env: AuthEnv, deps: AuthDeps)
   const limitReached = () => json({ error: 'DEVICE_LIMIT', message: `Esta conta já está em ${MAX_SESSIONS} dispositivos. Escolha um para desconectar.`, sessions: active.map(s => publicSession(s)) }, 409);
   const replace = b.replaceSessionId as string | undefined;
   if (active.length >= MAX_SESSIONS && !replace) return limitReached(); // o código continua válido para a nova tentativa
-  if (replace) {
-    if (!active.some(s => s.id === replace)) return apiError(400, 'INVALID_REQUEST', 'A sessão escolhida não existe ou já foi encerrada.');
-    await revokeSession(env.DB, user.id, replace, iso);
-  }
+  if (replace && !active.some(s => s.id === replace)) return apiError(400, 'INVALID_REQUEST', 'A sessão escolhida não existe ou já foi encerrada.');
+  // O código é consumido ANTES de encerrar a sessão escolhida: uma requisição repetida/simultânea que perca a disputa não derruba
+  // o dispositivo de ninguém sem abrir a sessão nova.
   if (!(await markCodeUsed(env.DB, open.id, iso))) return wrong(); // uso único, mesmo com requisições simultâneas
+  if (replace) await revokeSession(env.DB, user.id, replace, iso);
   if (!license.user_id) await bindLicenseToUser(env.DB, license.id, user.id);
 
   const token = randomToken(32);
   const sessionId = newSessionId();
   const csrf = randomToken(24);
-  const created = await insertSessionWithinLimit(env.DB, { id: sessionId, user_id: user.id, token_hash: await sha256Hex(token), csrf_token: csrf, device_label: normalizeDeviceLabel(b.deviceLabel), created_at: iso, last_seen_at: iso, expires_at: addMs(iso, sessionMaxAgeSeconds * 1000) }, iso, MAX_SESSIONS);
+  const created = await insertSessionWithinLimit(env.DB, { id: sessionId, user_id: user.id, token_hash: await sha256Hex(token), csrf_token: csrf, device_label: normalizeDeviceLabel(b.deviceLabel), created_at: iso, last_seen_at: iso, expires_at: addMs(iso, sessionIdleMs) }, iso, MAX_SESSIONS);
   if (!created) return limitReached();
   const res = json({ user: { id: user.id, email: user.email }, csrfToken: csrf, sessionId, license: publicLicense(license) });
   res.headers.append('Set-Cookie', sessionCookie(request, token, sessionMaxAgeSeconds));

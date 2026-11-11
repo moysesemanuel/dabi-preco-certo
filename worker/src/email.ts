@@ -5,7 +5,11 @@
  * o login responde 503 e nada finge ter sido entregue. O adaptador `dev` apenas imprime a mensagem no terminal do
  * `wrangler dev` (para testar localmente) e NÃO entrega nada: nunca use em produção.
  */
-export type OutgoingEmail = { to: string; subject: string; text: string };
+export type OutgoingEmail = { to: string; subject: string; text: string; /** Versão HTML opcional (a texto continua obrigatória). */ html?: string };
+/** Falha de envio com motivo genérico (nunca inclui token, código nem resposta do provedor). `retryAfterSeconds` vem do provedor em 429. */
+export class EmailSendError extends Error {
+  constructor(message: string, readonly retryAfterSeconds?: number) { super(message); }
+}
 export interface EmailSender {
   /** false quando não há provedor real/dev configurado. */
   readonly configured: boolean;
@@ -40,12 +44,15 @@ export function createResendSender(apiKey: string, from: string, fetchFn: typeof
         res = await fetchFn(RESEND_URL, {
           method: 'POST',
           headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text }),
+          body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text, ...(m.html ? { html: m.html } : {}) }),
           signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
         });
-      } catch { throw new Error('EMAIL_PROVIDER_UNREACHABLE'); }
+      } catch { throw new EmailSendError('EMAIL_PROVIDER_UNREACHABLE'); }
       // Qualquer resposta que não seja 2xx é falha (inclusive 429 e 5xx do provedor). Não se lê o corpo: pode ecoar dados.
-      if (!res.ok) throw new Error(`EMAIL_PROVIDER_REJECTED_${res.status}`);
+      if (!res.ok) {
+        const retry = Number(res.headers.get('retry-after'));
+        throw new EmailSendError(`EMAIL_PROVIDER_REJECTED_${res.status}`, res.status === 429 && Number.isFinite(retry) && retry > 0 ? Math.min(Math.ceil(retry), 3600) : undefined);
+      }
     },
   };
 }
