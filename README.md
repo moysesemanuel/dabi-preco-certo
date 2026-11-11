@@ -18,36 +18,37 @@ npm run build
 npm test
 ```
 
-**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 5/5. Os testes cobrem apenas o domínio de precificação (`src/domain/pricing.ts`); validação de backup e interface ainda não têm testes.
+**Status de verificação (2026-11-11):** `npm run build` (tsc + vite) conclui sem erros e `npm test` passa 17/17. Os testes cobrem o domínio (`pricing.ts`, `edit.ts`) e `validateBackup`; a interface ainda não tem testes.
 
 ## Estrutura
 
 - `src/domain/types.ts`: tipos `Ingredient`, `Recipe`, `Order` e `DataSet` (`schemaVersion: 1`).
 - `src/domain/pricing.ts`: `recipeCost` (custo total, unitário e preço sugerido; margem **sobre o preço de venda**: `custo / (1 − margem%)`), `normalizeQuantity` (kg↔g, l↔ml) e `money`.
+- `src/domain/edit.ts`: funções puras de edição (`updateIngredient`, `updateRecipe`, `unitChangeAffectsRecipes`).
 - `src/storage/db.ts`: persistência no IndexedDB (`pedidocerto-v1`) e `validateBackup`.
 - `src/App.tsx`: casca da aplicação (carregar/salvar dados, navegação, avisos). Repassa `data`, `update`, `inform` e `focus` às páginas.
 - `src/pages/`: uma página por arquivo (`DashboardPage`, `IngredientsPage`, `RecipesPage`, `OrdersPage`, `BackupPage`), cada uma com seu próprio estado de formulário.
 - `src/components/Field.tsx` e `src/utils.ts`: campo de formulário e utilitários compartilhados (`parse`, `newId`, `brDate`, `canPrice`, tipos `Page`/`PageProps`).
-- `tests/pricing.test.ts`: testes unitários do domínio.
+- `tests/`: `pricing.test.ts`, `edit.test.ts` e `backup.test.ts`.
 
 > Convenção do projeto: alterações que afetem o que está descrito aqui devem atualizar este README no mesmo trabalho.
 
 ## O que já está implementado
 
 - Design system inicial, dashboard responsivo e navegação.
-- Cadastro e exclusão de ingredientes com unidade, quantidade e preço de compra.
+- Cadastro, **edição** e exclusão de ingredientes com unidade, quantidade e preço de compra. Editar o preço recalcula o custo das receitas; trocar a unidade exibe um aviso para revisar as receitas.
 - Cadastro de receitas e seus ingredientes, rendimento, embalagem, mão de obra e extras.
 - Cálculo de custo total, custo unitário e sugestão de preço por margem sobre venda.
 - Cadastro de encomendas, mudança de status e cópia do texto de orçamento para WhatsApp.
 - Armazenamento local no IndexedDB e exportação/importação de backup JSON.
-- Testes unitários iniciais do domínio de precificação.
+- Testes unitários do domínio de precificação, das funções de edição e da validação de backup.
 
 ## Limitações deliberadas desta etapa
 
 - Não é uma PWA instalável nem há suporte offline garantido após fechar/reabrir o navegador; isso exige service worker e testes adicionais.
 - Sem login, servidor, pagamentos, licença ou sincronização entre dispositivos.
 - O formulário de receitas usa as mesmas unidades cadastradas. O módulo de conversão está preparado, mas ainda não foi ligado à interface.
-- Não há edição dos ingredientes/receitas; para alterar, será necessário excluir e cadastrar novamente (a exclusão é bloqueada se houver dependentes).
+- Não há edição de receitas e encomendas (apenas o status da encomenda muda); a exclusão de itens com dependentes é bloqueada.
 - O resumo financeiro mostra valores estimados e não substitui contabilidade.
 - O backup faz validação estrutural básica. Regras relacionais, migrações e proteção contra arquivos adulterados precisam de reforço para lançamento.
 - Não há cálculos de impostos, perdas, taxas de pagamento e capacidade de produção por lote no MVP.
