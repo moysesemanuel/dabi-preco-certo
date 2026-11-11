@@ -42,3 +42,12 @@ export function tryApply(data: DataSet, update: (fn: (d: DataSet) => DataSet) =>
   try { const next = rule(data); update(() => next); return null; }
   catch (e) { return e instanceof Error ? e.message : 'Não foi possível concluir a operação.'; }
 }
+
+/** Baixa um backup JSON dos dados (usado na página de Backup e na tela de acesso). */
+export function downloadBackup(data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `pedidocerto-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+}

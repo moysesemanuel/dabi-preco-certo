@@ -6,12 +6,19 @@ import { createHttpSyncApi } from '../sync/api';
 import { emptyDataSet, emptyMeta, isOpenFinancial, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
 import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
-import { API_URL, safeApiBase } from './http';
+import { API_URL, REQUIRE_LOGIN, safeApiBase } from './http';
 
 export type SyncPhase = 'idle' | 'syncing' | 'synced' | 'offline' | 'attention' | 'error';
 export type SyncBlock = null | 'needs-decision' | 'account-mismatch';
 export type SyncState = { phase: SyncPhase; message?: string; lastSyncedAt?: string; blocked: SyncBlock };
 export type AccountStatus = 'unconfigured' | 'loading' | 'signed-out' | 'signed-in';
+/** Se o app pode ser usado agora. Fora da versão comercial (`REQUIRE_LOGIN`) é sempre 'open'. */
+export type Access = 'open' | 'checking' | 'login' | 'inactive' | 'offline-grace';
+const LAST_ACCESS_KEY = 'pedidocerto.lastAccess';
+/** Sem internet, quem já entrou antes pode seguir usando os dados deste dispositivo por até 7 dias desde a última verificação. */
+export const OFFLINE_GRACE_MS = 7 * 86_400_000;
+const readLastAccess = (): number | undefined => { try { const v = Number(localStorage.getItem(LAST_ACCESS_KEY)); return Number.isFinite(v) && v > 0 ? v : undefined; } catch { return undefined; } };
+const writeLastAccess = (v: number | undefined) => { try { if (v === undefined) localStorage.removeItem(LAST_ACCESS_KEY); else localStorage.setItem(LAST_ACCESS_KEY, String(v)); } catch { /* sem armazenamento: só perde a tolerância offline */ } };
 
 type Ctx = {
   status: AccountStatus;
@@ -20,6 +27,9 @@ type Ctx = {
   quotes: QuotesClient | null;
   /** Licença ativa na conta: só então há sincronização e compartilhamento. */
   entitled: boolean;
+  /** Versão comercial: se o app pode ser usado (login + licença ativa, ou tolerância offline). */
+  access: Access;
+  requireLogin: boolean;
   setSession(session: SessionInfo | undefined): void;
   signOut(): Promise<void>;
   sync: SyncState;
@@ -36,7 +46,7 @@ type Ctx = {
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
 
-type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; children: ReactNode };
+type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; children: ReactNode; /** Padrão: VITE_REQUIRE_LOGIN. Existe para testes. */ requireLogin?: boolean };
 const DEBOUNCE_MS = 2500;
 
 /**
@@ -44,7 +54,7 @@ const DEBOUNCE_MS = 2500;
  * e o IndexedDB é o cache. Regras de segurança dos dados: nunca sincroniza antes de carregar os dados locais, nunca mistura
  * contas diferentes no mesmo dispositivo sem decisão do usuário e nunca apaga dados locais sem confirmação.
  */
-export function AccountProvider({ data, setData, ready, children }: Props) {
+export function AccountProvider({ data, setData, ready, children, requireLogin = REQUIRE_LOGIN }: Props) {
   const base = safeApiBase(API_URL);
   const auth = useMemo(() => (base ? createAuthClient(base) : null), [base]);
   const csrfRef = useRef<string | undefined>(undefined);
@@ -53,6 +63,7 @@ export function AccountProvider({ data, setData, ready, children }: Props) {
   const [session, setSessionState] = useState<SessionInfo | undefined>();
   const [sync, setSync] = useState<SyncState>({ phase: 'idle', blocked: null });
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
+  const [networkDown, setNetworkDown] = useState(false);
 
   const dataRef = useRef(data); dataRef.current = data;
   const metaRef = useRef<SyncMeta | null>(null); // null = ainda não carregado: não sincroniza
@@ -70,9 +81,24 @@ export function AccountProvider({ data, setData, ready, children }: Props) {
   useEffect(() => {
     if (!auth) return;
     let alive = true;
-    auth.currentSession().then(r => { if (alive) setSession(r.ok ? r.value : undefined); });
-    return () => { alive = false; };
+    const check = () => auth.currentSession().then(r => {
+      if (!alive) return;
+      setNetworkDown(!r.ok && r.reason === 'network');
+      setSession(r.ok ? r.value : undefined);
+    });
+    void check();
+    const onOnline = () => { void check(); }; // volta a internet: confirma o acesso de verdade
+    window.addEventListener('online', onOnline);
+    return () => { alive = false; window.removeEventListener('online', onOnline); };
   }, [auth, setSession]);
+  // Registra o último acesso verificado (só a hora; nenhum dado pessoal) para a tolerância offline.
+  useEffect(() => { if (entitled) writeLastAccess(Date.now()); }, [entitled]);
+  const access: Access = !requireLogin ? 'open'
+    : status === 'loading' ? 'checking'
+    : entitled ? 'open'
+    : status === 'signed-in' ? 'inactive'
+    : networkDown && (readLastAccess() ?? 0) > Date.now() - OFFLINE_GRACE_MS ? 'offline-grace'
+    : 'login';
 
   const block = (b: SyncBlock, message?: string) => { blockedRef.current = b; setSync(s => ({ ...s, blocked: b, phase: b ? 'attention' : s.phase, message })); };
 
@@ -129,8 +155,8 @@ export function AccountProvider({ data, setData, ready, children }: Props) {
   }, [entitled, ready, run]);
 
   const value: Ctx = {
-    status, session, auth, quotes, entitled, setSession,
-    async signOut() { if (auth && csrfRef.current) await auth.logout(csrfRef.current); setSession(undefined); setSync({ phase: 'idle', blocked: null }); blockedRef.current = null; },
+    status, session, auth, quotes, entitled, access, requireLogin, setSession,
+    async signOut() { if (auth && csrfRef.current) await auth.logout(csrfRef.current); writeLastAccess(undefined); setNetworkDown(false); setSession(undefined); setSync({ phase: 'idle', blocked: null }); blockedRef.current = null; },
     sync, syncNow: () => run(),
     async chooseMerge() { blockedRef.current = null; setSync(s => ({ ...s, blocked: null })); await run({ allowInitialMerge: true }); },
     /** Troca os dados deste dispositivo pelos da conta (a tela pede confirmação e sugere backup antes). */

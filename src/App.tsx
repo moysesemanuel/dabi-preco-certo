@@ -5,6 +5,7 @@ import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
 import { AccountProvider, useAccount } from './account/AccountContext';
+import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
@@ -20,6 +21,13 @@ const pages: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'recipes', label: 'Receitas e preços', icon: ChefHat }, { id: 'orders', label: 'Encomendas', icon: ClipboardCheck }, { id: 'agenda', label: 'Agenda', icon: CalendarDays },
   { id: 'converter', label: 'Conversor', icon: Ruler }, { id: 'backup', label: 'Backup', icon: ArchiveRestore }, { id: 'settings', label: 'Configurações', icon: Settings },
 ];
+
+/** Aviso quando a sincronização precisa de uma decisão sua (por exemplo, dados dos dois lados na primeira entrada). */
+function SyncBanner({ focus }: { focus: (p: Page) => void }) {
+  const acc = useAccount();
+  if (!acc.sync.blocked) return null;
+  return <div className="notice warn" role="alert"><strong>A sincronização precisa da sua decisão.</strong> Nada foi alterado ainda. <button className="secondary" onClick={() => focus('settings')}>Resolver em Configurações</button></div>;
+}
 
 /** Estado dos dados no topo da tela: local, ou sincronizado quando há conta. */
 function TopbarStatus() {
@@ -56,9 +64,10 @@ export default function App() {
   const focus = (p: Page) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); };
   const props: PageProps = { data, update: setData, inform, focus };
 
-  return <AccountProvider data={data} setData={setData} ready={ready}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
+  return <AccountProvider data={data} setData={setData} ready={ready}><AccessGate data={data}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><ClipboardCheck size={22} /></div><span>Pedido<span style={{ color: '#ff982b' }}>Certo</span></span></div><nav className="nav" aria-label="Navegação principal">{pages.map(p => { const Icon = p.icon; return <button key={p.id} className={page === p.id ? 'active' : ''} aria-current={page === p.id ? 'page' : undefined} onClick={() => focus(p.id)}><Icon size={18} />{p.label}</button>; })}</nav><div className="sidebar-foot"><strong style={{ color: 'white' }}>Versão beta</strong><br />Seus dados ficam neste navegador e, se você entrar numa conta (opcional), também no servidor. Exporte backups regularmente.</div></aside>
     <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><ChefHat size={16} /></div></header><div className="content" id="conteudo">
+      <SyncBanner focus={focus} />
       <ErrorBoundary key={page}>{!ready ? <div className="empty" role="status" aria-live="polite">Carregando seus dados…</div> : <>
       {page === 'dashboard' && <DashboardPage {...props} />}
       {page === 'ingredients' && <IngredientsPage {...props} />}
@@ -70,5 +79,5 @@ export default function App() {
       {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}
       </>}</ErrorBoundary>
     </div></main>{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
-  </div></AccountProvider>;
+  </div></AccessGate></AccountProvider>;
 }

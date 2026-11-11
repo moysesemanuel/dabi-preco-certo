@@ -67,7 +67,7 @@ export function AccountPanel({ inform }: { inform: (m: string) => void }) {
   }
 
   return <section className="card stack"><span className="icon-box"><LogIn size={21} /></span><h2 className="section-title">Entrar na conta</h2>
-    <p className="muted">A conta é opcional e liberada pela sua licença. Ela permite usar seus dados em até 2 dispositivos e compartilhar orçamentos por link. Sem conta, tudo funciona neste dispositivo.</p>
+    <p className="muted">{acc.requireLogin ? 'O acesso é liberado pela sua licença. A conta permite usar seus dados em até 2 dispositivos e compartilhar orçamentos por link.' : 'A conta é opcional e liberada pela sua licença. Ela permite usar seus dados em até 2 dispositivos e compartilhar orçamentos por link. Sem conta, tudo funciona neste dispositivo.'}</p>
     {step === 'email' && <form className="stack" onSubmit={ask}>
       <Field label="E-mail da compra"><input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="voce@exemplo.com" /></Field>
       <button className="primary" type="submit" disabled={busy || !email.trim()}>{busy ? 'Enviando…' : 'Enviar código de acesso'}</button>

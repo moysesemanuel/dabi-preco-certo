@@ -2,15 +2,11 @@ import { Download, Upload } from 'lucide-react';
 import type { DataSet } from '../domain/types';
 import { Field } from '../components/Field';
 import { validateBackup } from '../storage/db';
-import type { PageProps } from '../utils';
+import { downloadBackup, type PageProps } from '../utils';
 
 export function BackupPage({ data, inform, replaceData }: PageProps & { replaceData: (d: DataSet) => Promise<void> }) {
   function exportBackup() {
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `pedidocerto-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
-    URL.revokeObjectURL(url);
+    downloadBackup(data);
     inform('Backup exportado. Guarde o arquivo em local seguro.');
   }
   async function importBackup(file: File | undefined) {

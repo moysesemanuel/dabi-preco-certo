@@ -1,6 +1,9 @@
 /** Configuração e chamadas HTTP da conta. A sessão vai no cookie HttpOnly (nunca em URL nem em armazenamento do navegador). */
 export const API_URL: string | undefined = import.meta.env.VITE_API_URL ?? import.meta.env.VITE_QUOTES_API_URL;
 
+/** Versão comercial: o app só abre depois do login com licença ativa. Os dados locais existentes NUNCA são apagados por isso. */
+export const REQUIRE_LOGIN: boolean = import.meta.env.VITE_REQUIRE_LOGIN === 'on';
+
 /** Aceita https em qualquer host e http apenas em localhost/127.0.0.1, para não enviar a sessão sem criptografia pela internet. */
 export function safeApiBase(url: string | undefined): string | undefined {
   if (!url) return undefined;
