@@ -7,7 +7,7 @@ import { Field } from '../components/Field';
 import { densityToGramsPerCup, findReference, gramsPerCupToDensity, referenceDensity, REFERENCE_DISCLAIMER } from '../features/measurement/densities';
 import { formatQuantity } from '../features/measurement/units';
 import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
-import { cupSizeOf, newId, parse, units, type PageProps } from '../utils';
+import { cupSizeOf, newId, parse, tryApply, units, type PageProps } from '../utils';
 
 export function IngredientsPage({ data, update, inform }: PageProps) {
   const cup = cupSizeOf(data);
@@ -44,7 +44,8 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
     };
     if (editingId) {
       const unitWarning = unitChangeAffectsRecipes(data, editingId, unit);
-      update(d => updateIngredient(d, editingId, values));
+      const failed = tryApply(data, update, d => updateIngredient(d, editingId, values));
+      if (failed) return inform(failed);
       resetForm();
       inform(unitWarning ? 'Ingrediente atualizado. Atenção: você mudou a unidade; revise as quantidades nas receitas antigas que o usam.' : 'Ingrediente atualizado. Os custos das receitas foram recalculados.');
       return;

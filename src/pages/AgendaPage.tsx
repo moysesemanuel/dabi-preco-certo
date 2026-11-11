@@ -19,6 +19,7 @@ export function AgendaPage({ data, update, focus }: PageProps) {
   const recipeName = (id: string) => data.recipes.find(r => r.id === id)?.name ?? 'Receita indisponível';
   const setStatus = (id: string, status: Order['status']) => update(d => ({ ...d, orders: d.orders.map(o => (o.id === id ? { ...o, status } : o)) }));
   const hasCapacity = !!data.settings?.dailyCapacityMinutes;
+  const hiddenQuotes = includeQuotes ? 0 : data.orders.filter(o => o.status === 'Orçamento').length;
 
   const Row = ({ order, late }: { order: Order; late?: number }) => (
     <li style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f0f2f4' }}>
@@ -35,6 +36,8 @@ export function AgendaPage({ data, update, focus }: PageProps) {
   return <>
     <div className="head"><div><div className="eyebrow">Organização das entregas</div><h1>Agenda</h1><p className="muted">Entregas de hoje, dos próximos dias e atrasos, e uma estimativa da carga de produção.</p></div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, margin: 0 }}><input type="checkbox" checked={includeQuotes} onChange={e => setIncludeQuotes(e.target.checked)} style={{ width: 18, height: 18 }} /> Incluir orçamentos</label></div>
+
+    {hiddenQuotes > 0 && <div className="notice" role="status" style={{ marginBottom: 19 }}>{hiddenQuotes} encomenda(s) em <strong>Orçamento</strong> não aparecem aqui até serem confirmadas. Mude o status em Encomendas, ou marque “Incluir orçamentos”.</div>}
 
     {agenda.overdue.length > 0 && <section className="card" style={{ marginBottom: 19, borderColor: '#e8b4b4' }}><h2 className="section-title" style={{ color: '#c43d3d' }}>Atrasados ({agenda.overdue.length})</h2><List items={agenda.overdue.map(o => ({ order: o.order, late: o.daysLate }))} /></section>}
 

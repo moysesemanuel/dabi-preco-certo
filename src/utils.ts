@@ -32,3 +32,13 @@ export const localToday = (now: Date = new Date()): string => `${now.getFullYear
 export async function copyText(text: string): Promise<boolean> {
   try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
 }
+
+/**
+ * Aplica uma regra de domínio que pode recusar a operação (lançar Error).
+ * O novo estado é calculado AGORA, dentro de try/catch; passar a regra direto para `setState(fn)` faria o erro estourar
+ * depois, durante a renderização do React, e poderia deixar a tela em branco. Devolve a mensagem do erro, ou null se deu certo.
+ */
+export function tryApply(data: DataSet, update: (fn: (d: DataSet) => DataSet) => void, rule: (d: DataSet) => DataSet): string | null {
+  try { const next = rule(data); update(() => next); return null; }
+  catch (e) { return e instanceof Error ? e.message : 'Não foi possível concluir a operação.'; }
+}

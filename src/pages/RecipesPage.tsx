@@ -9,7 +9,7 @@ import { RecipeTextImporter, type ImportConfirm } from '../features/recipe-impor
 import { MeasurementConverter, type ConverterUse } from '../features/measurement/components/MeasurementConverter';
 import { formatQuantity, friendlyAmount, UNIT_ORDER, UNITS, unitText } from '../features/measurement/units';
 import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
-import { cupSizeOf, newId, parse, priceRecipe, withSettings, type PageProps } from '../utils';
+import { cupSizeOf, newId, parse, priceRecipe, tryApply, withSettings, type PageProps } from '../utils';
 
 export function RecipesPage({ data, update, inform }: PageProps) {
   const [name, setName] = useState('');
@@ -45,7 +45,8 @@ export function RecipesPage({ data, update, inform }: PageProps) {
     const values = { name: name.trim(), yield: yieldNum, items, packagingPerUnit: pack, laborTotal: lab, extraTotal: extra, desiredMargin: m, ...(prepNum !== undefined ? { prepMinutes: prepNum } : {}) };
     try { recipeCost({ id: editingId ?? 'novo', ...values }, data.ingredients, cupSizeMl); } catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível calcular o custo desta receita.'); }
     if (editingId) {
-      update(d => updateRecipe(d, editingId, values));
+      const failed = tryApply(data, update, d => updateRecipe(d, editingId, values));
+      if (failed) return inform(failed);
       setSelectedId(editingId); resetForm(); inform('Receita atualizada. Encomendas já registradas não foram alteradas.');
       return;
     }
@@ -60,7 +61,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
     inform('Medida aplicada à receita (se o ingrediente já estava na lista, a linha foi atualizada).');
   }
   function importIngredients({ items: incoming, patches }: ImportConfirm) {
-    if (patches.length) update(d => applyEquivalences(d, patches));
+    if (patches.length) { const failed = tryApply(data, update, d => applyEquivalences(d, patches)); if (failed) return inform(failed); }
     // evita duplicar uma linha idêntica (mesmo ingrediente, quantidade e medida) já presente na receita
     setItems(list => [...list, ...incoming.filter(n => !list.some(x => x.ingredientId === n.ingredientId && x.quantity === n.quantity && x.unit === n.unit))]);
     setShowImport(false);

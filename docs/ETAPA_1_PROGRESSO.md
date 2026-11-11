@@ -94,3 +94,21 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 **Pendências / riscos**
 - Dois dispositivos registrando recebimentos no mesmo pedido ao mesmo tempo geram conflito (o servidor vence e o recebimento perdido fica guardado em "alterações substituídas"). Aceitável para beta; fusão por campo/lista é uma melhoria futura.
 - Interface sem testes automatizados de componentes (ver Fase 5).
+
+## Fase 5 — Experiência e qualidade: CONCLUÍDA
+
+**Defeitos reais encontrados pelos novos testes de interface (e corrigidos)**
+1. **Rótulos sem associação aos campos** em todo o app (`<label>` sem `htmlFor`): leitores de tela não anunciavam o nome dos campos e clicar no rótulo não focava o campo. Corrigido no componente `Field` (`useId` + `htmlFor`).
+2. **Telas em branco em erros de regra de negócio:** regras que recusam uma operação (receber acima do saldo, editar encomenda, etc.) eram chamadas dentro da função de atualização do React, e o erro estourava durante a renderização, depois do `try/catch`. Agora o novo estado é calculado antes (`tryApply`), e a mensagem aparece normalmente. Foi acrescentada uma **rede de segurança** (`ErrorBoundary`) com mensagem útil e sem detalhes técnicos.
+3. **Edição antes de carregar os dados:** a tela aceitava edições enquanto o IndexedDB ainda carregava (seriam sobrescritas). Agora mostra "Carregando seus dados…" e só libera os formulários depois.
+4. A Agenda escondia, sem explicar, as encomendas novas (nascem como "Orçamento"). Agora há um aviso explicativo.
+
+**Melhorias:** link "Pular para o conteúdo", `aria-current` na navegação, foco no título ao trocar de página, foco visível, status de sincronização no topo, texto do rodapé atualizado para a realidade com conta.
+
+**Testes de interface (jsdom + Testing Library + fake-indexeddb): +19** — fluxo ingrediente → receita → preço → encomenda → recebimento → agenda (inclui custo histórico, recusa acima do saldo e persistência após recarregar), estados de carregamento e vazios, acessibilidade básica, login por código (código errado, troca de dispositivo, sair mantendo os dados), envio dos dados locais, modo offline e licença revogada. Total: 409.
+
+**Layout móvel:** conferido em 390 px reais (iframe), sem rolagem horizontal em Encomendas, Agenda e Configurações.
+
+**Playwright:** não foi adotado. Exige baixar navegadores e não há necessidade comprovada; os fluxos críticos estão cobertos por testes de componente com armazenamento real simulado, e o fluxo completo contra o Worker real foi verificado manualmente no Chrome. Reavaliar para testes e2e no CI se a equipe crescer.
+
+**Pendências:** teste visual automatizado (capturas) e e2e em navegador real no CI; revisão de contraste das cores do Design System com ferramenta dedicada (cores preservadas conforme a regra).

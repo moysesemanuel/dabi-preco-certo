@@ -9,7 +9,7 @@ import { PAYMENT_METHODS, type Order, type PaymentMethod } from '../domain/types
 import { Field } from '../components/Field';
 import { QuoteSharePanel } from '../features/sharing/QuoteSharePanel';
 import { FORECAST_DISCLAIMER, forecastUntil, formatMinutes } from '../domain/schedule';
-import { brDate, localToday, newId, parse, priceRecipe, type PageProps } from '../utils';
+import { brDate, localToday, newId, parse, priceRecipe, tryApply, type PageProps } from '../utils';
 
 const statuses: Order['status'][] = ['Orçamento', 'Confirmado', 'Produção', 'Entregue'];
 
@@ -37,7 +37,8 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
   }
   function deleteOrder(o: Order) {
     if (!confirm(`Excluir a encomenda de ${o.customer} (${money(o.quantity * o.unitPrice)})? Esta ação não pode ser desfeita.`)) return;
-    update(d => removeOrder(d, o.id));
+    const failedDelete = tryApply(data, update, d => removeOrder(d, o.id));
+    if (failedDelete) return inform(failedDelete);
     if (editingId === o.id) resetForm();
     inform('Encomenda excluída.');
   }
@@ -46,7 +47,8 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
     const q = parse(qty), price = toCents2(parse(unitPrice)), dep = toCents2(parse(deposit));
     if (!customer.trim() || !recipeId || !date || !isPositiveQuantity(q) || !isMoney(price) || !isMoney(dep) || dep > toCents2(q * price)) return inform('Revise cliente, receita, data, quantidade, preço e sinal.');
     if (editingId) {
-      try { update(d => updateOrder(d, editingId, { customer, recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep })); } catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível atualizar a encomenda.'); }
+      const failed = tryApply(data, update, d => updateOrder(d, editingId, { customer, recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep }));
+      if (failed) return inform(failed);
       resetForm(); inform('Encomenda atualizada. Status e data de criação foram mantidos.');
       return;
     }
@@ -62,13 +64,15 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
   function savePayment(e: FormEvent, o: Order) {
     e.preventDefault();
     const amount = toCents2(parse(payAmount));
-    try { update(d => addPayment(d, o.id, { id: newId(), amount, receivedAt: payDate, ...(payMethod ? { method: payMethod } : {}), ...(payNote.trim() ? { note: payNote.trim() } : {}) })); }
-    catch (err) { return inform(err instanceof Error ? err.message : 'Não foi possível registrar o recebimento.'); }
+    const failed = tryApply(data, update, d => addPayment(d, o.id, { id: newId(), amount, receivedAt: payDate, ...(payMethod ? { method: payMethod } : {}), ...(payNote.trim() ? { note: payNote.trim() } : {}) }));
+    if (failed) return inform(failed);
     setPayingId(null); inform('Recebimento registrado.');
   }
   function deletePayment(o: Order, paymentId: string) {
     if (!confirm('Remover este recebimento? O saldo pendente da encomenda voltará a aumentar.')) return;
-    update(d => removePayment(d, o.id, paymentId)); inform('Recebimento removido.');
+    const failed = tryApply(data, update, d => removePayment(d, o.id, paymentId));
+    if (failed) return inform(failed);
+    inform('Recebimento removido.');
   }
   const copyQuote = async (o: Order) => {
     const r = data.recipes.find(x => x.id === o.recipeId);
