@@ -15,8 +15,8 @@ export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): Dat
   return { ...data, recipes: data.recipes.map(r => (r.id === id ? { ...patch, id } : r)) };
 }
 
-/** True se mudar a unidade do ingrediente pode distorcer o custo de receitas que o usam. */
+/** True se mudar a unidade do ingrediente pode distorcer receitas antigas, cujos itens não guardam unidade própria. */
 export function unitChangeAffectsRecipes(data: DataSet, id: string, newUnit: Ingredient['unit']): boolean {
   const current = data.ingredients.find(i => i.id === id);
-  return !!current && current.unit !== newUnit && data.recipes.some(r => r.items.some(i => i.ingredientId === id));
+  return !!current && current.unit !== newUnit && data.recipes.some(r => r.items.some(i => i.ingredientId === id && !i.unit));
 }

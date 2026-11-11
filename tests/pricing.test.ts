@@ -1,5 +1,5 @@
 import { describe,expect,it } from 'vitest';
-import { normalizeQuantity,recipeCost } from '../src/domain/pricing';
+import { convertQuantity,normalizeQuantity,recipeCost } from '../src/domain/pricing';
 import type { Ingredient,Recipe } from '../src/domain/types';
 const ingredients:Ingredient[]=[{id:'farinha',name:'Farinha',purchaseQuantity:1000,unit:'g',purchasePrice:6}];
 const recipe:Recipe={id:'r',name:'Bolo',yield:10,items:[{ingredientId:'farinha',quantity:500}],packagingPerUnit:1,laborTotal:20,extraTotal:7,desiredMargin:20};
@@ -9,4 +9,12 @@ describe('Precificação',()=>{
  it('rejeita margem de 100%',()=>expect(()=>recipeCost({...recipe,desiredMargin:100},ingredients)).toThrow());
  it('não converte unidades incompatíveis',()=>expect(()=>normalizeQuantity(1,'kg','ml')).toThrow());
  it('converte quilogramas em gramas',()=>expect(normalizeQuantity(1,'kg','g')).toBe(1000));
+ it('converte volume culinário entre si',()=>{expect(convertQuantity(1,'xic','ml')).toBe(240);expect(convertQuantity(2,'cs','ml')).toBe(30);expect(convertQuantity(3,'cc','cs')).toBe(1);expect(convertQuantity(1,'l','xic')).toBeCloseTo(4.1667,4)});
+ it('converte xícara em gramas usando o peso de 1 xícara',()=>{expect(convertQuantity(1,'xic','g',120)).toBe(120);expect(convertQuantity(0.5,'xic','g',120)).toBe(60);expect(convertQuantity(1,'cs','g',120)).toBe(7.5);expect(convertQuantity(240,'g','xic',120)).toBe(2)});
+ it('converte xícara em kg e gramas em colher de sopa',()=>{expect(convertQuantity(2,'xic','kg',120)).toBeCloseTo(0.24,5);expect(convertQuantity(30,'g','cs',120)).toBe(4)});
+ it('exige o peso de 1 xícara para converter volume em peso',()=>{expect(()=>convertQuantity(1,'xic','g')).toThrow('xícara');expect(()=>convertQuantity(1,'g','xic',0)).toThrow()});
+ it('não converte unidades (un) em peso ou volume',()=>{expect(()=>convertQuantity(1,'un','g',100)).toThrow();expect(()=>convertQuantity(1,'xic','un',100)).toThrow()});
+ it('calcula o custo da receita com itens em xícara',()=>{const ing:Ingredient[]=[{...ingredients[0],gramsPerCup:120}];const r={...recipe,items:[{ingredientId:'farinha',quantity:2,unit:'xic' as const}]};expect(recipeCost(r,ing).materials).toBe(1.44)});
+ it('falha ao usar xícara sem o peso cadastrado',()=>{const r={...recipe,items:[{ingredientId:'farinha',quantity:2,unit:'xic' as const}]};expect(()=>recipeCost(r,ingredients)).toThrow()});
+ it('itens antigos sem unidade seguem a unidade do ingrediente',()=>expect(recipeCost(recipe,ingredients).materials).toBe(3));
 });

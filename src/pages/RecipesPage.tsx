@@ -1,8 +1,8 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, BookOpen, Pencil, Plus, Save, Trash2, X } from 'lucide-react';
 import { updateRecipe } from '../domain/edit';
-import { money } from '../domain/pricing';
-import type { Recipe, RecipeItem } from '../domain/types';
+import { convertQuantity, measureLabels, measureOptions, money } from '../domain/pricing';
+import type { MeasureUnit, Recipe, RecipeItem } from '../domain/types';
 import { Field } from '../components/Field';
 import { canPrice, newId, parse, type PageProps } from '../utils';
 
@@ -23,7 +23,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
   function startEdit(id: string) {
     const r = data.recipes.find(x => x.id === id);
     if (!r) return;
-    setEditingId(r.id); setName(r.name); setYieldQty(String(r.yield)); setItems(r.items.map(i => ({ ...i })));
+    setEditingId(r.id); setName(r.name); setYieldQty(String(r.yield)); setItems(r.items.map(i => ({ ...i, unit: i.unit ?? data.ingredients.find(x => x.id === i.ingredientId)?.unit })));
     setPackaging(String(r.packagingPerUnit)); setLabor(String(r.laborTotal)); setExtras(String(r.extraTotal)); setMargin(String(r.desiredMargin));
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
@@ -31,6 +31,10 @@ export function RecipesPage({ data, update, inform }: PageProps) {
     e.preventDefault();
     const yieldNum = parse(yieldQty), pack = parse(packaging), lab = parse(labor), extra = parse(extras), m = parse(margin);
     if (!name.trim() || !(yieldNum > 0) || !items.length || items.some(i => !(i.quantity > 0) || !data.ingredients.some(x => x.id === i.ingredientId)) || ![pack, lab, extra, m].every(Number.isFinite) || [pack, lab, extra, m].some(x => x < 0) || m >= 100) return inform('Revise rendimento, ingredientes e custos. Margem: 0 até menos de 100%.');
+    for (const i of items) {
+      const ing = data.ingredients.find(x => x.id === i.ingredientId)!;
+      try { convertQuantity(i.quantity, i.unit ?? ing.unit, ing.unit, ing.gramsPerCup); } catch (err) { return inform(`${ing.name}: ${err instanceof Error ? err.message : 'medida inválida.'}`); }
+    }
     const values = { name: name.trim(), yield: yieldNum, items, packagingPerUnit: pack, laborTotal: lab, extraTotal: extra, desiredMargin: m };
     if (editingId) {
       update(d => updateRecipe(d, editingId, values));
@@ -61,13 +65,26 @@ export function RecipesPage({ data, update, inform }: PageProps) {
             <Field label="Nome da receita"><input value={name} onChange={e => setName(e.target.value)} placeholder="Ex.: Bolo de cenoura" required /></Field>
             <Field label="Rendimento (unidades)"><input type="number" min="0.01" step="any" value={yieldQty} onChange={e => setYieldQty(e.target.value)} required /></Field>
           </div>
-          <div><label>Ingredientes utilizados</label><p className="form-subtitle" style={{ marginBottom: 12 }}>Informe a quantidade na mesma unidade usada no cadastro.</p>
-            {items.map((item, index) => <div key={index} className="recipe-line" style={{ marginBottom: 10 }}>
-              <select value={item.ingredientId} onChange={e => setItems(list => list.map((x, i) => i === index ? { ...x, ingredientId: e.target.value } : x))}>{data.ingredients.map(ing => <option key={ing.id} value={ing.id}>{ing.name} ({ing.unit})</option>)}</select>
-              <input aria-label="Quantidade utilizada" type="number" min="0.001" step="any" value={item.quantity} onChange={e => setItems(list => list.map((x, i) => i === index ? { ...x, quantity: parse(e.target.value) } : x))} />
-              <button aria-label="Remover ingrediente da receita" type="button" className="inline-icon" onClick={() => setItems(list => list.filter((_, i) => i !== index))}><Trash2 size={16} /></button>
-            </div>)}
-            <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setItems(list => [...list, { ingredientId: data.ingredients[0].id, quantity: 100 }])}><Plus size={16} /> Adicionar ingrediente</button>
+          <div><label>Ingredientes utilizados</label><p className="form-subtitle" style={{ marginBottom: 12 }}>Escolha a medida da receita (g, xícara, colher...). O app converte para a unidade de compra.</p>
+            {items.map((item, index) => {
+              const ing = data.ingredients.find(x => x.id === item.ingredientId);
+              const unit: MeasureUnit = item.unit ?? ing?.unit ?? 'g';
+              const patch = (change: Partial<RecipeItem>) => setItems(list => list.map((x, i) => i === index ? { ...x, ...change } : x));
+              let hint = '';
+              if (ing && unit !== ing.unit && item.quantity > 0) {
+                try { hint = `≈ ${Number(convertQuantity(item.quantity, unit, ing.unit, ing.gramsPerCup).toFixed(2))} ${ing.unit}`; } catch (err) { hint = err instanceof Error ? err.message : ''; }
+              }
+              return <div key={index} style={{ marginBottom: 10 }}>
+                <div className="recipe-line">
+                  <select aria-label="Ingrediente" value={item.ingredientId} onChange={e => { const next = data.ingredients.find(x => x.id === e.target.value); patch({ ingredientId: e.target.value, unit: next?.unit }); }}>{data.ingredients.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}</select>
+                  <input aria-label="Quantidade utilizada" type="number" min="0.001" step="any" value={item.quantity} onChange={e => patch({ quantity: parse(e.target.value) })} />
+                  <select aria-label="Medida" value={unit} onChange={e => patch({ unit: e.target.value as MeasureUnit })}>{(ing ? measureOptions(ing.unit) : []).map(u => <option key={u} value={u}>{measureLabels[u]}</option>)}</select>
+                  <button aria-label="Remover ingrediente da receita" type="button" className="inline-icon" onClick={() => setItems(list => list.filter((_, i) => i !== index))}><Trash2 size={16} /></button>
+                </div>
+                {hint && <p className="form-subtitle" style={{ margin: '4px 0 0' }}>{hint}</p>}
+              </div>;
+            })}
+            <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setItems(list => [...list, { ingredientId: data.ingredients[0].id, quantity: 100, unit: data.ingredients[0].unit }])}><Plus size={16} /> Adicionar ingrediente</button>
           </div>
           <div className="form-grid">
             <Field label="Embalagem por unidade (R$)"><input type="number" min="0" step="0.01" value={packaging} onChange={e => setPackaging(e.target.value)} /></Field>

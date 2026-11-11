@@ -36,4 +36,8 @@ describe('Edição de cadastros', () => {
     expect(unitChangeAffectsRecipes(data, 'f', 'g')).toBe(false);
     expect(unitChangeAffectsRecipes({ ...data, recipes: [] }, 'f', 'kg')).toBe(false);
   });
+  it('não avisa quando os itens da receita já guardam a própria unidade', () => {
+    const explicit = { ...data, recipes: [{ ...data.recipes[0], items: [{ ingredientId: 'f', quantity: 500, unit: 'g' as const }] }] };
+    expect(unitChangeAffectsRecipes(explicit, 'f', 'kg')).toBe(false);
+  });
 });

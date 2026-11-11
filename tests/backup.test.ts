@@ -38,4 +38,12 @@ describe('validateBackup', () => {
     expect(() => validateBackup(a)).toThrow('Encomenda');
     expect(() => validateBackup(b)).toThrow('Encomenda');
   });
+  it('aceita unidade culinária e peso de xícara, e rejeita valores inválidos', () => {
+    const ok = valid(); (ok.ingredients[0] as Record<string, unknown>).gramsPerCup = 120; (ok.recipes[0].items[0] as Record<string, unknown>).unit = 'xic';
+    expect(() => validateBackup(ok)).not.toThrow();
+    const badCup = valid(); (badCup.ingredients[0] as Record<string, unknown>).gramsPerCup = 0;
+    const badUnit = valid(); (badUnit.recipes[0].items[0] as Record<string, unknown>).unit = 'balde';
+    expect(() => validateBackup(badCup)).toThrow('Ingrediente');
+    expect(() => validateBackup(badUnit)).toThrow('Receita');
+  });
 });
