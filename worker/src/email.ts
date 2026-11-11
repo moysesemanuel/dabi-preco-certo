@@ -18,8 +18,52 @@ const devSender: EmailSender = {
 };
 const unconfigured: EmailSender = { configured: false, async send() { throw new Error('EMAIL_NOT_CONFIGURED'); } };
 
-export function createEmailSender(env: object): EmailSender {
-  return (env as { EMAIL_ADAPTER?: string }).EMAIL_ADAPTER === 'dev' ? devSender : unconfigured;
+export type EmailEnv = { ALLOWED_ORIGINS?: string; EMAIL_ADAPTER?: string; RESEND_API_KEY?: string; EMAIL_FROM?: string };
+export const RESEND_URL = 'https://api.resend.com/emails';
+const RESEND_TIMEOUT_MS = 8000;
+/** Remetente aceito: `email@dominio` ou `Nome <email@dominio>`, sem quebras de linha (evita injeção de cabeçalhos). */
+const FROM_PATTERN = /^(?:[^<>\r\n@]{1,80} <[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+>|[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+)$/;
+const looksLikeAddress = (v: string) => /^[^\s<>@,;]+@[^\s<>@,;]+\.[^\s<>@,;]+$/.test(v);
+
+/**
+ * Adaptador Resend (https://resend.com/docs/api-reference/emails/send-email). O token vem SEMPRE do segredo do ambiente
+ * (`RESEND_API_KEY`, via `wrangler secret put`), nunca do repositório nem do app. Erros NUNCA incluem o token, o corpo da mensagem
+ * (que contém o código) nem a resposta do provedor: só um motivo genérico para o log. `fetchFn` é injetável para testes.
+ */
+export function createResendSender(apiKey: string, from: string, fetchFn: typeof fetch = fetch): EmailSender {
+  return {
+    configured: true,
+    async send(m) {
+      if (!looksLikeAddress(m.to) || /[\r\n]/.test(m.subject)) throw new Error('EMAIL_INVALID_MESSAGE');
+      let res: Response;
+      try {
+        res = await fetchFn(RESEND_URL, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from, to: [m.to], subject: m.subject, text: m.text }),
+          signal: AbortSignal.timeout(RESEND_TIMEOUT_MS),
+        });
+      } catch { throw new Error('EMAIL_PROVIDER_UNREACHABLE'); }
+      // Qualquer resposta que não seja 2xx é falha (inclusive 429 e 5xx do provedor). Não se lê o corpo: pode ecoar dados.
+      if (!res.ok) throw new Error(`EMAIL_PROVIDER_REJECTED_${res.status}`);
+    },
+  };
+}
+
+export function createEmailSender(env: object, fetchFn?: typeof fetch): EmailSender {
+  const e = env as EmailEnv;
+  if (e.EMAIL_ADAPTER === 'dev') {
+    // O adaptador de desenvolvimento escreve o CÓDIGO no log: só vale quando todas as origens autorizadas são locais.
+    const origins = (e.ALLOWED_ORIGINS ?? '').split(',').map(o => o.trim()).filter(Boolean);
+    const local = origins.length > 0 && origins.every(o => /^http:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(o));
+    return local ? devSender : unconfigured;
+  }
+  if (e.EMAIL_ADAPTER === 'resend') {
+    // Configuração incompleta ou inválida = "não configurado" (503), nunca um envio parcial.
+    if (!e.RESEND_API_KEY || !e.EMAIL_FROM || !FROM_PATTERN.test(e.EMAIL_FROM)) return unconfigured;
+    return createResendSender(e.RESEND_API_KEY, e.EMAIL_FROM, fetchFn);
+  }
+  return unconfigured;
 }
 
 /** Para testes: guarda as mensagens em memória. */

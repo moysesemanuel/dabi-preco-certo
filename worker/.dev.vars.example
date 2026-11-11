@@ -2,3 +2,5 @@
 AUTH_SECRET=troque-por-um-valor-aleatorio-longo-apenas-para-desenvolvimento
 # Imprime o código de login no terminal do `wrangler dev`; NÃO entrega e-mail. Não use em produção.
 EMAIL_ADAPTER=dev
+# Para testar o Resend de verdade em desenvolvimento (opcional, exige conta própria): EMAIL_ADAPTER=resend, RESEND_API_KEY=... e
+# EMAIL_FROM="Nome <remetente@dominio-verificado>". Os testes automatizados usam uma API simulada e não precisam disso.

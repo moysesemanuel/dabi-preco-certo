@@ -37,7 +37,10 @@ workers_dev = false
 PUBLIC_BASE_URL = "https://orcamento-hml.exemplo.com.br"
 ALLOWED_ORIGINS = "https://app-hml.exemplo.com.br"
 LEGACY_KEY_AUTH = "off"
-# EMAIL_ADAPTER: deixe em branco até existir um provedor de e-mail real (o login responde 503, sem fingir envio).
+# E-mail pelo Resend. Sem o segredo RESEND_API_KEY o login responde 503 (nada finge ser enviado).
+# Segredo: `wrangler secret put RESEND_API_KEY --env staging`. EMAIL_FROM precisa ser um remetente de domínio verificado no Resend.
+EMAIL_ADAPTER = "resend"
+EMAIL_FROM = "PedidoCerto <acesso@exemplo.com.br>"
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -53,6 +56,9 @@ workers_dev = false
 PUBLIC_BASE_URL = "https://orcamento.exemplo.com.br"
 ALLOWED_ORIGINS = "https://app.exemplo.com.br"
 LEGACY_KEY_AUTH = "off"
+# Segredo: `wrangler secret put RESEND_API_KEY --env production`.
+EMAIL_ADAPTER = "resend"
+EMAIL_FROM = "PedidoCerto <acesso@exemplo.com.br>"
 
 [[env.production.d1_databases]]
 binding = "DB"

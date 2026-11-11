@@ -16,8 +16,12 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   /** SEGREDO do servidor (wrangler secret) usado para proteger os códigos de acesso. Sem ele, o login responde 503. */
   AUTH_SECRET?: string;
-  /** `dev` imprime o e-mail no terminal (apenas desenvolvimento). Sem valor, não há envio e o login responde 503. */
+  /** `resend` envia pelo Resend (exige RESEND_API_KEY e EMAIL_FROM); `dev` imprime no terminal (só com origens locais). Sem valor, não há envio e o login responde 503. */
   EMAIL_ADAPTER?: string;
+  /** SEGREDO (wrangler secret) do provedor Resend. Nunca em arquivos versionados. */
+  RESEND_API_KEY?: string;
+  /** Remetente verificado no Resend, ex.: `PedidoCerto <acesso@seudominio.com.br>`. Não é segredo. */
+  EMAIL_FROM?: string;
   /** `on` reativa a autenticação antiga por chave de licença (Bearer). Padrão: desligada. */
   LEGACY_KEY_AUTH?: string;
 }
