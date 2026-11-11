@@ -38,12 +38,20 @@ describe('validateBackup', () => {
     expect(() => validateBackup(a)).toThrow('Encomenda');
     expect(() => validateBackup(b)).toThrow('Encomenda');
   });
-  it('aceita unidade culinária e peso de xícara, e rejeita valores inválidos', () => {
-    const ok = valid(); (ok.ingredients[0] as Record<string, unknown>).gramsPerCup = 120; (ok.recipes[0].items[0] as Record<string, unknown>).unit = 'xic';
+  it('aceita unidade culinária, densidade, equivalência por unidade e xícara configurada; rejeita valores inválidos', () => {
+    const ok = valid(); Object.assign(ok.ingredients[0], { densityGPerMl: 0.5, gramsPerUnit: 50 }); Object.assign(ok.recipes[0].items[0], { unit: 'xic' }); Object.assign(ok, { settings: { cupSizeMl: 250 } });
     expect(() => validateBackup(ok)).not.toThrow();
-    const badCup = valid(); (badCup.ingredients[0] as Record<string, unknown>).gramsPerCup = 0;
-    const badUnit = valid(); (badUnit.recipes[0].items[0] as Record<string, unknown>).unit = 'balde';
-    expect(() => validateBackup(badCup)).toThrow('Ingrediente');
+    const badDensity = valid(); Object.assign(badDensity.ingredients[0], { densityGPerMl: 0 });
+    const badUnit = valid(); Object.assign(badUnit.recipes[0].items[0], { unit: 'balde' });
+    const badCup = valid(); Object.assign(badCup, { settings: { cupSizeMl: -1 } });
+    expect(() => validateBackup(badDensity)).toThrow('Ingrediente');
     expect(() => validateBackup(badUnit)).toThrow('Receita');
+    expect(() => validateBackup(badCup)).toThrow('Configurações');
+  });
+  it('migra backups antigos com gramsPerCup para densidade em g/mL', () => {
+    const old = valid(); Object.assign(old.ingredients[0], { gramsPerCup: 120 });
+    const migrated = validateBackup(old).ingredients[0] as unknown as Record<string, unknown>;
+    expect(migrated.densityGPerMl).toBe(0.5);
+    expect('gramsPerCup' in migrated).toBe(false);
   });
 });

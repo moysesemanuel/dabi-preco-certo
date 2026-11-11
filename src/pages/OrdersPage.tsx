@@ -3,7 +3,7 @@ import { ClipboardCheck, FileText, Plus } from 'lucide-react';
 import { money } from '../domain/pricing';
 import type { Order } from '../domain/types';
 import { Field } from '../components/Field';
-import { brDate, canPrice, newId, parse, type PageProps } from '../utils';
+import { brDate, newId, parse, priceRecipe, type PageProps } from '../utils';
 
 const statuses: Order['status'][] = ['Orçamento', 'Confirmado', 'Produção', 'Entregue'];
 
@@ -28,7 +28,7 @@ export function OrdersPage({ data, update, inform }: PageProps) {
     const txt = `Olá, ${o.customer}! Segue seu orçamento:\nProduto: ${r?.name ?? 'Encomenda'}\nQuantidade: ${o.quantity}\nValor unitário: ${money(o.unitPrice)}\nTotal: ${money(o.quantity * o.unitPrice)}\nData solicitada: ${brDate(o.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
     try { await navigator.clipboard.writeText(txt); inform('Orçamento copiado para enviar no WhatsApp.'); } catch { inform('Não foi possível copiar automaticamente.'); }
   };
-  const orderCost = useMemo(() => { const r = data.recipes.find(x => x.id === recipeId); return r ? canPrice(r, data) : null; }, [data, recipeId]);
+  const orderCost = useMemo(() => { const r = data.recipes.find(x => x.id === recipeId); return r ? priceRecipe(r, data) : null; }, [data, recipeId]);
 
   return <>
     <div className="head"><div><div className="eyebrow">Atendimento e organização</div><h1>Encomendas</h1><p className="muted">Cadastre pedidos, acompanhe estados e copie orçamentos.</p></div></div>
@@ -36,14 +36,15 @@ export function OrdersPage({ data, update, inform }: PageProps) {
       <section className="card"><h2 className="section-title">Nova encomenda</h2>
         <form className="stack" onSubmit={addOrder} style={{ marginTop: 19 }}>
           <Field label="Nome do cliente"><input value={customer} onChange={e => setCustomer(e.target.value)} placeholder="Ex.: Ana Martins" required /></Field>
-          <Field label="Receita"><select value={recipeId} onChange={e => { const newRecipe = e.target.value; setRecipeId(newRecipe); const r = data.recipes.find(x => x.id === newRecipe); const result = r ? canPrice(r, data) : null; setUnitPrice(result ? String(result.suggestedPrice) : ''); }} required><option value="">Escolha a receita...</option>{data.recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></Field>
+          <Field label="Receita"><select value={recipeId} onChange={e => { const newRecipe = e.target.value; setRecipeId(newRecipe); const r = data.recipes.find(x => x.id === newRecipe); const result = r ? priceRecipe(r, data) : null; setUnitPrice(result?.ok ? String(result.cost.suggestedPrice) : ''); }} required><option value="">Escolha a receita...</option>{data.recipes.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></Field>
           <div className="form-grid">
             <Field label="Quantidade"><input type="number" min="0.01" step="any" value={qty} onChange={e => setQty(e.target.value)} required /></Field>
             <Field label="Preço unitário (R$)"><input type="number" min="0" step="any" value={unitPrice} onChange={e => setUnitPrice(e.target.value)} required /></Field>
             <Field label="Data da entrega"><input type="date" value={date} onChange={e => setDate(e.target.value)} required /></Field>
             <Field label="Sinal recebido (R$)"><input type="number" min="0" step="any" value={deposit} onChange={e => setDeposit(e.target.value)} required /></Field>
           </div>
-          {recipeId && <div className="notice">Custo estimado por unidade: <strong>{money(orderCost?.costPerUnit ?? 0)}</strong>. Valor unitário pode ser ajustado conforme a negociação.</div>}
+          {recipeId && orderCost?.ok && <div className="notice">Custo estimado por unidade: <strong>{money(orderCost.cost.costPerUnit)}</strong>. Valor unitário pode ser ajustado conforme a negociação.</div>}
+          {recipeId && orderCost && !orderCost.ok && <div className="notice warn"><strong>Custo indisponível.</strong> {orderCost.message} Informe o preço unitário manualmente ou corrija o cadastro.</div>}
           <button className="primary" disabled={!data.recipes.length} type="submit"><Plus size={17} /> Registrar encomenda</button>
         </form>
       </section>

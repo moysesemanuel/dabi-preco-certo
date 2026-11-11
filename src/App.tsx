@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ArchiveRestore, ChefHat, ClipboardCheck, LayoutDashboard, ShoppingBasket } from 'lucide-react';
+import { ArchiveRestore, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, ShoppingBasket } from 'lucide-react';
 import type { DataSet } from './domain/types';
 import { emptyData, loadData, saveData } from './storage/db';
 import type { Page, PageProps } from './utils';
@@ -7,12 +7,13 @@ import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
 import { RecipesPage } from './pages/RecipesPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { ConverterPage } from './pages/ConverterPage';
 import { BackupPage } from './pages/BackupPage';
 
 const pages: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }, { id: 'ingredients', label: 'Ingredientes', icon: ShoppingBasket },
   { id: 'recipes', label: 'Receitas e preços', icon: ChefHat }, { id: 'orders', label: 'Encomendas', icon: ClipboardCheck },
-  { id: 'backup', label: 'Backup', icon: ArchiveRestore },
+  { id: 'converter', label: 'Conversor', icon: Ruler }, { id: 'backup', label: 'Backup', icon: ArchiveRestore },
 ];
 
 export default function App() {
@@ -35,6 +36,7 @@ export default function App() {
       {page === 'ingredients' && <IngredientsPage {...props} />}
       {page === 'recipes' && <RecipesPage {...props} />}
       {page === 'orders' && <OrdersPage {...props} />}
+      {page === 'converter' && <ConverterPage {...props} />}
       {page === 'backup' && <BackupPage {...props} replaceData={setData} />}
     </div></main>{feedback && <div className="toast" role="status">{feedback}</div>}
   </div>;
