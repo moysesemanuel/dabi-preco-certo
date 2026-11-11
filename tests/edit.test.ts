@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { unitChangeAffectsRecipes, updateIngredient, updateOrder, updateRecipe } from '../src/domain/edit';
+import { removeOrder, unitChangeAffectsRecipes, updateIngredient, updateOrder, updateRecipe } from '../src/domain/edit';
 import { recipeCost } from '../src/domain/pricing';
 import type { DataSet } from '../src/domain/types';
 
@@ -60,4 +60,13 @@ describe('Edição de cadastros', () => {
     expect(() => updateOrder(data, 'o', { ...base, deposit: 11 })).toThrow('sinal');
     expect(updateOrder(data, 'o', { ...base, deposit: 10 }).orders[0].deposit).toBe(10);
   });
+
+  it('remove só a encomenda indicada, sem tocar em receitas e ingredientes', () => {
+    const two = { ...data, orders: [...data.orders, { ...data.orders[0], id: 'o2' }] };
+    const next = removeOrder(two, 'o');
+    expect(next.orders.map(o => o.id)).toEqual(['o2']);
+    expect(next.recipes).toEqual(two.recipes); expect(next.ingredients).toEqual(two.ingredients);
+    expect(two.orders).toHaveLength(2);
+  });
+  it('rejeita remover encomenda inexistente', () => expect(() => removeOrder(data, 'nada')).toThrow('Encomenda'));
 });

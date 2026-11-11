@@ -27,6 +27,12 @@ export function updateOrder(data: DataSet, id: string, patch: OrderPatch): DataS
   return { ...data, orders: data.orders.map(o => (o.id === id ? { ...o, ...patch, customer: patch.customer.trim() } : o)) };
 }
 
+/** Remove uma encomenda. Receitas e ingredientes não são alterados (a receita volta a poder ser excluída se não tiver outras encomendas). */
+export function removeOrder(data: DataSet, id: string): DataSet {
+  if (!data.orders.some(o => o.id === id)) throw new Error('Encomenda não encontrada.');
+  return { ...data, orders: data.orders.filter(o => o.id !== id) };
+}
+
 /** Grava equivalências de referência em ingredientes, preenchendo só o que ainda está em branco (nunca sobrescreve). */
 export function applyEquivalences(data: DataSet, patches: { ingredientId: string; patch: { densityGPerMl?: number; gramsPerUnit?: number } }[]): DataSet {
   return patches.reduce((acc, { ingredientId, patch }) => {
