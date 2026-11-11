@@ -4,7 +4,7 @@ import { unitChangeAffectsRecipes, updateIngredient } from '../domain/edit';
 import { money } from '../domain/pricing';
 import type { Unit } from '../domain/types';
 import { Field } from '../components/Field';
-import { densityToGramsPerCup, findReference, gramsPerCupToDensity, REFERENCE_DISCLAIMER } from '../features/measurement/densities';
+import { densityToGramsPerCup, findReference, gramsPerCupToDensity, referenceDensity, REFERENCE_DISCLAIMER } from '../features/measurement/densities';
 import { formatQuantity } from '../features/measurement/units';
 import { cupSizeOf, newId, parse, units, type PageProps } from '../utils';
 
@@ -18,6 +18,7 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
   const [unitGrams, setUnitGrams] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const reference = findReference(name);
+  const refDensity = reference ? referenceDensity(reference) : undefined;
 
   function resetForm() { setEditingId(null); setName(''); setUnit('g'); setQty('1000'); setPrice(''); setCupGrams(''); setUnitGrams(''); }
   function startEdit(id: string) {
@@ -72,8 +73,9 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
           <div className="stack" style={{ gap: 12, borderTop: '1px solid #edf0f3', paddingTop: 14 }}>
             <strong style={{ fontSize: 13 }}>Equivalências para as receitas (opcional)</strong>
             <Field label={`1 xícara (${cup} mL) pesa quantos gramas?`}><input type="number" min="0.1" step="any" value={cupGrams} onChange={e => setCupGrams(e.target.value)} placeholder="Ex.: 120" /></Field>
-            {reference && !cupGrams && <div className="notice">Referência aproximada: 1 xícara de {reference.name.toLowerCase()} ≈ {reference.gramsPerCup} g (xícara de 240 mL). <button type="button" className="secondary" style={{ marginTop: 8, minHeight: 36 }} onClick={() => setCupGrams(String(Number((gramsPerCupToDensity(reference.gramsPerCup, 240) * cup).toFixed(2))))}>Usar esta referência</button></div>}
+            {reference && refDensity && !cupGrams && <div className="notice">Referência aproximada: 1 xícara de {reference.name.toLowerCase()} ≈ {Number((refDensity * 240).toFixed(1))} g (xícara de 240 mL). <button type="button" className="secondary" style={{ marginTop: 8, minHeight: 36 }} onClick={() => setCupGrams(String(Number((refDensity * cup).toFixed(2))))}>Usar esta referência</button></div>}
             <Field label="1 unidade pesa quantos gramas?"><input type="number" min="0.1" step="any" value={unitGrams} onChange={e => setUnitGrams(e.target.value)} placeholder="Ex.: 50 (um ovo)" /></Field>
+            {reference?.gramsPerUnit && !unitGrams && <div className="notice">Referência aproximada: 1 unidade de {reference.name.toLowerCase()} ≈ {reference.gramsPerUnit} g. <button type="button" className="secondary" style={{ marginTop: 8, minHeight: 36 }} onClick={() => setUnitGrams(String(reference.gramsPerUnit))}>Usar esta referência</button></div>}
             <p className="form-subtitle" style={{ margin: 0 }}>Permite usar xícaras, colheres e unidades nas receitas. {REFERENCE_DISCLAIMER} Você pode ajustar o valor.</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}><button className="primary" type="submit">{editingId ? <><Save size={17} /> Salvar alterações</> : <><Plus size={17} /> Adicionar ingrediente</>}</button>{editingId && <button className="secondary" type="button" onClick={resetForm}><X size={16} /> Cancelar</button>}</div>

@@ -67,7 +67,7 @@ describe('Mensagens, referências e apresentação', () => {
   it('referências só casam com o nome completo, sem adivinhar', () => {
     expect(findReference('farinha de trigo')?.gramsPerCup).toBe(120);
     expect(findReference('Açúcar Refinado')?.gramsPerCup).toBe(200);
-    expect(findReference('Farinha de trigo integral')?.gramsPerCup).toBe(120);
+    expect(findReference('Farinha de trigo integral')).toBeUndefined();
     expect(findReference('Leite condensado')).toBeUndefined();
     expect(findReference('Farinha de mandioca')).toBeUndefined();
     expect(findReference('')).toBeUndefined();

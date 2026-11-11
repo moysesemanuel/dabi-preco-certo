@@ -1,10 +1,11 @@
 import { useState, type FormEvent } from 'react';
-import { ArrowRight, BookOpen, Pencil, Plus, Ruler, Save, Trash2, X } from 'lucide-react';
-import { updateRecipe } from '../domain/edit';
+import { ArrowRight, BookOpen, ClipboardPaste, Pencil, Plus, Ruler, Save, Trash2, X } from 'lucide-react';
+import { applyEquivalences, updateRecipe } from '../domain/edit';
 import { money, recipeCost } from '../domain/pricing';
 import type { MeasureUnit, Recipe, RecipeItem } from '../domain/types';
 import { Field } from '../components/Field';
 import { convert, conversionErrorMessage } from '../features/measurement/convert';
+import { RecipeTextImporter, type ImportConfirm } from '../features/recipe-import/components/RecipeTextImporter';
 import { MeasurementConverter, type ConverterUse } from '../features/measurement/components/MeasurementConverter';
 import { formatQuantity, friendlyAmount, UNIT_ORDER, UNITS, unitText } from '../features/measurement/units';
 import { cupSizeOf, newId, parse, priceRecipe, type PageProps } from '../utils';
@@ -20,6 +21,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
   const [selectedId, setSelectedId] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showConverter, setShowConverter] = useState(false);
+  const [showImport, setShowImport] = useState(false);
   const cupSizeMl = cupSizeOf(data);
 
   function resetForm() {
@@ -53,6 +55,13 @@ export function RecipesPage({ data, update, inform }: PageProps) {
       : [...list, { ingredientId: use.ingredientId, quantity: use.quantity, unit: use.unit }]);
     inform('Medida aplicada à receita (se o ingrediente já estava na lista, a linha foi atualizada).');
   }
+  function importIngredients({ items: incoming, patches }: ImportConfirm) {
+    if (patches.length) update(d => applyEquivalences(d, patches));
+    // evita duplicar uma linha idêntica (mesmo ingrediente, quantidade e medida) já presente na receita
+    setItems(list => [...list, ...incoming.filter(n => !list.some(x => x.ingredientId === n.ingredientId && x.quantity === n.quantity && x.unit === n.unit))]);
+    setShowImport(false);
+    inform(`${incoming.length} ingrediente(s) adicionado(s) à receita. Revise e clique em "Salvar receita" para guardar.`);
+  }
   function removeRecipe(recipeId: string) {
     if (data.orders.some(o => o.recipeId === recipeId)) return inform('Esta receita possui encomendas. Exclua as encomendas antes.');
     if (!confirm('Excluir esta receita?')) return;
@@ -67,6 +76,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
 
   return <>
     <div className="head"><div><div className="eyebrow">Custo e preço sugerido</div><h1>Receitas e precificação</h1><p className="muted">Organize ingredientes, rendimento, embalagem e mão de obra.</p></div></div>
+    {showImport && <section className="card" style={{ marginBottom: 19 }}><RecipeTextImporter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onConfirm={importIngredients} onCancel={() => setShowImport(false)} /></section>}
     <div className="two">
       <section className="card"><h2 className="section-title">{editingId ? 'Editar receita' : 'Criar receita'}</h2>
         <form className="stack" onSubmit={saveRecipe} style={{ marginTop: 19 }}>
@@ -96,6 +106,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
             })}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setItems(list => [...list, { ingredientId: data.ingredients[0].id, quantity: 100, unit: data.ingredients[0].unit }])}><Plus size={16} /> Adicionar ingrediente</button>
+            <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setShowImport(v => !v)}><ClipboardPaste size={16} /> Colar lista</button>
             <button type="button" className="secondary" onClick={() => setShowConverter(v => !v)}><Ruler size={16} /> {showConverter ? 'Fechar conversor' : 'Conversor de medidas'}</button>
             </div>
             {showConverter && <div className="card" style={{ marginTop: 12, background: '#fbfaf7' }}><MeasurementConverter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onCupSizeChange={n => update(d => ({ ...d, settings: { cupSizeMl: n } }))} onUse={useConversion} /></div>}

@@ -15,6 +15,20 @@ export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): Dat
   return { ...data, recipes: data.recipes.map(r => (r.id === id ? { ...patch, id } : r)) };
 }
 
+/** Grava equivalências de referência em ingredientes, preenchendo só o que ainda está em branco (nunca sobrescreve). */
+export function applyEquivalences(data: DataSet, patches: { ingredientId: string; patch: { densityGPerMl?: number; gramsPerUnit?: number } }[]): DataSet {
+  return patches.reduce((acc, { ingredientId, patch }) => {
+    const current = acc.ingredients.find(i => i.id === ingredientId);
+    if (!current) return acc;
+    const { id: _id, ...rest } = current;
+    return updateIngredient(acc, ingredientId, {
+      ...rest,
+      ...(current.densityGPerMl === undefined && patch.densityGPerMl !== undefined ? { densityGPerMl: patch.densityGPerMl } : {}),
+      ...(current.gramsPerUnit === undefined && patch.gramsPerUnit !== undefined ? { gramsPerUnit: patch.gramsPerUnit } : {}),
+    });
+  }, data);
+}
+
 /** True se mudar a unidade do ingrediente pode distorcer receitas antigas, cujos itens não guardam unidade própria. */
 export function unitChangeAffectsRecipes(data: DataSet, id: string, newUnit: Ingredient['unit']): boolean {
   const current = data.ingredients.find(i => i.id === id);
