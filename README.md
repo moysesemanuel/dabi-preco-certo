@@ -37,7 +37,7 @@ npm test
 
 - Design system inicial, dashboard responsivo e navegação.
 - Cadastro, **edição** e exclusão de ingredientes com unidade, quantidade e preço de compra. Editar o preço recalcula o custo das receitas; trocar a unidade exibe um aviso para revisar as receitas.
-- Cadastro de receitas e seus ingredientes, rendimento, embalagem, mão de obra e extras.
+- Cadastro e **edição** de receitas (ingredientes, rendimento, embalagem, mão de obra e extras). Editar uma receita não altera encomendas já registradas, que guardam o próprio preço unitário.
 - Cálculo de custo total, custo unitário e sugestão de preço por margem sobre venda.
 - Cadastro de encomendas, mudança de status e cópia do texto de orçamento para WhatsApp.
 - Armazenamento local no IndexedDB e exportação/importação de backup JSON.
@@ -48,17 +48,16 @@ npm test
 - Não é uma PWA instalável nem há suporte offline garantido após fechar/reabrir o navegador; isso exige service worker e testes adicionais.
 - Sem login, servidor, pagamentos, licença ou sincronização entre dispositivos.
 - O formulário de receitas usa as mesmas unidades cadastradas. O módulo de conversão está preparado, mas ainda não foi ligado à interface.
-- Não há edição de receitas e encomendas (apenas o status da encomenda muda); a exclusão de itens com dependentes é bloqueada.
+- Não há edição de encomendas (apenas o status muda); a exclusão de itens com dependentes é bloqueada.
 - O resumo financeiro mostra valores estimados e não substitui contabilidade.
 - O backup faz validação estrutural básica. Regras relacionais, migrações e proteção contra arquivos adulterados precisam de reforço para lançamento.
 - Não há cálculos de impostos, perdas, taxas de pagamento e capacidade de produção por lote no MVP.
 
 ## Próxima etapa proposta
 
-1. Validar instalação, build e testes em ambiente com npm.
-2. Testar fluxo completo em celular e desktop.
-3. Adicionar edição segura dos cadastros, custo de taxas e perdas, capacidade de produção e análises de prazo.
-4. Habilitar PWA offline com versão e política de atualização, mais testes e2e.
+1. Testar fluxo completo (incluindo a edição de ingredientes e receitas) em celular e desktop.
+2. Adicionar edição de encomendas, custo de taxas e perdas, capacidade de produção e análises de prazo.
+3. Habilitar PWA offline com versão e política de atualização, mais testes e2e.
 
 ## Tokens de identidade
 
