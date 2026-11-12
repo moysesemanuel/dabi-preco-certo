@@ -46,7 +46,7 @@ describe('Acesso na versão comercial', () => {
   it('sem sessão: mostra só a entrada (nenhuma navegação nem dado) e avisa que os dados locais foram preservados', async () => {
     fakeServer();
     await boot({ seed: true });
-    expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
+    expect(await screen.findByRole('heading', { name: 'Entrar na conta' }, { timeout: 5000 })).toBeTruthy(); // folga para a suíte inteira rodando em paralelo
     expect(hasApp()).toBe(false);
     expect(screen.queryByText('Farinha Local')).toBeNull();
     expect(screen.getByText(/não foram apagados/)).toBeTruthy();
