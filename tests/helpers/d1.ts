@@ -6,10 +6,10 @@ import type { BoundStatement, D1Like } from '../../worker/src/store';
 const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
 
 /** Simula o D1 com SQLite real (node:sqlite) aplicando a migração verdadeira do projeto. */
-export function createTestD1() {
+export function createTestD1(opts: { /** aplica só as migrações até este arquivo (inclusive), ex.: '0006_prep_minutes.sql' */ upTo?: string } = {}) {
   const db = new DatabaseSync(':memory:');
   const dir = new URL('../../worker/migrations/', import.meta.url);
-  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) db.exec(readFileSync(new URL(file, dir), 'utf8'));
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) { if (opts.upTo && file > opts.upTo) break; db.exec(readFileSync(new URL(file, dir), 'utf8')); }
   type Bound = BoundStatement & { exec: () => { meta: { changes: number } } };
   const d1: D1Like = {
     prepare(sql: string) {

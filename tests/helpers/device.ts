@@ -12,10 +12,12 @@ export class Device {
   dropNextPushResponse = false;
   status401 = false;
   readonly api: SyncApi;
-  constructor(private server: Server, private session: Session) {
+  /** `rewritePush`: altera o corpo dos envios antes de chegarem ao Worker (ex.: simular um Worker ANTIGO que descarta campos que não conhece). */
+  constructor(private server: Server, private session: Session, rewritePush?: (body: Record<string, any>) => Record<string, any>) {
     const fetchImpl = (async (url: string, init: RequestInit = {}) => {
       if (this.offline) throw new TypeError('Failed to fetch');
       const isPush = String(url).endsWith('/api/sync/push');
+      if (isPush && rewritePush && typeof init.body === 'string') init = { ...init, body: JSON.stringify(rewritePush(JSON.parse(init.body))) };
       const res = await server.handle(new Request(url, { ...init, headers: { ...(init.headers as Record<string, string>), cookie: this.status401 ? 'dabi_session=invalida' : session.cookie, origin: ORIGIN } }), server.env);
       if (isPush && this.dropNextPushResponse) { this.dropNextPushResponse = false; throw new TypeError('rede caiu depois do servidor gravar'); }
       return res;

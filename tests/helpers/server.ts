@@ -14,8 +14,8 @@ export const SECRET = 'segredo-de-teste-que-so-existe-no-ambiente-de-teste';
 export type Session = { cookie: string; csrf: string; sessionId: string };
 
 /** Servidor de teste completo (Worker real + SQLite com as migrações reais) com contas, e-mail em memória e relógio controlável. */
-export function makeServer(start = new Date('2026-11-12T15:00:00Z'), opts: { meter?: boolean } = {}) {
-  const db = createTestD1();
+export function makeServer(start = new Date('2026-11-12T15:00:00Z'), opts: { meter?: boolean; /** banco já preparado (ex.: esquema antigo) em vez de um novo com todas as migrações */ db?: ReturnType<typeof createTestD1> } = {}) {
+  const db = opts.db ?? createTestD1();
   const meter = opts.meter ? meterD1(db.d1, db.raw) : undefined; // medição de consumo do D1 (só quando pedida)
   const mail = new MemoryEmailSender();
   const state = { clock: new Date(start) };

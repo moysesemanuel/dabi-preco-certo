@@ -11,9 +11,12 @@
     "test": "vitest run",
     "worker:migrate": "node worker/scripts/d1.ts migrate --env local",
     "d1": "node worker/scripts/d1.ts",
+    "worker:dry-run:staging": "wrangler deploy --dry-run --env staging --config worker/wrangler.toml --outdir .wrangler/dry-run",
+    "worker:deploy:staging": "wrangler deploy --env staging --config worker/wrangler.toml",
     "worker:dev": "wrangler dev --local --config worker/wrangler.toml",
     "licenses": "node worker/scripts/licenses.ts",
     "typecheck": "tsc -b",
+    "rehearse": "REHEARSE_BACKUP=${BACKUP:?informe BACKUP=backups/arquivo.sql} vitest run tests/ops/migration-rehearsal.test.ts",
     "costs": "COST_REPORT=1 vitest run tests/costs/report.test.ts",
     "audit": "npm audit --audit-level=high",
     "check:secrets": "sh scripts/check-secrets.sh"

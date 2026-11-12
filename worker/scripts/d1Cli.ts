@@ -12,17 +12,33 @@ const SPECS = {
   migrate: { options: [], allowedEnvs: ['local', 'staging', 'production', 'restore'], mutating: true },
   export: { options: ['--output'], allowedEnvs: ['local', 'staging', 'production'], mutating: false },
   'restore-file': { options: ['--file'], allowedEnvs: ['local', 'staging', 'restore'], mutating: true }, // nunca produção: use time-travel
+  'migrations-list': { options: [], allowedEnvs: ['local', 'staging', 'production', 'restore'], mutating: false }, // só lista as migrações pendentes
+  query: { options: ['--command'], allowedEnvs: ['local', 'staging', 'production', 'restore'], mutating: false }, // só leitura (SELECT / PRAGMA de estrutura)
   'time-travel-info': { options: [], allowedEnvs: ['staging', 'production'], mutating: false },
   'time-travel-restore': { options: ['--timestamp'], allowedEnvs: ['staging', 'production'], mutating: true },
 } as const satisfies Record<string, Spec>;
 type Cmd = keyof typeof SPECS;
 const USAGE = `Uso: npm run d1 -- <comando> --env <ambiente>
   migrate --env local|staging|production|restore
+  migrations-list --env local|staging|production|restore                 (somente lista as migrações pendentes)
+  query --env local|staging|production|restore --command "SELECT ..."   (somente leitura: SELECT ou PRAGMA table_info/index_list)
   export --env local|staging|production --output arquivo.sql
   restore-file --env local|staging|restore --file arquivo.sql        (restaurar em produção só por time-travel-restore)
   time-travel-info --env staging|production
   time-travel-restore --env staging|production --timestamp <ISO-8601>
   Em produção, comandos que alteram dados exigem confirmação (digitada ou --confirm-production <nome-do-banco>).`;
+
+/** "query" é só leitura: um único SELECT, ou PRAGMA table_info/index_list/index_info. Qualquer outra coisa é recusada antes de chegar ao Wrangler. */
+export function unsafeQuery(command: string): string | undefined {
+  const c = command.trim();
+  if (!c || c.length > 500) return '--command deve ter entre 1 e 500 caracteres.';
+  if (/;/.test(c.replace(/;\s*$/, ''))) return '--command aceita uma única instrução.';
+  const stmt = c.replace(/;\s*$/, '');
+  if (/^PRAGMA\s+(table_info|index_list|index_info)\s*\(\s*[A-Za-z0-9_]+\s*\)$/i.test(stmt)) return undefined;
+  if (!/^SELECT\b/i.test(stmt)) return '--command só aceita SELECT ou PRAGMA table_info/index_list/index_info (somente leitura).';
+  if (/\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|REPLACE|ATTACH|DETACH|VACUUM|REINDEX|PRAGMA|TRIGGER)\b/i.test(stmt)) return '--command contém uma palavra de escrita ou de configuração: recusado.';
+  return undefined;
+}
 
 export type D1Plan = { command: Cmd; target: Target; options: Record<string, string>; confirm?: string };
 
@@ -50,6 +66,7 @@ export function parseD1(argv: readonly string[]): { ok: true; plan: D1Plan } | {
   if ('--output' in options && !/^[\w./-]+\.sql$/.test(options['--output'])) return { ok: false, error: '--output deve ser um caminho .sql simples (letras, números, . _ - /).' };
   if ('--file' in options && !/^[\w./-]+\.sql$/.test(options['--file'])) return { ok: false, error: '--file deve ser um caminho .sql simples (letras, números, . _ - /).' };
   if ('--timestamp' in options && !/^(\d{9,11}|\d{4}-\d{2}-\d{2}T[\d:.]+Z)$/.test(options['--timestamp'])) return { ok: false, error: '--timestamp deve ser epoch em segundos ou RFC3339 em UTC (ex.: 2026-11-12T15:00:00Z).' };
+  if ('--command' in options) { const bad = unsafeQuery(options['--command']); if (bad) return { ok: false, error: bad }; }
   if ('--confirm-production' in options && !spec.mutating) return { ok: false, error: '--confirm-production só se aplica a comandos que alteram dados.' };
   if ('--confirm-production' in options && sel.target.name !== 'production') return { ok: false, error: '--confirm-production só se aplica a --env production.' };
   return { ok: true, plan: { command, target: sel.target, options, confirm: options['--confirm-production'] } };
@@ -62,6 +79,8 @@ export function d1Args(plan: D1Plan): string[] {
   switch (command) {
     case 'migrate': return ['wrangler', 'd1', 'migrations', 'apply', db, ...wranglerScope(t)];
     case 'export': return ['wrangler', 'd1', 'export', db, ...wranglerScope(t), '--output', o['--output']];
+    case 'migrations-list': return ['wrangler', 'd1', 'migrations', 'list', db, ...wranglerScope(t)];
+    case 'query': return ['wrangler', 'd1', 'execute', db, ...wranglerScope(t), '--command', o['--command']];
     case 'restore-file': return ['wrangler', 'd1', 'execute', db, ...wranglerScope(t), '--file', o['--file']];
     case 'time-travel-info': return ['wrangler', 'd1', 'time-travel', 'info', db, '--config', 'worker/wrangler.toml', '--env', t.wranglerEnv as string];
     case 'time-travel-restore': return ['wrangler', 'd1', 'time-travel', 'restore', db, '--config', 'worker/wrangler.toml', '--env', t.wranglerEnv as string, '--timestamp', o['--timestamp']];

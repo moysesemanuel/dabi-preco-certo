@@ -213,6 +213,45 @@ describe('CLI do D1 (migrar, exportar, restaurar)', () => {
   });
 });
 
+describe('CLI do D1: verificação somente leitura (migrations-list e query)', () => {
+  const go = async (argv: string[]) => { const calls: string[][] = [], err: string[] = []; const code = await runD1Cli(argv, { exec: a => { calls.push(a); }, out: () => undefined, err: l => err.push(l), isTTY: false, prompt: async () => '' } as D1Deps); return { code, calls, err }; };
+  it('migrations-list usa o ambiente explícito, o banco certo e --remote; não pede confirmação (não altera nada)', async () => {
+    const r = await go(['migrations-list', '--env', 'staging']);
+    expect(r.code).toBe(0); expect(r.calls).toEqual([['wrangler', 'd1', 'migrations', 'list', 'dabi-orcamentos-staging', '--config', 'worker/wrangler.toml', '--env', 'staging', '--remote']]);
+    expect(r.err[0]).toContain('dabi-orcamentos-staging');
+  });
+  it('query aceita só SELECT e PRAGMA de estrutura, com o ambiente explícito', async () => {
+    const q = 'SELECT name FROM d1_migrations ORDER BY id';
+    expect((await go(['query', '--env', 'staging', '--command', q])).calls).toEqual([['wrangler', 'd1', 'execute', 'dabi-orcamentos-staging', '--config', 'worker/wrangler.toml', '--env', 'staging', '--remote', '--command', q]]);
+    for (const ok of ['PRAGMA table_info(orders)', 'pragma index_list(orders)', 'SELECT COUNT(*) AS n FROM orders WHERE quote_code IS NULL;']) expect(parseD1(['query', '--env', 'local', '--command', ok]).ok, ok).toBe(true);
+  });
+  it.each([
+    ['sem ambiente', ['query', '--command', 'SELECT 1']], ['sem --command', ['query', '--env', 'staging']],
+    ['escrita', ['query', '--env', 'staging', '--command', 'UPDATE orders SET status = 1']], ['apagar', ['query', '--env', 'staging', '--command', 'DELETE FROM orders']],
+    ['duas instruções', ['query', '--env', 'staging', '--command', 'SELECT 1; DROP TABLE orders']], ['SELECT disfarçado', ['query', '--env', 'staging', '--command', 'SELECT 1 FROM orders WHERE 1=1 UNION SELECT 1 FROM (DELETE FROM orders)']],
+    ['pragma de escrita', ['query', '--env', 'staging', '--command', 'PRAGMA writable_schema=1']], ['--remote sozinho', ['migrations-list', '--remote']], ['--confirm-production não se aplica', ['query', '--env', 'production', '--command', 'SELECT 1', '--confirm-production', 'x']],
+  ])('recusa: %s', async (_n, argv) => { const r = await go(argv as string[]); expect(r.code).toBe(1); expect(r.calls).toHaveLength(0); });
+});
+
+describe('Publicação do Worker: sempre com ambiente explícito', () => {
+  const scripts = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }).scripts;
+  it('todo script que publica ou simula publicação informa --env e a configuração; nenhum aponta para produção', () => {
+    const deploys = Object.entries(scripts).filter(([, v]) => /wrangler\s+deploy/.test(v));
+    expect(deploys.map(([k]) => k).sort()).toEqual(['worker:deploy:staging', 'worker:dry-run:staging']);
+    for (const [k, v] of deploys) { expect(v, k).toMatch(/--env staging/); expect(v, k).toContain('--config worker/wrangler.toml'); expect(v, k).not.toMatch(/production|producao/i); }
+    expect(scripts['worker:dry-run:staging']).toContain('--dry-run');
+  });
+  it('a configuração de homologação não usa curingas nem a origem de produção e tem banco próprio', () => {
+    const toml = readFileSync('worker/wrangler.toml', 'utf8');
+    const staging = toml.slice(toml.indexOf('[env.staging]'), toml.indexOf('[env.production]'));
+    expect(staging).toContain('name = "dabi-orcamentos-staging"'); expect(staging).toMatch(/EMAIL_ADAPTER = "resend"/); expect(staging).toMatch(/PUBLIC_BASE_URL = "https:\/\//);
+    expect(staging).not.toMatch(/ALLOWED_ORIGINS = "[^"]*\*/); expect(staging).not.toContain('database_name = "dabi-orcamentos-producao"');
+    const id = (block: string) => /database_id = "([^"]+)"/.exec(block)?.[1];
+    const prod = toml.slice(toml.indexOf('[env.production]'));
+    expect(id(staging)).not.toBe(id(prod));
+  });
+});
+
 describe('Coerência com worker/wrangler.toml e package.json', () => {
   const toml = readFileSync('worker/wrangler.toml', 'utf8');
   const section = (header: string) => { const i = toml.indexOf(header); const rest = toml.slice(i + header.length); const next = rest.search(/\n\[\[?[a-z]/); return rest.slice(0, next < 0 ? undefined : next); };

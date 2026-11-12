@@ -7,3 +7,7 @@ dist
 
 .wrangler
 .dev.vars
+
+# Backups do banco (contêm e-mails e dados de clientes): nunca versionar
+backups/
+*.sql.bak
