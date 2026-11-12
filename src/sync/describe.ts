@@ -1,4 +1,5 @@
 /** Textos em português para mostrar um conflito: nome da entidade, campos que divergem e valores formatados. */
+import { findItem, findVariant } from '../features/measurement/catalog';
 import type { ConflictRecord } from './engine';
 
 export const KIND_LABEL: Record<ConflictRecord['kind'], string> = { ingredients: 'ingrediente', recipes: 'receita', orders: 'encomenda', settings: 'configurações' };
@@ -11,7 +12,7 @@ const FIELD: Record<string, { label: string; money?: boolean }> = {
   extraTotal: { label: 'Custos extras', money: true }, desiredMargin: { label: 'Margem desejada (%)' }, prepMinutes: { label: 'Minutos de preparo' },
   customer: { label: 'Cliente' }, recipeId: { label: 'Receita' }, quantity: { label: 'Quantidade' }, unitPrice: { label: 'Preço unitário', money: true }, deliveryDate: { label: 'Entrega' },
   status: { label: 'Situação' }, deposit: { label: 'Sinal', money: true }, createdAt: { label: 'Criada em' }, costSnapshot: { label: 'Custo registrado' }, payments: { label: 'Recebimentos' },
-  cupSizeMl: { label: 'Tamanho da xícara (ml)' }, businessName: { label: 'Nome do negócio' }, businessPhone: { label: 'Telefone' }, dailyCapacityMinutes: { label: 'Minutos por dia' }, workWeekdays: { label: 'Dias de trabalho' },
+  catalogRef: { label: 'Medidas de referência' }, cupSizeMl: { label: 'Tamanho da xícara (ml)' }, businessName: { label: 'Nome do negócio' }, businessPhone: { label: 'Telefone' }, dailyCapacityMinutes: { label: 'Minutos por dia' }, workWeekdays: { label: 'Dias de trabalho' },
 };
 
 const show = (key: string, v: unknown): string => {
@@ -23,6 +24,7 @@ const show = (key: string, v: unknown): string => {
     if (key === 'items') return `${v.length} ${v.length === 1 ? 'item' : 'itens'}`;
     return v.join(', ');
   }
+  if (typeof v === 'object' && key === 'catalogRef') { const r = v as { id: string; variant: string }; const item = findItem(r.id); return item ? `${item.name}${item.variants.length > 1 ? ` · ${findVariant(item, r.variant).label}` : ''}` : r.id; }
   if (typeof v === 'object') return key === 'costSnapshot' ? brl((v as { costPerUnit: number }).costPerUnit) : JSON.stringify(v);
   return String(v);
 };

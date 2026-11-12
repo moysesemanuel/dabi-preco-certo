@@ -1,4 +1,6 @@
-import type { Ingredient, MeasureUnit, RecipeItem } from '../../domain/types';
+import { effectiveEquivalence } from '../../domain/equivalence';
+import type { CatalogRef, Ingredient, MeasureUnit, RecipeItem } from '../../domain/types';
+import { makeRef } from '../measurement/catalog';
 import { convert, conversionErrorMessage, DEFAULT_CUP_ML, type ConversionResult } from '../measurement/convert';
 import { findReference, nameCandidates, referenceDensity, type DensityReference } from '../measurement/densities';
 import { dimensionOf, formatQuantity, unitLabel } from '../measurement/units';
@@ -6,7 +8,7 @@ import type { ParsedLine } from './parse';
 
 /** Linha editável da tabela de importação. Os campos de texto são o que a pessoa vê e pode corrigir. */
 export type ImportRow = { id: number; parsed: ParsedLine; quantity: string; unit: MeasureUnit | ''; ingredientId: string; include: boolean };
-export type EquivalencePatch = { ingredientId: string; name: string; patch: { densityGPerMl?: number; gramsPerUnit?: number }; description: string };
+export type EquivalencePatch = { ingredientId: string; name: string; patch: { catalogRef: CatalogRef }; description: string };
 
 export type RowAnalysis = {
   ingredient?: Ingredient;
@@ -71,11 +73,12 @@ export function analyzeRow(row: ImportRow, ingredients: Ingredient[], cupSizeMl:
   const ingredient = ingredients.find(i => i.id === row.ingredientId);
   const reference = findReference(parsed.name) ?? (ingredient ? findReference(ingredient.name) : undefined);
   const refDensity = reference ? referenceDensity(reference) : undefined;
-  // O cadastro do ingrediente tem prioridade sobre a referência aproximada.
-  const density = ingredient?.densityGPerMl ?? refDensity;
-  const densitySource = ingredient?.densityGPerMl !== undefined ? 'cadastro do ingrediente' : 'referência aproximada';
-  const gramsPerUnit = ingredient?.gramsPerUnit ?? reference?.gramsPerUnit;
-  const unitSource = ingredient?.gramsPerUnit !== undefined ? 'cadastro do ingrediente' : 'referência aproximada';
+  // O que o usuário informou no cadastro tem prioridade; depois a referência do catálogo já adotada; por último a referência sugerida.
+  const eq = ingredient ? effectiveEquivalence(ingredient) : {};
+  const density = eq.densityGPerMl ?? refDensity;
+  const densitySource = eq.densitySource === 'custom' ? 'valor informado no cadastro' : eq.densitySource === 'catalog' ? 'referência do catálogo adotada' : 'referência aproximada do catálogo';
+  const gramsPerUnit = eq.gramsPerUnit ?? reference?.gramsPerUnit;
+  const unitSource = eq.unitSource === 'custom' ? 'valor informado no cadastro' : eq.unitSource === 'catalog' ? 'referência do catálogo adotada' : 'referência aproximada do catálogo';
 
   const valid = quantity !== undefined && Number.isFinite(quantity) && quantity >= 0 && unit !== undefined;
   let grams: number | undefined, ml: number | undefined, approximate = false;
@@ -110,10 +113,11 @@ export function analyzeRow(row: ImportRow, ingredients: Ingredient[], cupSizeMl:
       item = { ingredientId: ingredient.id, quantity, unit };
       if (dimensionOf(unit) !== dimensionOf(ingredient.unit)) {
         const counting = dimensionOf(unit) === 'count' || dimensionOf(ingredient.unit) === 'count';
-        if (counting && ingredient.gramsPerUnit === undefined && reference?.gramsPerUnit !== undefined) {
-          patch = { ingredientId: ingredient.id, name: ingredient.name, patch: { gramsPerUnit: reference.gramsPerUnit }, description: `1 unidade ≈ ${formatQuantity(reference.gramsPerUnit, 'g')} g` };
-        } else if (!counting && ingredient.densityGPerMl === undefined && refDensity !== undefined) {
-          patch = { ingredientId: ingredient.id, name: ingredient.name, patch: { densityGPerMl: refDensity }, description: `1 xícara (${cupSizeMl} mL) ≈ ${formatQuantity(refDensity * cupSizeMl, 'g')} g` };
+        const ref = reference && !ingredient.catalogRef ? makeRef(reference.itemId, reference.variantId) : undefined;
+        if (ref && counting && eq.gramsPerUnit === undefined && reference?.gramsPerUnit !== undefined) {
+          patch = { ingredientId: ingredient.id, name: ingredient.name, patch: { catalogRef: ref }, description: `1 unidade ≈ ${formatQuantity(reference.gramsPerUnit, 'g')} g` };
+        } else if (ref && !counting && eq.densityGPerMl === undefined && refDensity !== undefined) {
+          patch = { ingredientId: ingredient.id, name: ingredient.name, patch: { catalogRef: ref }, description: `1 xícara (${cupSizeMl} mL) ≈ ${formatQuantity(refDensity * cupSizeMl, 'g')} g` };
         }
       }
     }

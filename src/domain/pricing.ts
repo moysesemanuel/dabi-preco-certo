@@ -1,4 +1,5 @@
 import { convert, conversionErrorMessage, DEFAULT_CUP_ML } from '../features/measurement/convert';
+import { effectiveEquivalence } from './equivalence';
 import type { Ingredient, MeasureUnit, Recipe } from './types';
 export const round2 = (v: number): number => Math.round((v + Number.EPSILON) * 100) / 100;
 /** Linha de custo: preserva a medida original da receita e a quantidade convertida usada no cálculo. */
@@ -13,7 +14,8 @@ export function recipeCost(recipe: Recipe, ingredients: Ingredient[], cupSizeMl:
     if (!ingredient) throw new Error('Ingrediente não encontrado.');
     if (ingredient.purchaseQuantity <= 0 || item.quantity < 0 || ingredient.purchasePrice < 0) throw new Error('Quantidade ou custo inválido.');
     const unit = item.unit ?? ingredient.unit;
-    const converted = convert({ quantity: item.quantity, from: unit, to: ingredient.unit, densityGPerMl: ingredient.densityGPerMl, gramsPerUnit: ingredient.gramsPerUnit, cupSizeMl });
+    const eq = effectiveEquivalence(ingredient); // o valor informado pelo usuário tem prioridade sobre a referência do catálogo
+    const converted = convert({ quantity: item.quantity, from: unit, to: ingredient.unit, densityGPerMl: eq.densityGPerMl, gramsPerUnit: eq.gramsPerUnit, cupSizeMl });
     if (!converted.success) throw new Error(conversionErrorMessage(converted.error, unit, ingredient.unit, ingredient.name));
     return { ingredientId: ingredient.id, name: ingredient.name, quantity: item.quantity, unit, convertedQuantity: converted.value, convertedUnit: ingredient.unit, approximate: converted.approximate, cost: ingredient.purchasePrice / ingredient.purchaseQuantity * converted.value };
   });

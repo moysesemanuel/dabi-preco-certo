@@ -2,10 +2,17 @@ export type Unit = 'g' | 'kg' | 'ml' | 'l' | 'un';
 /** Unidades de medida de uso culinário: xícara (240 ml), colher de sopa (15 ml) e colher de chá (5 ml). */
 export type MeasureUnit = Unit | 'xic' | 'cs' | 'cc';
 /**
- * densityGPerMl: densidade do ingrediente (g/mL), necessária para converter entre peso e volume.
- * gramsPerUnit: quanto pesa 1 unidade do ingrediente, necessário para converter unidade em peso.
+ * densityGPerMl: densidade informada pelo usuário (g/mL), para converter entre peso e volume.
+ * gramsPerUnit: quanto pesa 1 unidade do ingrediente, informado pelo usuário.
+ * Sem valor informado, vale a referência do catálogo (`catalogRef`), veja `effectiveEquivalence`.
  */
-export type Ingredient = { id: string; name: string; purchaseQuantity: number; unit: Unit; purchasePrice: number; densityGPerMl?: number; gramsPerUnit?: number };
+export type Ingredient = { id: string; name: string; purchaseQuantity: number; unit: Unit; purchasePrice: number;
+  /** Valor INFORMADO pelo usuário (tem prioridade sobre a referência do catálogo). Nunca é preenchido automaticamente pelo catálogo. */
+  densityGPerMl?: number; gramsPerUnit?: number;
+  /** Referência do catálogo adotada pelo usuário, com os valores congelados no momento da adoção. */
+  catalogRef?: CatalogRef };
+/** Referência de medidas escolhida no catálogo. Os valores ficam congelados: atualizar o catálogo nunca altera custos sem o usuário aceitar. */
+export type CatalogRef = { id: string; variant: string; /** versão do catálogo em que foi adotada */ version: string; densityGPerMl?: number; gramsPerUnit?: number };
 /** unit ausente = mesma unidade de compra do ingrediente (dados anteriores à conversão). */
 export type RecipeItem = { ingredientId: string; quantity: number; unit?: MeasureUnit };
 export type Recipe = { id: string; name: string; yield: number; items: RecipeItem[]; packagingPerUnit: number; laborTotal: number; extraTotal: number; desiredMargin: number; /** Minutos para produzir UMA receita (rendimento completo); opcional, usado só na análise de prazo. */ prepMinutes?: number };

@@ -20,7 +20,12 @@ export type ConversionInput = {
   cupSizeMl?: number;
 };
 export type ConversionError = 'INVALID_QUANTITY' | 'MISSING_DENSITY' | 'MISSING_UNIT_EQUIVALENCE' | 'INVALID_CONFIGURATION';
-export type ConversionResult = { success: true; value: number; approximate: boolean } | { success: false; error: ConversionError };
+/**
+ * Natureza do resultado: 'exact' (mesma grandeza, sem convenção: g↔kg, mL↔L, unidade↔unidade), 'convention' (usa xícara/colher,
+ * que são convenções culinárias, não medidas físicas) ou 'reference' (massa↔volume ou unidade↔peso: depende da referência do ingrediente).
+ */
+export type ConversionBasis = 'exact' | 'convention' | 'reference';
+export type ConversionResult = { success: true; value: number; approximate: boolean; basis: ConversionBasis } | { success: false; error: ConversionError };
 
 const GRAMS: Record<string, number | undefined> = { g: 1, kg: 1000 };
 const isPositive = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0;
@@ -34,14 +39,14 @@ export function convert(input: ConversionInput): ConversionResult {
   if (!isPositive(cup) || invalidIfSet(densityGPerMl) || invalidIfSet(gramsPerUnit) || invalidIfSet(mlPerUnit) || !(from in UNITS) || !(to in UNITS)) return { success: false, error: 'INVALID_CONFIGURATION' };
 
   const approximate = UNITS[from].approximate || UNITS[to].approximate;
-  if (from === to) return { success: true, value: quantity, approximate: false };
+  if (from === to) return { success: true, value: quantity, approximate: false, basis: 'exact' };
 
   const mlOf = (u: MeasureUnit): number => (u === 'ml' ? 1 : u === 'l' ? 1000 : u === 'xic' ? cup : u === 'cs' ? TBSP_ML : TSP_ML);
   const fromDim = dimensionOf(from), toDim = dimensionOf(to);
 
-  if (fromDim === toDim && fromDim === 'mass') return { success: true, value: quantity * GRAMS[from]! / GRAMS[to]!, approximate };
-  if (fromDim === toDim && fromDim === 'volume') return { success: true, value: quantity * mlOf(from) / mlOf(to), approximate };
-  if (fromDim === 'count' && toDim === 'count') return { success: true, value: quantity, approximate: false };
+  if (fromDim === toDim && fromDim === 'mass') return { success: true, value: quantity * GRAMS[from]! / GRAMS[to]!, approximate, basis: 'exact' };
+  if (fromDim === toDim && fromDim === 'volume') return { success: true, value: quantity * mlOf(from) / mlOf(to), approximate, basis: approximate ? 'convention' : 'exact' };
+  if (fromDim === 'count' && toDim === 'count') return { success: true, value: quantity, approximate: false, basis: 'exact' };
 
   if (fromDim === 'count' || toDim === 'count') {
     const other = fromDim === 'count' ? to : from;
@@ -50,7 +55,7 @@ export function convert(input: ConversionInput): ConversionResult {
     const value = fromDim === 'count'
       ? (dimensionOf(other) === 'mass' ? quantity * perUnit / GRAMS[other]! : quantity * perUnit / mlOf(other))
       : (dimensionOf(other) === 'mass' ? quantity * GRAMS[other]! / perUnit : quantity * mlOf(other) / perUnit);
-    return { success: true, value, approximate: true };
+    return { success: true, value, approximate: true, basis: 'reference' };
   }
 
   // massa <-> volume: exige densidade específica do ingrediente
@@ -58,7 +63,7 @@ export function convert(input: ConversionInput): ConversionResult {
   const value = fromDim === 'volume'
     ? quantity * mlOf(from) * densityGPerMl / GRAMS[to]!
     : quantity * GRAMS[from]! / densityGPerMl / mlOf(to);
-  return { success: true, value, approximate: true };
+  return { success: true, value, approximate: true, basis: 'reference' };
 }
 
 /** Mensagem clara para a interface, indicando qual configuração falta. */

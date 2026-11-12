@@ -1,5 +1,5 @@
 import { captureCostSnapshot } from './orderCost';
-import type { DataSet, Ingredient, Order, Recipe } from './types';
+import type { CatalogRef, DataSet, Ingredient, Order, Recipe } from './types';
 
 export type IngredientPatch = Omit<Ingredient, 'id'>;
 export type RecipePatch = Omit<Recipe, 'id'>;
@@ -55,17 +55,16 @@ export function removeOrder(data: DataSet, id: string): DataSet {
   return { ...data, orders: data.orders.filter(o => o.id !== id) };
 }
 
-/** Grava equivalências de referência em ingredientes, preenchendo só o que ainda está em branco (nunca sobrescreve). */
-export function applyEquivalences(data: DataSet, patches: { ingredientId: string; patch: { densityGPerMl?: number; gramsPerUnit?: number } }[]): DataSet {
+/**
+ * Adota referências do catálogo em ingredientes que ainda não têm uma (nunca troca uma referência existente nem mexe nos valores
+ * informados pelo usuário, que têm prioridade nos cálculos).
+ */
+export function applyEquivalences(data: DataSet, patches: { ingredientId: string; patch: { catalogRef?: CatalogRef } }[]): DataSet {
   return patches.reduce((acc, { ingredientId, patch }) => {
     const current = acc.ingredients.find(i => i.id === ingredientId);
-    if (!current) return acc;
+    if (!current || current.catalogRef || !patch.catalogRef) return acc;
     const { id: _id, ...rest } = current;
-    return updateIngredient(acc, ingredientId, {
-      ...rest,
-      ...(current.densityGPerMl === undefined && patch.densityGPerMl !== undefined ? { densityGPerMl: patch.densityGPerMl } : {}),
-      ...(current.gramsPerUnit === undefined && patch.gramsPerUnit !== undefined ? { gramsPerUnit: patch.gramsPerUnit } : {}),
-    });
+    return updateIngredient(acc, ingredientId, { ...rest, catalogRef: patch.catalogRef });
   }, data);
 }
 

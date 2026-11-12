@@ -1,4 +1,4 @@
-import { parseIngredient, parseOrder, parseRecipe, parseSettings } from '../../shared/dataset';
+import { parseCatalogRef, parseIngredient, parseOrder, parseRecipe, parseSettings } from '../../shared/dataset';
 import { countChanges, KINDS, sameEntity, SYNC_LIMITS, type Conflict, type Kind, type PullEntity, type PullResponse, type PushOk, type PushRequest } from '../../shared/sync';
 import type { Ingredient, Order, Payment, Recipe, Settings } from '../../src/domain/types';
 import type { BoundStatement, D1Like } from './store';
@@ -9,7 +9,9 @@ const GUARD = (userIdParam: string, pushParam: string) => `EXISTS (SELECT 1 FROM
 
 type Row = Record<string, unknown>;
 const num = (v: unknown) => v as number;
-const ingredientOf = (r: Row): Ingredient => ({ id: r.id as string, name: r.name as string, unit: r.unit as Ingredient['unit'], purchaseQuantity: num(r.purchase_quantity), purchasePrice: num(r.purchase_price), ...(r.density_g_per_ml !== null ? { densityGPerMl: num(r.density_g_per_ml) } : {}), ...(r.grams_per_unit !== null ? { gramsPerUnit: num(r.grams_per_unit) } : {}) });
+const ingredientOf = (r: Row): Ingredient => ({ id: r.id as string, name: r.name as string, unit: r.unit as Ingredient['unit'], purchaseQuantity: num(r.purchase_quantity), purchasePrice: num(r.purchase_price), ...(r.density_g_per_ml !== null ? { densityGPerMl: num(r.density_g_per_ml) } : {}), ...(r.grams_per_unit !== null ? { gramsPerUnit: num(r.grams_per_unit) } : {}), ...(typeof r.catalog_ref === 'string' ? catalogRefOf(r.catalog_ref) : {}) });
+/** Lê a referência do catálogo gravada (JSON). Valor ilegível é ignorado em vez de derrubar a leitura. */
+const catalogRefOf = (json: string): Pick<Ingredient, 'catalogRef'> => { try { return { catalogRef: parseCatalogRef(JSON.parse(json)) }; } catch { return {}; } };
 const recipeOf = (r: Row, items: Row[]): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), ...(r.prep_minutes !== null ? { prepMinutes: num(r.prep_minutes) } : {}), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })) });
 const paymentOf = (p: Row): Payment => ({ id: p.id as string, amount: num(p.amount), receivedAt: p.received_at as string, ...(p.method !== null ? { method: p.method as NonNullable<Payment['method']> } : {}), ...(p.note !== null ? { note: p.note as string } : {}) });
 const orderOf = (r: Row, pays: Row[] = []): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}) });
@@ -176,10 +178,10 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   const g = (a: string, b: string) => GUARD(a, b);
   const batch: BoundStatement[] = [p('UPDATE sync_state SET revision = ?1, last_push_id = ?2, updated_at = ?3 WHERE user_id = ?4 AND revision = ?5', rev, newPushId, now, userId, state.revision)];
   for (const i of toUpsert.ingredients) {
-    batch.push(p(`INSERT INTO ingredients (user_id, id, name, unit, purchase_quantity, purchase_price, density_g_per_ml, grams_per_unit, rev, deleted_at)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL WHERE ${g('?1', '?10')}
+    batch.push(p(`INSERT INTO ingredients (user_id, id, name, unit, purchase_quantity, purchase_price, density_g_per_ml, grams_per_unit, catalog_ref, rev, deleted_at)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?11, ?9, NULL WHERE ${g('?1', '?10')}
       ON CONFLICT (user_id, id) DO UPDATE SET name = excluded.name, unit = excluded.unit, purchase_quantity = excluded.purchase_quantity, purchase_price = excluded.purchase_price,
-        density_g_per_ml = excluded.density_g_per_ml, grams_per_unit = excluded.grams_per_unit, rev = excluded.rev, deleted_at = NULL`, userId, i.id, i.name, i.unit, i.purchaseQuantity, i.purchasePrice, i.densityGPerMl ?? null, i.gramsPerUnit ?? null, rev, newPushId));
+        density_g_per_ml = excluded.density_g_per_ml, grams_per_unit = excluded.grams_per_unit, catalog_ref = excluded.catalog_ref, rev = excluded.rev, deleted_at = NULL`, userId, i.id, i.name, i.unit, i.purchaseQuantity, i.purchasePrice, i.densityGPerMl ?? null, i.gramsPerUnit ?? null, rev, newPushId, i.catalogRef ? JSON.stringify(i.catalogRef) : null));
   }
   for (const r of toUpsert.recipes) {
     batch.push(p(`INSERT INTO recipes (user_id, id, name, yield, packaging_per_unit, labor_total, extra_total, desired_margin, prep_minutes, rev, deleted_at)

@@ -8,7 +8,7 @@
  *  - Dados já gravados no navegador são migrados de forma tolerante (`migrateStored`), para nunca tornar dados antigos ilegíveis.
  *  - Backups importados e payloads de sincronização passam por `validateDataSet` (estrito).
  */
-import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
+import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CatalogRef, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
 import { isMoney, isPositiveQuantity } from '../src/domain/money';
 
 export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, itemsPerRecipe: 200, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
@@ -56,6 +56,16 @@ export function migrateStored(raw: unknown): DataSet {
   };
 }
 
+const CATALOG_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+/** Referência do catálogo de medidas. Validada só pela forma: o catálogo pode mudar de versão sem invalidar dados antigos. */
+export function parseCatalogRef(raw: unknown): CatalogRef {
+  if (!isObj(raw)) return fail('Referência de medidas inválida.');
+  if (typeof raw.id !== 'string' || !CATALOG_ID.test(raw.id) || typeof raw.variant !== 'string' || !CATALOG_ID.test(raw.variant)) return fail('Referência de medidas inválida (identificador).');
+  if (typeof raw.version !== 'string' || !/^[0-9A-Za-z.\-]{1,24}$/.test(raw.version)) return fail('Referência de medidas inválida (versão).');
+  if (!optPositive(raw.densityGPerMl) || !optPositive(raw.gramsPerUnit)) return fail('Referência de medidas inválida (valores).');
+  return { id: raw.id, variant: raw.variant, version: raw.version, ...(raw.densityGPerMl !== undefined ? { densityGPerMl: raw.densityGPerMl as number } : {}), ...(raw.gramsPerUnit !== undefined ? { gramsPerUnit: raw.gramsPerUnit as number } : {}) };
+}
+
 function ingredientOf(i: unknown, n: number, seen: Set<string>): Ingredient {
   const at = `Ingrediente inválido no backup (#${n + 1})`;
   if (!isObj(i)) return fail(`${at}: formato incorreto.`);
@@ -69,7 +79,8 @@ function ingredientOf(i: unknown, n: number, seen: Set<string>): Ingredient {
   if (!isMoney(v.purchasePrice)) return fail(`${at}: preço inválido.`);
   if (!optPositive(v.densityGPerMl) || !optPositive(v.gramsPerUnit)) return fail(`${at}: equivalência inválida.`);
   return { id: v.id, name: v.name.trim(), unit: v.unit as Ingredient['unit'], purchaseQuantity: v.purchaseQuantity, purchasePrice: v.purchasePrice,
-    ...(v.densityGPerMl !== undefined ? { densityGPerMl: v.densityGPerMl as number } : {}), ...(v.gramsPerUnit !== undefined ? { gramsPerUnit: v.gramsPerUnit as number } : {}) };
+    ...(v.densityGPerMl !== undefined ? { densityGPerMl: v.densityGPerMl as number } : {}), ...(v.gramsPerUnit !== undefined ? { gramsPerUnit: v.gramsPerUnit as number } : {}),
+    ...(v.catalogRef !== undefined ? { catalogRef: parseCatalogRef(v.catalogRef) } : {}) };
 }
 
 function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<string>): Recipe {
