@@ -8,9 +8,9 @@ const BASE = 'https://api.exemplo.test';
 const SESSION = { user: { id: 'usr_1', email: 'bia@exemplo.com' }, csrfToken: 'csrf-de-teste', sessionId: 'ses_aaaaaaaaaaaaaaaa', license: { status: 'active', quotaActive: 100, quotaDaily: 30 } };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-type Server = { signedIn: boolean; deviceLimit: boolean; offline: boolean; calls: { method: string; path: string; body?: unknown }[] };
+type Server = { logout: 'ok' | 'network' | 'error' | 'expired'; signedIn: boolean; deviceLimit: boolean; offline: boolean; calls: { method: string; path: string; body?: unknown }[] };
 function fakeServer(): Server {
-  const s: Server = { signedIn: false, deviceLimit: false, offline: false, calls: [] };
+  const s: Server = { logout: 'ok', signedIn: false, deviceLimit: false, offline: false, calls: [] };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (s.offline) throw new TypeError('Failed to fetch');
     const path = url.replace(BASE, ''); const method = init.method ?? 'GET';
@@ -23,7 +23,11 @@ function fakeServer(): Server {
       if (s.deviceLimit && !body.replaceSessionId) return json(409, { error: 'DEVICE_LIMIT', sessions: [{ id: 'ses_bbbbbbbbbbbbbbbb', deviceLabel: 'Celular antigo', createdAt: '2026-11-01T10:00:00Z', lastSeenAt: '2026-11-10T10:00:00Z' }] });
       s.signedIn = true; return json(200, SESSION);
     }
-    if (path === '/api/auth/logout') { s.signedIn = false; return json(200, { ok: true }); }
+    if (path === '/api/auth/logout') {
+      if (s.logout === 'network') throw new TypeError('Failed to fetch');
+      if (s.logout === 'error') return json(500, { error: 'INTERNAL' });
+      s.signedIn = false; return s.logout === 'expired' ? json(401, { error: 'UNAUTHORIZED' }) : json(200, { ok: true });
+    }
     if (path === '/api/sessions') return json(200, { maxSessions: 2, sessions: [{ id: SESSION.sessionId, deviceLabel: 'Mac (navegador)', createdAt: '2026-11-11T10:00:00Z', lastSeenAt: '2026-11-11T10:00:00Z', current: true }] });
     if (path.startsWith('/api/sync?')) return json(200, { revision: 0, ingredients: [], recipes: [], orders: [] });
     if (path === '/api/sync/push') return json(200, { revision: 1, changed: true });
@@ -115,6 +119,32 @@ describe('Entrar na conta', () => {
     expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
     await nav(u, 'Ingredientes');
     expect(screen.getByText('Farinha')).toBeTruthy();
+  });
+});
+
+describe('Logout só é confirmado quando o servidor confirma', () => {
+  async function ready() { const u = userEvent.setup(); const server = fakeServer(); await boot(BASE); await signIn(u); await screen.findByText(/Conectado como/); return { u, server }; }
+  it('falha de rede: continua conectado, avisa com clareza e NÃO diz que saiu', async () => {
+    const { u, server } = await ready(); server.logout = 'network';
+    await u.click(screen.getByRole('button', { name: /Sair desta conta/ }));
+    expect(await screen.findByText(/Você continua conectado/)).toBeTruthy();
+    expect(screen.queryByText(/Você saiu desta conta/)).toBeNull();
+    expect(screen.getByText(/Conectado como/)).toBeTruthy();
+    // ao voltar a rede, tentar de novo funciona
+    server.logout = 'ok';
+    await u.click(screen.getByRole('button', { name: /Sair desta conta/ }));
+    expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
+  });
+  it('erro do servidor (500): continua conectado e não confirma a saída', async () => {
+    const { u, server } = await ready(); server.logout = 'error';
+    await u.click(screen.getByRole('button', { name: /Sair desta conta/ }));
+    expect(await screen.findByText(/Você continua conectado/)).toBeTruthy();
+    expect(screen.queryByText(/Você saiu desta conta/)).toBeNull();
+  });
+  it('sessão já expirada (401): a saída vale, pois a sessão já não existe no servidor', async () => {
+    const { u, server } = await ready(); server.logout = 'expired';
+    await u.click(screen.getByRole('button', { name: /Sair desta conta/ }));
+    expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
   });
 });
 

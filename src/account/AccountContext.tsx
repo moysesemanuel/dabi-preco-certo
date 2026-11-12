@@ -7,7 +7,7 @@ import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, isPendingConflic
 import { DEBOUNCE_MS, retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
 import { resolveConflict as resolveConflictPure, type ConflictAction } from '../sync/resolve';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
-import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
+import { AUTH_MESSAGES, createAuthClient, type AuthClient, type SessionInfo } from './authClient';
 import { API_URL, REQUIRE_LOGIN, safeApiBase } from './http';
 
 export type SyncPhase = 'idle' | 'syncing' | 'synced' | 'offline' | 'attention' | 'error';
@@ -22,6 +22,8 @@ export const OFFLINE_GRACE_MS = 7 * 86_400_000;
 const readLastAccess = (): number | undefined => { try { const v = Number(localStorage.getItem(LAST_ACCESS_KEY)); return Number.isFinite(v) && v > 0 ? v : undefined; } catch { return undefined; } };
 const writeLastAccess = (v: number | undefined) => { try { if (v === undefined) localStorage.removeItem(LAST_ACCESS_KEY); else localStorage.setItem(LAST_ACCESS_KEY, String(v)); } catch { /* sem armazenamento: só perde a tolerância offline */ } };
 
+export type SignOutResult = { ok: true } | { ok: false; message: string };
+
 type Ctx = {
   status: AccountStatus;
   session?: SessionInfo;
@@ -33,7 +35,8 @@ type Ctx = {
   access: Access;
   requireLogin: boolean;
   setSession(session: SessionInfo | undefined): void;
-  signOut(): Promise<void>;
+  /** Só encerra a sessão local depois que o servidor confirma (200/401). Falha de rede ou do servidor: continua conectado e devolve a mensagem. */
+  signOut(): Promise<SignOutResult>;
   sync: SyncState;
   syncNow(): Promise<void>;
   chooseMerge(): Promise<void>;
@@ -234,7 +237,14 @@ export function AccountProvider({ data, setData, ready: readyProp, epoch = 0, me
 
   const value: Ctx = {
     status, session, auth, quotes, entitled, access, requireLogin, setSession,
-    async signOut() { if (auth && csrfRef.current) await auth.logout(csrfRef.current); writeLastAccess(undefined); setNetworkDown(false); setSession(undefined); setSync({ phase: 'idle', blocked: null }); blockedRef.current = null; },
+    async signOut(): Promise<SignOutResult> {
+      if (auth) {
+        if (!csrfRef.current) return { ok: false, message: 'Não foi possível confirmar a saída agora. Recarregue a página e tente de novo.' };
+        const r = await auth.logout(csrfRef.current);
+        if (!r.ok) return { ok: false, message: `Você continua conectado: não foi possível confirmar a saída no servidor. ${AUTH_MESSAGES[r.reason]}` };
+      }
+      writeLastAccess(undefined); setNetworkDown(false); setSession(undefined); setSync({ phase: 'idle', blocked: null }); blockedRef.current = null; return { ok: true };
+    },
     sync, syncNow: () => run(),
     async chooseMerge() { blockedRef.current = null; setSync(s => ({ ...s, blocked: null })); await run({ allowInitialMerge: true }); },
     /** Troca os dados deste dispositivo pelos da conta (a tela pede confirmação e sugere backup antes). */

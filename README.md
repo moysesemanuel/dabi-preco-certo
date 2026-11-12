@@ -28,6 +28,7 @@ npm test
 - [`docs/SEGURANCA_CHECKLIST.md`](docs/SEGURANCA_CHECKLIST.md): o que está protegido e o que falta.
 - [`docs/IMPLANTACAO_HOMOLOGACAO.md`](docs/IMPLANTACAO_HOMOLOGACAO.md): roteiro de implantação em homologação (não executado).
 - [`docs/ABAS_E_ARMAZENAMENTO.md`](docs/ABAS_E_ARMAZENAMENTO.md): como várias abas do mesmo navegador convivem com o IndexedDB sem perder alterações (uma aba edita; as outras consultam).
+- [`docs/AUDITORIA_SEGURANCA_PRE_BETA.md`](docs/AUDITORIA_SEGURANCA_PRE_BETA.md): auditoria de segurança pré-beta (achados, testes negativos, riscos residuais, recomendação).
 - [`docs/POLITICA_DE_CUSTOS.md`](docs/POLITICA_DE_CUSTOS.md): **política de infraestrutura de custo zero** (limites gratuitos verificados, metas, medição com `npm run costs`, proteções, upgrade). Vale para toda nova funcionalidade.
 - [`docs/ETAPA_1_PROGRESSO.md`](docs/ETAPA_1_PROGRESSO.md): histórico e decisões da Etapa 1.
 - [`worker/README.md`](worker/README.md): API, contas, sincronização, licenças e pendências do servidor.

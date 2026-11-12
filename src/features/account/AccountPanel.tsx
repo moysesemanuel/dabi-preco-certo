@@ -67,7 +67,7 @@ export function AccountPanel({ inform }: { inform: (m: string) => void }) {
         <ul style={{ listStyle: 'none', margin: '8px 0 0', padding: 0 }}>{devices.map(d => <li key={d.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, padding: '8px 0', borderBottom: '1px solid #f0f2f4' }}>
           <span>{d.deviceLabel ?? 'Dispositivo'}{d.current ? <span className="tag green" style={{ marginLeft: 6 }}>Este aparelho</span> : null}<span className="muted" style={{ display: 'block', fontSize: 12 }}>Último uso: {when(d.lastSeenAt)}</span></span>
           <button className="inline-icon" aria-label={d.current ? 'Sair deste dispositivo' : `Desconectar ${d.deviceLabel ?? 'dispositivo'}`} title={d.current ? 'Sair' : 'Desconectar'} onClick={() => void removeDevice(d)}><Trash2 size={15} /></button></li>)}</ul></div>
-      <button className="secondary" type="button" onClick={() => void acc.signOut().then(() => inform('Você saiu desta conta. Seus dados continuam neste dispositivo.'))}><LogOut size={16} /> Sair desta conta</button>
+      <button className="secondary" type="button" onClick={() => void acc.signOut().then(r => inform(r.ok ? 'Você saiu desta conta. Seus dados continuam neste dispositivo.' : r.message))}><LogOut size={16} /> Sair desta conta</button>
     </section>;
   }
 

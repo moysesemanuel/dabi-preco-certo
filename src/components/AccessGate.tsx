@@ -30,7 +30,7 @@ export function AccessGate({ data, children }: { data: DataSet; children: ReactN
     </>}
     {acc.access === 'inactive' && <section className="card stack">
       <div className="notice warn" role="alert"><strong>Acesso indisponível.</strong> {acc.session?.license ? 'A licença desta conta foi revogada.' : 'Esta conta não tem licença ativa.'} Entre em contato com o suporte.</div>
-      <button className="secondary" onClick={() => void acc.signOut()}><LogOut size={16} /> Sair desta conta</button>
+      <button className="secondary" onClick={() => void acc.signOut().then(r => { if (!r.ok) setNote(r.message); })}><LogOut size={16} /> Sair desta conta</button>
     </section>}
     {acc.access !== 'checking' && <section className="card stack" style={{ marginTop: 16 }}>
       <h2 className="section-title">Seus dados atuais</h2>
