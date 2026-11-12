@@ -12,14 +12,80 @@ const MIGRATIONS = new URL('../../worker/migrations/', import.meta.url);
 const sql = (file: string) => readFileSync(new URL(file, MIGRATIONS), 'utf8');
 const legacy = () => createTestD1({ upTo: '0006_prep_minutes.sql' });
 
-/** Impressão digital das colunas ANTIGAS de uma tabela (ignora as colunas novas), para provar que nada existente mudou. */
-const fingerprint = (db: InstanceType<typeof DatabaseSync>, table: string, skip: string[] = []) => {
-  const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name).filter(c => !skip.includes(c));
-  const rows = db.prepare(`SELECT ${cols.join(', ')} FROM ${table} ORDER BY ${cols.slice(0, 2).join(', ')}`).all();
+type Raw = InstanceType<typeof DatabaseSync>;
+const tablesOf = (raw: Raw) => (raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'd1_migrations' ORDER BY name").all() as { name: string }[]).map(t => t.name);
+const columnsOf = (raw: Raw, table: string) => (raw.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name);
+const countOf = (raw: Raw, table: string) => (raw.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+/** Impressão digital de UM conjunto EXPLÍCITO de colunas (as mesmas antes e depois: nunca "ignora" coluna para fazer a comparação passar). */
+const fingerprint = (raw: Raw, table: string, cols: string[]) => {
+  if (!cols.length) return '';
+  const rows = raw.prepare(`SELECT ${cols.join(', ')} FROM ${table} ORDER BY ${cols.map((_, i) => i + 1).join(', ')}`).all();
   return createHash('sha256').update(JSON.stringify(rows)).digest('hex');
 };
-const TABLES = ['quotes', 'licenses', 'rate_limits', 'users', 'sessions', 'auth_codes', 'sync_state', 'ingredients', 'recipes', 'recipe_items', 'orders', 'order_payments'];
-const NEW_COLS: Record<string, string[]> = { ingredients: ['catalog_ref'], orders: ['quote_code'] };
+
+const ALL_FILES = () => readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort();
+/** Migrações realmente aplicadas, lidas da tabela `d1_migrations` (como o Wrangler registra). Recusa estados que não sejam um prefixo contínuo 0001…000N. */
+export function appliedMigrations(raw: Raw): string[] {
+  if (!tablesOfAll(raw).includes('d1_migrations')) throw new Error('sem a tabela d1_migrations: não parece um banco/backup do D1.');
+  const applied = (raw.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as { name: string }[]).map(r => r.name);
+  const files = ALL_FILES();
+  if (applied.some((n, i) => n !== files[i])) throw new Error(`migrações aplicadas fora de ordem ou desconhecidas: ${applied.join(', ')}`);
+  return applied;
+}
+const tablesOfAll = (raw: Raw) => (raw.prepare("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[]).map(t => t.name);
+
+export type Report = { applied: string[]; pending: string[]; tables: { name: string; rows: number; columns: number }[]; codesAssigned: number; financial: { orders: number; payments: number } };
+
+/**
+ * Ensaio genérico para QUALQUER estágio de migração (0001–0006, 0001–0007 ou 0001–0008):
+ *  1. detecta as aplicadas pelo `d1_migrations` e simula SÓ as pendentes;
+ *  2. compara, tabela a tabela, contagens e impressão digital das MESMAS colunas de antes (incluindo `catalog_ref`/`quote_code` quando já existiam);
+ *  3. confere o esquema final (colunas e índice único) e a integridade financeira;
+ *  4. simula a atribuição de códigos aos pedidos sem código (derivados, únicos por conta), sem alterar códigos já existentes nem nenhuma outra coluna.
+ * `afterMigrations` existe para provar que divergências REAIS são detectadas (teste negativo).
+ */
+export function rehearseMigrations(raw: Raw, hooks: { afterMigrations?: (raw: Raw) => void } = {}): Report {
+  const applied = appliedMigrations(raw);
+  const pending = ALL_FILES().filter(f => !applied.includes(f));
+  const noCode = (name: string, cols: string[]) => cols.filter(c => !(name === 'orders' && c === 'quote_code')); // a atribuição de códigos só pode mexer nesta coluna
+  const before = tablesOf(raw).map(name => { const cols = columnsOf(raw, name); return { name, cols, rows: countOf(raw, name), fp: fingerprint(raw, name, cols), fpNoCode: fingerprint(raw, name, noCode(name, cols)) }; });
+  const financialBefore = fingerprint(raw, 'orders', ['user_id', 'id', 'quantity', 'unit_price', 'deposit', 'status', 'created_at', 'delivery_date', 'cost_per_unit', 'cost_captured_at', 'deleted_at']) + fingerprint(raw, 'order_payments', columnsOf(raw, 'order_payments'));
+  const hadCodes = columnsOf(raw, 'orders').includes('quote_code');
+  const codesBefore = hadCodes ? (raw.prepare('SELECT user_id, id, quote_code FROM orders WHERE quote_code IS NOT NULL ORDER BY user_id, id').all() as { user_id: string; id: string; quote_code: string }[]) : [];
+
+  for (const f of pending) { raw.exec(sql(f)); raw.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(f); }
+  hooks.afterMigrations?.(raw);
+
+  for (const t of before) {
+    expect(countOf(raw, t.name), `${t.name}: linhas`).toBe(t.rows);
+    expect(fingerprint(raw, t.name, t.cols), `${t.name}: valores das colunas preexistentes (${t.cols.join(', ')})`).toBe(t.fp);
+  }
+  expect(appliedMigrations(raw)).toEqual(ALL_FILES());
+  expect(columnsOf(raw, 'ingredients')).toContain('catalog_ref'); expect(columnsOf(raw, 'orders')).toContain('quote_code');
+  const idx = raw.prepare("SELECT sql FROM sqlite_master WHERE name = 'idx_orders_quote_code'").get() as { sql: string } | undefined;
+  expect(idx?.sql).toMatch(/UNIQUE[\s\S]*\(user_id, quote_code\)[\s\S]*WHERE quote_code IS NOT NULL/i);
+
+  // Atribuição de códigos pelo app (derivados e únicos por conta), respeitando os que já existem.
+  const orders = raw.prepare('SELECT user_id, id, quote_code FROM orders ORDER BY created_at, id').all() as { user_id: string; id: string; quote_code: string | null }[];
+  const used = new Set(orders.filter(o => o.quote_code).map(o => `${o.user_id}:${o.quote_code}`));
+  let assigned = 0;
+  for (const o of orders.filter(x => !x.quote_code)) {
+    let salt = 0, c = legacyQuoteCode(o.id, salt); while (used.has(`${o.user_id}:${c}`)) c = legacyQuoteCode(o.id, ++salt);
+    used.add(`${o.user_id}:${c}`); raw.prepare('UPDATE orders SET quote_code = ? WHERE user_id = ? AND id = ?').run(c, o.user_id, o.id); assigned++; // o índice único recusaria qualquer repetição
+  }
+  for (const c of codesBefore) expect(raw.prepare('SELECT quote_code FROM orders WHERE user_id = ? AND id = ?').get(c.user_id, c.id), `código existente de ${c.id}`).toEqual({ quote_code: c.quote_code });
+  expect(raw.prepare('SELECT COUNT(*) AS n FROM orders WHERE quote_code IS NULL').get()).toEqual({ n: 0 });
+  for (const t of before) expect(fingerprint(raw, t.name, noCode(t.name, t.cols)), `${t.name}: nada além do código mudou`).toBe(t.fpNoCode);
+  const financialAfter = fingerprint(raw, 'orders', ['user_id', 'id', 'quantity', 'unit_price', 'deposit', 'status', 'created_at', 'delivery_date', 'cost_per_unit', 'cost_captured_at', 'deleted_at']) + fingerprint(raw, 'order_payments', columnsOf(raw, 'order_payments'));
+  expect(financialAfter, 'dados financeiros dos pedidos e recebimentos').toBe(financialBefore);
+  return { applied, pending, tables: before.map(t => ({ name: t.name, rows: t.rows, columns: t.cols.length })), codesAssigned: assigned, financial: { orders: countOf(raw, 'orders'), payments: countOf(raw, 'order_payments') } };
+}
+
+/** Cria o controle de migrações como o Wrangler (`d1_migrations`) num banco de teste já migrado até `upTo`. */
+function recordMigrations(raw: Raw, upTo: string) {
+  raw.exec('CREATE TABLE IF NOT EXISTS d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP)');
+  for (const f of ALL_FILES()) { if (f > upTo) break; raw.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run(f); }
+}
 
 /** Dados antigos sintéticos e representativos: várias contas, pedidos com recebimentos e custo registrado, itens excluídos, links publicados. */
 function seedLegacy(raw: InstanceType<typeof DatabaseSync>) {
@@ -41,17 +107,46 @@ function seedLegacy(raw: InstanceType<typeof DatabaseSync>) {
 }
 
 describe('Migrações 0007 e 0008 sobre dados antigos (banco descartável, dados sintéticos)', () => {
-  it('são aditivas: nenhuma linha, coluna antiga ou valor existente muda; as colunas novas nascem vazias', () => {
-    const db = legacy(); seedLegacy(db.raw);
-    const before = Object.fromEntries(TABLES.map(t => [t, { n: (db.raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n, fp: fingerprint(db.raw, t) }]));
-    db.raw.exec(sql('0007_catalog_ref.sql')); db.raw.exec(sql('0008_quote_code.sql'));
-    for (const t of TABLES) {
-      expect((db.raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n, t).toBe(before[t].n);
-      expect(fingerprint(db.raw, t, NEW_COLS[t] ?? []), t).toBe(before[t].fp);
-    }
+  it.each([
+    ['0001–0006', '0006_prep_minutes.sql', ['0007_catalog_ref.sql', '0008_quote_code.sql']],
+    ['0001–0007', '0007_catalog_ref.sql', ['0008_quote_code.sql']],
+    ['0001–0008', '0008_quote_code.sql', []],
+  ])('estágio %s: detecta as aplicadas, simula só as pendentes e nada preexistente muda (mesmas colunas antes e depois)', (_n, upTo, expectedPending) => {
+    const db = createTestD1({ upTo }); seedLegacy(db.raw); recordMigrations(db.raw, upTo);
+    // Estágios mais novos já têm valores nas colunas que existem: eles precisam sobreviver intactos.
+    if (upTo >= '0007') db.raw.prepare("UPDATE ingredients SET catalog_ref = '{\"id\":\"farinha-de-trigo\",\"variant\":\"padrao\",\"version\":\"2026.11.1\",\"densityGPerMl\":0.5283}' WHERE id IN ('i0','i2')").run();
+    if (upTo >= '0008') { db.raw.prepare("UPDATE orders SET quote_code = 'ORC-K7M42P' WHERE user_id = 'usr_a' AND id = 'o0'").run(); db.raw.prepare("UPDATE orders SET quote_code = 'ORC-K7M42P' WHERE user_id = 'usr_b' AND id = 'o0'").run(); db.raw.prepare("UPDATE orders SET quote_code = 'ORC-ABCDEF' WHERE user_id = 'usr_a' AND id = 'o3'").run(); }
+    const r = rehearseMigrations(db.raw);
+    expect(r.pending).toEqual(expectedPending); expect(r.applied.length + r.pending.length).toBe(ALL_FILES().length);
+    expect(r.tables.length).toBe(12); expect(r.financial.orders).toBe(16); expect(r.financial.payments).toBe(6);
+    expect(r.codesAssigned).toBe(upTo >= '0008' ? 13 : 16); // pedidos que ainda não tinham código (os que já tinham, nunca mudam)
+    if (upTo >= '0007') expect(db.raw.prepare("SELECT COUNT(*) AS n FROM ingredients WHERE catalog_ref IS NOT NULL").get()).toEqual({ n: 4 }); // i0 e i2 das duas contas
+    if (upTo >= '0008') expect(db.raw.prepare("SELECT quote_code FROM orders WHERE user_id = 'usr_a' AND id = 'o3'").get()).toEqual({ quote_code: 'ORC-ABCDEF' });
+  });
+
+  it('no estágio 0001–0006 as colunas novas nascem vazias (NULL) em todas as linhas', () => {
+    const db = legacy(); seedLegacy(db.raw); recordMigrations(db.raw, '0006_prep_minutes.sql');
+    const original = { ingredients: countOf(db.raw, 'ingredients'), orders: countOf(db.raw, 'orders') };
+    for (const f of ['0007_catalog_ref.sql', '0008_quote_code.sql']) db.raw.exec(sql(f));
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM ingredients WHERE catalog_ref IS NOT NULL').get()).toEqual({ n: 0 });
     expect(db.raw.prepare('SELECT COUNT(*) AS n FROM orders WHERE quote_code IS NOT NULL').get()).toEqual({ n: 0 });
-    expect(before.orders.n).toBeGreaterThan(10);
+    expect([countOf(db.raw, 'ingredients'), countOf(db.raw, 'orders')]).toEqual([original.ingredients, original.orders]);
+  });
+
+  it('NÃO esconde divergências reais: uma migração que altere um valor existente, apague uma linha ou mexa em dinheiro faz o ensaio falhar', () => {
+    const run = (evil: string) => { const db = legacy(); seedLegacy(db.raw); recordMigrations(db.raw, '0006_prep_minutes.sql'); return () => rehearseMigrations(db.raw, { afterMigrations: raw => raw.exec(evil) }); };
+    expect(run("UPDATE ingredients SET purchase_price = purchase_price + 1 WHERE id = 'i0'")).toThrow(/ingredients/);
+    expect(run("DELETE FROM orders WHERE id = 'o1'")).toThrow(/orders/);
+    expect(run("UPDATE order_payments SET amount = amount + 1")).toThrow();
+    expect(run("UPDATE orders SET deposit = deposit + 1 WHERE id = 'o2'")).toThrow();
+    expect(run("UPDATE quotes SET payload = '{}'")).toThrow(); // até tabelas sem relação com a mudança
+  });
+
+  it('recusa estados que não são um banco do D1 ou cujas migrações aplicadas estão fora de ordem', () => {
+    const noTable = legacy(); expect(() => appliedMigrations(noTable.raw)).toThrow(/d1_migrations/);
+    const skewed = legacy(); skewed.raw.exec('CREATE TABLE d1_migrations (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)');
+    skewed.raw.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run('0001_quotes.sql'); skewed.raw.prepare('INSERT INTO d1_migrations (name) VALUES (?)').run('0003_accounts.sql');
+    expect(() => appliedMigrations(skewed.raw)).toThrow(/fora de ordem/);
   });
 
   it('o índice único é parcial: aceita muitos pedidos antigos sem código, recusa repetição na mesma conta e aceita em contas diferentes', () => {
@@ -156,26 +251,17 @@ describe('Atualização completa em ensaio: banco antigo → migração → Work
   });
 });
 
-/** Ensaio com o backup REAL de homologação, só leitura, em memória: `REHEARSE_BACKUP=backups/arquivo.sql npm run rehearse`. */
+/** Ensaio com o backup REAL de homologação (qualquer estágio), só leitura, em memória: `BACKUP=backups/arquivo.sql npm run rehearse`. */
 const backup = process.env.REHEARSE_BACKUP;
 describe.skipIf(!backup)('Ensaio com o backup real de homologação (somente leitura; nada remoto)', () => {
-  it('restaura em banco descartável, aplica 0007 e 0008 e confere que nada mudou', () => {
+  it('detecta as migrações aplicadas, simula só as pendentes e confere contagens, valores, dinheiro e unicidade', () => {
     if (!backup || !existsSync(backup)) throw new Error(`backup não encontrado: ${backup}`);
-    const raw = new DatabaseSync(':memory:'); raw.exec(readFileSync(backup, 'utf8'));
-    const applied = (raw.prepare('SELECT name FROM d1_migrations ORDER BY id').all() as { name: string }[]).map(r => r.name);
-    const tables = (raw.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name <> 'd1_migrations'").all() as { name: string }[]).map(t => t.name);
-    const count = (t: string) => (raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
-    const before = Object.fromEntries(tables.map(t => [t, { n: count(t), fp: fingerprint(raw, t) }]));
-    const pending = readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql') && !applied.includes(f)).sort();
-    for (const f of pending) raw.exec(sql(f));
-    for (const t of tables) { expect(count(t), t).toBe(before[t].n); expect(fingerprint(raw, t, NEW_COLS[t] ?? []), t).toBe(before[t].fp); }
-    const orders = raw.prepare('SELECT user_id, id, created_at FROM orders').all() as { user_id: string; id: string; created_at: string }[];
-    const codes = new Map<string, string>(); const used = new Set<string>();
-    for (const o of orders) { let salt = 0, c = legacyQuoteCode(o.id, salt); while (used.has(`${o.user_id}:${c}`)) c = legacyQuoteCode(o.id, ++salt); used.add(`${o.user_id}:${c}`); codes.set(o.id, c); }
-    for (const [id, c] of codes) raw.prepare('UPDATE orders SET quote_code = ? WHERE id = ?').run(c, id); // o que o app enviaria no primeiro sync: nenhuma violação do índice único
-    process.stdout.write(`\nENSAIO COM O BACKUP: migrações já aplicadas no dump = ${applied.length} (${applied.join(', ')}); pendentes aplicadas no ensaio = ${pending.join(', ') || 'nenhuma'}\n` +
-      tables.map(t => `  ${t.padEnd(14)} ${String(before[t].n).padStart(3)} linhas → ${String(count(t)).padStart(3)} (colunas antigas idênticas)`).join('\n') + `\n  pedidos com código derivado único: ${codes.size}\n`);
-    expect(pending).toEqual(['0007_catalog_ref.sql', '0008_quote_code.sql']);
+    const raw = new DatabaseSync(':memory:'); raw.exec(readFileSync(backup, 'utf8')); // cópia em memória: o arquivo nunca é aberto para escrita
+    const r = rehearseMigrations(raw);
+    process.stdout.write(`\nENSAIO COM O BACKUP ${backup}\n  migrações detectadas (d1_migrations): ${r.applied.join(', ')}\n  migrações simuladas (pendentes):     ${r.pending.join(', ') || 'nenhuma'}\n` +
+      r.tables.map(t => `  ${t.name.padEnd(14)} ${String(t.rows).padStart(3)} linhas → ${String(t.rows).padStart(3)} (${t.columns} colunas preexistentes idênticas)`).join('\n') +
+      `\n  financeiro: ${r.financial.orders} pedidos e ${r.financial.payments} recebimentos idênticos\n  códigos derivados atribuídos (pedidos sem código): ${r.codesAssigned} (únicos por conta; códigos já existentes preservados)\n`);
+    expect([...r.applied, ...r.pending]).toEqual(ALL_FILES());
   });
 });
 

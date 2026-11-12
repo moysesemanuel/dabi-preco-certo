@@ -47,7 +47,7 @@ npm run audit                         # 0 vulnerabilidades
 BACKUP=backups/dabi-staging-antes-0007.sql npm run rehearse   # ensaio com o seu backup REAL, em memória
 ```
 
-O ensaio com o backup real restaura em SQLite descartável, aplica 0007+0008, confere contagens e impressões digitais e simula a atribuição de códigos (resultado do dump atual: 12 tabelas idênticas; 1 pedido com código derivado único). Nada é lido nem escrito na Cloudflare.
+O ensaio com o backup real detecta as migrações aplicadas pelo `d1_migrations` (qualquer estágio: 0001–0006, 0001–0007 ou 0001–0008), restaura em SQLite descartável, simula **só as pendentes**, confere contagens e impressões digitais e simula a atribuição de códigos (resultado do dump atual: 12 tabelas idênticas; 1 pedido com código derivado único). Nada é lido nem escrito na Cloudflare.
 
 ## 3. Plano de atualização (a executar por você, nesta ordem)
 
@@ -58,7 +58,7 @@ Pare no primeiro resultado diferente do esperado e vá ao §5.
 ```bash
 # A1. Estado atual (somente leitura): migrações pendentes
 npm run d1 -- migrations-list --env staging
-#   esperado: 0007_catalog_ref.sql e 0008_quote_code.sql pendentes (nenhuma outra)
+#   esperado: só as migrações ainda não aplicadas (0007 e 0008; apenas 0008 se a 0007 já foi aplicada)
 
 # A2. Contagens ANTES (somente leitura; guarde a saída)
 npm run d1 -- query --env staging --command "SELECT (SELECT COUNT(*) FROM orders) AS orders, (SELECT COUNT(*) FROM order_payments) AS payments, (SELECT COUNT(*) FROM ingredients) AS ingredients, (SELECT COUNT(*) FROM recipes) AS recipes, (SELECT COUNT(*) FROM users) AS users, (SELECT COUNT(*) FROM licenses) AS licenses"
