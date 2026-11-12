@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStorage } from './setup';
 
 // Tempos curtos só nos testes (em produção: 5 s, 10 s, 20 s… até 2 min).
-vi.mock('../../src/sync/retry', () => ({ retryDelayMs: (n: number) => 60 * 2 ** Math.min(n, 3), WAKE_MIN_INTERVAL_MS: 100, WAKE_MIN_INTERVAL_FAILING_MS: 20 }));
+vi.mock('../../src/sync/retry', () => ({ retryDelayMs: (n: number) => 60 * 2 ** Math.min(n, 3), WAKE_MIN_INTERVAL_MS: 100, WAKE_MIN_INTERVAL_FAILING_MS: 20, DEBOUNCE_MS: 100 }));
 
 const BASE = 'https://api.exemplo.test';
 const SESSION = { user: { id: 'usr_1', email: 'bia@exemplo.com' }, csrfToken: 'csrf', sessionId: 'ses_aaaaaaaaaaaaaaaa', license: { status: 'active', quotaActive: 100, quotaDaily: 30 } };

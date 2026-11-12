@@ -4,7 +4,7 @@ import { createQuotesClient, type QuotesClient } from '../features/sharing/quote
 import { loadSyncMeta, saveSyncMeta } from '../storage/db';
 import { createHttpSyncApi } from '../sync/api';
 import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, isPendingConflict, isUnresolved, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
-import { retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
+import { DEBOUNCE_MS, retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
 import { resolveConflict as resolveConflictPure, type ConflictAction } from '../sync/resolve';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
 import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
@@ -59,7 +59,6 @@ const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
 
 type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; children: ReactNode; /** Padrão: VITE_REQUIRE_LOGIN. Existe para testes. */ requireLogin?: boolean };
-const DEBOUNCE_MS = 2500;
 
 /**
  * Conta + sincronização. O app continua 100% local sem conta. Com conta e licença ativa, o servidor é a fonte autoritativa
@@ -82,7 +81,12 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
 
   const dataRef = useRef(data); dataRef.current = data;
   const metaRef = useRef<SyncMeta | null>(null); // null = ainda não carregado: não sincroniza
-  const lastApplied = useRef<DataSet | null>(null);
+  // Estados de dados produzidos pelo próprio app (resultado de uma sincronização, resolução de conflito ou troca de conta): NÃO são edições do usuário
+  // e não devem disparar uma nova sincronização. Um WeakSet identifica o OBJETO, então não depende de quantas vezes o React chama a função de
+  // atualização (em desenvolvimento, com StrictMode, ela roda duas vezes e uma referência única "do último resultado" ficava diferente do estado,
+  // o que reagendava a sincronização a cada 2,5 s, para sempre).
+  const appProduced = useRef(new WeakSet<DataSet>());
+  const seeded = useRef(false);
   const setConflicts = (list: ConflictRecord[]) => setConflictState({ list, owner: metaRef.current?.userId });
   const running = useRef(false);
   const again = useRef(false);
@@ -149,7 +153,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
       if (r.status !== 'unauthorized' && r.status !== 'forbidden') {
         meta = { ...r.meta, userId: sess.user.id };
         metaRef.current = meta; setConflicts(meta.conflicts);
-        setData(cur => { const next = rebaseLocal(cur, started, r.local); lastApplied.current = next; return next; });
+        setData(cur => { const next = rebaseLocal(cur, started, r.local); appProduced.current.add(next); return next; });
         await saveSyncMeta(meta).catch(() => undefined);
       }
       if (r.status === 'unauthorized') { setSession(undefined); setAuthNotice('Sua sessão não foi reconhecida pelo servidor (expirou, foi encerrada ou o navegador não enviou o cookie). Entre novamente.'); setSync({ phase: 'idle', blocked: null }); return; }
@@ -187,8 +191,9 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
 
   // Sincroniza ao entrar, depois de mudanças locais (com pausa) e quando a internet volta.
   useEffect(() => { if (entitled && ready) void run(); }, [entitled, ready, run]);
+  useEffect(() => { if (ready && !seeded.current) { seeded.current = true; appProduced.current.add(data); } }, [ready, data]); // o que veio do disco não é edição (a sincronização de entrada já cuida dele)
   useEffect(() => {
-    if (!entitled || !ready || data === lastApplied.current) return;
+    if (!entitled || !ready || appProduced.current.has(data) || !seeded.current) return;
     const t = setTimeout(() => void run(), DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [data, entitled, ready, run]);
@@ -232,7 +237,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
       blockedRef.current = null;
       metaRef.current = { ...emptyMeta(), userId: sess.user.id };
       await saveSyncMeta(metaRef.current).catch(() => undefined);
-      setData(() => { const next = emptyDataSet(); lastApplied.current = next; return next; });
+      setData(() => { const next = emptyDataSet(); appProduced.current.add(next); return next; });
       dataRef.current = emptyDataSet();
       setSync(s => ({ ...s, blocked: null }));
       await run();
@@ -248,7 +253,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
     resolveConflict(conflictId, action, expectedServerRev) {
       const meta = metaRef.current; if (!meta) throw new Error('Os dados de sincronização ainda não foram carregados.');
       const res = resolveConflictPure(dataRef.current, meta, conflictId, action, new Date(), expectedServerRev); // lança se a regra impedir; nada é alterado antes disso
-      metaRef.current = res.meta; dataRef.current = res.data; lastApplied.current = res.data;
+      metaRef.current = res.meta; dataRef.current = res.data; appProduced.current.add(res.data);
       setData(() => res.data); setConflicts(res.meta.conflicts);
       // Primeiro o estado de sincronização (com a base nova), depois a tentativa de envio.
       void saveSyncMeta(res.meta).catch(() => undefined).then(() => run());

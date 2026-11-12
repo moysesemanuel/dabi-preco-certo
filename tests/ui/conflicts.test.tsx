@@ -6,7 +6,7 @@ import { saveSyncMeta } from '../../src/storage/db';
 import { emptyMeta } from '../../src/sync/engine';
 import { resetStorage } from './setup';
 
-vi.mock('../../src/sync/retry', () => ({ retryDelayMs: () => 60, WAKE_MIN_INTERVAL_MS: 100, WAKE_MIN_INTERVAL_FAILING_MS: 20 }));
+vi.mock('../../src/sync/retry', () => ({ retryDelayMs: () => 60, WAKE_MIN_INTERVAL_MS: 100, WAKE_MIN_INTERVAL_FAILING_MS: 20, DEBOUNCE_MS: 100 }));
 
 const BASE = 'https://api.exemplo.test';
 const SESSION = { user: { id: 'usr_1', email: 'bia@exemplo.com' }, csrfToken: 'csrf', sessionId: 'ses_aaaaaaaaaaaaaaaa', license: { status: 'active', quotaActive: 100, quotaDaily: 30 } };

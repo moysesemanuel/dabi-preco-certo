@@ -1,15 +1,17 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { resolve } from 'node:path';
 import type { BoundStatement, D1Like } from '../../worker/src/store';
 
 // `node:sqlite` só existe com prefixo; createRequire evita que o bundler tente resolvê-lo.
-const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite');
+const { DatabaseSync } = createRequire(resolve(process.cwd(), 'package.json'))('node:sqlite') as typeof import('node:sqlite');
 
 /** Simula o D1 com SQLite real (node:sqlite) aplicando a migração verdadeira do projeto. */
 export function createTestD1(opts: { /** aplica só as migrações até este arquivo (inclusive), ex.: '0006_prep_minutes.sql' */ upTo?: string } = {}) {
   const db = new DatabaseSync(':memory:');
-  const dir = new URL('../../worker/migrations/', import.meta.url);
-  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) { if (opts.upTo && file > opts.upTo) break; db.exec(readFileSync(new URL(file, dir), 'utf8')); }
+  // caminho a partir da raiz do projeto (o vitest roda ali): funciona também com ambiente jsdom, onde `import.meta.url` é http://
+  const dir = resolve(process.cwd(), 'worker/migrations') + '/';
+  for (const file of readdirSync(dir).filter(f => f.endsWith('.sql')).sort()) { if (opts.upTo && file > opts.upTo) break; db.exec(readFileSync(dir + file, 'utf8')); }
   type Bound = BoundStatement & { exec: () => { meta: { changes: number } } };
   const d1: D1Like = {
     prepare(sql: string) {
