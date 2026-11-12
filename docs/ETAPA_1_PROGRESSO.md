@@ -262,3 +262,7 @@ Correção do ensaio de migrações (`tests/ops/migration-rehearsal.test.ts`): a
 
 - **Pesquisa:** o campo foi reestruturado (`.search-row` > `.search-field` + "Fechar" fora do campo) e o CSS neutraliza o `input` global (largura 100%, borda, contorno de foco) e o estilo nativo de `type="search"` (aparência própria e "x" de limpar embutido que duplicava o botão do app). Validado no Chrome em 320, 375, 390, 430, 474, 1000 e 1400 px (sem rolagem horizontal, sem sobreposição). Também corrigido um alargamento da página em telas estreitas (`.two` com `minmax(0,1fr)`).
 - **Sincronização:** laço de pull a cada 2,5 s em desenvolvimento (StrictMode) corrigido; detalhes e consumo em `docs/POLITICA_DE_CUSTOS.md`.
+
+## Várias abas do mesmo navegador
+
+Perda silenciosa de alterações entre abas (documento inteiro gravado às cegas) reproduzida em teste e em Chrome real e corrigida: uma aba edita por vez (Web Locks), as demais consultam e acompanham por BroadcastChannel; toda gravação compara a versão do documento no IndexedDB (rede de segurança e alternativa sem Web Locks); a aba que assume relê os dados e verifica a sessão antes de sincronizar. Sem requisições novas. Detalhes, alternativas e limitações em `docs/ABAS_E_ARMAZENAMENTO.md`.
