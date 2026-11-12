@@ -47,6 +47,8 @@ npm run d1 -- restore-file --env restore --file backup-AAAA-MM-DD.sql
 
 **Ensaio já realizado (local):** exportar o D1 local e restaurá-lo em um banco novo preservou as 12 tabelas e os dados (licença e e-mail conferidos). Repita o ensaio em homologação antes de depender do procedimento em produção.
 
+> **Antes de atualizar a homologação:** siga `docs/ATUALIZACAO_STAGING.md` (backup validado, ensaio local `npm run rehearse`, ponto de Time Travel e recuperação).
+
 ## Checklist de recuperação
 
 1. Identifique o problema e o horário em que começou.

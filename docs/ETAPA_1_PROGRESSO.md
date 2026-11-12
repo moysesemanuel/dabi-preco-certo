@@ -251,3 +251,7 @@ Código `ORC-XXXXXX` por pedido (gerado offline, único por conta, permanente), 
 ## Política de infraestrutura de custo zero
 
 Nova diretriz: ficar nos limites gratuitos (Cloudflare Workers/D1/Pages e Resend) enquanto possível. Criados `docs/POLITICA_DE_CUSTOS.md` (limites verificados em 12/11/2026, metas, monitoramento, proteções, upgrade), `npm run costs` (medição e projeção), orçamentos de regressão em `tests/costs/`. Correções: orçamento diário de e-mails (80/dia) e teto de 12/dia por e-mail, limpeza de contadores que apagava outros escopos, validação de referências sem ler a conta inteira, uma consulta a menos por sincronização, retry máximo de 5 min. Gargalo: escritas no D1 (~228 contas ativas na meta de 50%, hipótese típica).
+
+## Preparação da atualização do staging (nada remoto executado)
+
+Auditoria do estado (Git, `wrangler.toml` local preservado, backup real em `backups/`, agora no `.gitignore`), ensaio das migrações 0007/0008 em bancos descartáveis (dados sintéticos e o backup real), prova de compatibilidade nos dois sentidos (Worker anterior × esquema novo: 134 testes passam; Worker novo × esquema antigo: leituras ok, gravações falham, por isso a ordem banco → Worker → app), `d1 migrations-list`/`d1 query` (somente leitura), scripts `worker:dry-run:staging`/`worker:deploy:staging` e o plano completo em `docs/ATUALIZACAO_STAGING.md`.
