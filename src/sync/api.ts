@@ -7,14 +7,19 @@ type Options = {
   /** Token CSRF da sessão atual (vem de GET /api/auth/session). */
   getCsrfToken: () => string | undefined;
   fetchImpl?: typeof fetch;
+  /** Tempo máximo de cada requisição (padrão 20 s). */
+  timeoutMs?: number;
 };
 
 /** Cliente HTTP da sincronização. A sessão vai no cookie HttpOnly (credentials: include); nunca há segredo em URL. */
-export function createHttpSyncApi({ baseUrl, getCsrfToken, fetchImpl = fetch }: Options): SyncApi {
+export function createHttpSyncApi({ baseUrl, getCsrfToken, fetchImpl = fetch, timeoutMs = 20_000 }: Options): SyncApi {
   async function call(path: string, init: RequestInit): Promise<Response> {
     let res: Response;
-    try { res = await fetchImpl(`${baseUrl}${path}`, { ...init, credentials: 'include', cache: 'no-store', referrerPolicy: 'no-referrer' }); }
-    catch { throw new SyncError('offline', 'Sem conexão com o servidor.'); }
+    // Sem limite de tempo, uma requisição que nunca responde deixaria a sincronização presa para sempre.
+    const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), timeoutMs);
+    try { res = await fetchImpl(`${baseUrl}${path}`, { ...init, signal: ctl.signal, credentials: 'include', cache: 'no-store', referrerPolicy: 'no-referrer' }); }
+    catch { throw new SyncError('offline', ctl.signal.aborted ? 'O servidor não respondeu a tempo.' : 'Sem conexão com o servidor.'); }
+    finally { clearTimeout(timer); }
     return res;
   }
   const messageOf = async (res: Response, fallback: string) => { try { const b = await res.json() as { message?: unknown }; return typeof b.message === 'string' ? b.message : fallback; } catch { return fallback; } };

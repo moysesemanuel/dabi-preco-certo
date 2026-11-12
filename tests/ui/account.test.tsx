@@ -144,7 +144,7 @@ describe('Sincronização na interface', () => {
     await u.click(screen.getByRole('button', { name: /Adicionar ingrediente/ }));
     expect(await screen.findByText('Ingrediente cadastrado.')).toBeTruthy();
     expect(screen.getByText('Açúcar')).toBeTruthy(); // continua usável offline
-    await waitFor(() => expect(screen.getByRole('img', { name: /Sincronização: Sem conexão/ })).toBeTruthy(), { timeout: 6000 }); // o indicador do cabeçalho descreve o estado no tooltip/rótulo acessível
+    await waitFor(() => expect(screen.getByRole('button', { name: /Sincronização: (Sem conexão|Servidor inacessível)/ })).toBeTruthy(), { timeout: 6000 }); // o indicador do cabeçalho descreve o estado no tooltip/rótulo acessível
   }, 15000);
 
   it('a mensagem do servidor para licença revogada não derruba nada', async () => {

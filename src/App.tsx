@@ -5,7 +5,8 @@ import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
 import { AccountProvider, useAccount } from './account/AccountContext';
-import { deriveIndicator, useStableIndicator } from './account/syncIndicator';
+import { SyncDot } from './components/SyncDot';
+import { deriveIndicator, useBrowserOnline, useStableIndicator } from './account/syncIndicator';
 import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/DashboardPage';
@@ -33,13 +34,13 @@ function SyncBanner({ focus }: { focus: (p: Page) => void }) {
 /** Estado dos dados no topo: local, ou o e-mail da conta com um indicador circular da saúde da sincronização. */
 function TopbarStatus() {
   const acc = useAccount();
-  const raw = deriveIndicator({ sync: acc.sync, dirty: acc.dirty, openFinancial: acc.openFinancial, entitled: acc.entitled });
+  const online = useBrowserOnline();
+  const raw = deriveIndicator({ sync: acc.sync, hasPending: acc.hasPending, openFinancial: acc.openFinancial, entitled: acc.entitled, browserOnline: online });
   const level = useStableIndicator(raw);
   if (acc.status !== 'signed-in') return <span role="status">Dados salvos neste dispositivo</span>;
   const email = acc.session?.user.email;
   if (!acc.entitled) return <span role="status">{email} · sem licença ativa</span>;
-  const tip = `${raw.label}. ${raw.detail}`;
-  return <span className="sync-status">{email}<span role="img" className={`sync-dot ${level}`} tabIndex={0} aria-label={`Sincronização: ${tip}`} title={tip} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
+  return <span className="sync-status">{email}<SyncDot level={level} label={raw.label} detail={raw.detail} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
 }
 
 export default function App() {

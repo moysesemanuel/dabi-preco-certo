@@ -208,3 +208,13 @@ Os textos "Sincronizando…/Sincronizado" foram trocados por um ponto ao lado do
 - O tooltip (`title` e `aria-label`) traz o estado e o horário da última confirmação. Os avisos existentes (faixa de decisão, pendências financeiras) continuam iguais.
 - Nenhuma lógica de sincronização, autenticação ou API foi alterada; o contexto só expõe `dirty`, derivado de dados já existentes.
 - Testes: `tests/ui/sync-indicator.test.tsx`.
+
+## Sincronização offline: reconexão, retry e indicador
+
+**Causa raiz (sincronização).** Depois de uma falha de rede o app só voltava a sincronizar com o evento `online`, com uma nova edição ou ao reabrir. Ao alternar o DevTools de Offline para No throttling o navegador pode não emitir `online`; então o estado ficava em "offline" indefinidamente, com a alteração salva localmente (IndexedDB) mas nunca enviada. Também não havia sincronização ao voltar o foco para a janela (a outra sessão só recebia mudanças ao editar/recarregar), nem limite de tempo nas requisições (uma que nunca respondesse travava o ciclo), e a checagem de sessão ao abrir sem rede não era repetida. A API e as regras de autenticação/CSRF/conflitos não tinham defeito.
+
+**Apresentação.** O cinza era correto (não havia confirmação), mas: (1) o "?" era o cursor `help` sobre um `title` nativo, que demora e não aparece em toque; (2) `dirty` comparava com a última versão aplicada, e por isso deixava de apontar a pendência depois de uma tentativa falha; (3) a última confirmação era apagada a cada falha.
+
+**Correções.** Retry automático com espera 5 s → 10 s → 20 s… até 2 min (`src/sync/retry.ts`); nova tentativa ao voltar o foco/visibilidade (mín. 3 s em falha, 15 s normal) e `online`; tempo limite de 20 s por requisição; a checagem de sessão sem rede também é repetida; pendência real (`hasPending`) = diferença para a última versão confirmada pelo servidor; `lastSyncedAt` só muda com confirmação remota e `failingSince` marca a falha; indicador com rótulo visível quando não está verde e balão acessível (hover, foco, toque, Esc); falha de servidor com o navegador online vira vermelha se persistir. O aviso de salvamento ("Ingrediente atualizado…") continua dizendo só que foi salvo localmente.
+
+Testes: `tests/ui/offline-sync.test.tsx`, `tests/sync-retry.test.ts`, `tests/ui/sync-indicator.test.tsx`.

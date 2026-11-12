@@ -3,14 +3,15 @@ import type { DataSet } from '../domain/types';
 import { createQuotesClient, type QuotesClient } from '../features/sharing/quotes';
 import { loadSyncMeta, saveSyncMeta } from '../storage/db';
 import { createHttpSyncApi } from '../sync/api';
-import { emptyDataSet, emptyMeta, isOpenFinancial, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
 import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
 import { API_URL, REQUIRE_LOGIN, safeApiBase } from './http';
 
 export type SyncPhase = 'idle' | 'syncing' | 'synced' | 'offline' | 'attention' | 'error';
 export type SyncBlock = null | 'needs-decision' | 'account-mismatch';
-export type SyncState = { phase: SyncPhase; message?: string; lastSyncedAt?: string; blocked: SyncBlock };
+export type SyncState = { phase: SyncPhase; message?: string; /** Última confirmação REMOTA bem-sucedida (preservada durante falhas). */ lastSyncedAt?: string; /** Quando a falha atual começou; some na próxima confirmação. */ failingSince?: string; blocked: SyncBlock };
 export type AccountStatus = 'unconfigured' | 'loading' | 'signed-out' | 'signed-in';
 /** Se o app pode ser usado agora. Fora da versão comercial (`REQUIRE_LOGIN`) é sempre 'open'. */
 export type Access = 'open' | 'checking' | 'login' | 'inactive' | 'offline-grace';
@@ -44,8 +45,8 @@ type Ctx = {
   /** Resolve uma pendência financeira. Lança Error com a explicação se a regra de negócio impedir (ex.: passaria do total). */
   resolveFinancial(conflictId: string, action: ReconcileAction): void;
   openFinancial: number;
-  /** Há alteração local ainda não confirmada pelo servidor (derivado; não altera a sincronização). */
-  dirty: boolean;
+  /** Há alteração local ainda não confirmada pelo servidor (comparação com a última versão confirmada, guardada no IndexedDB). */
+  hasPending: boolean;
 };
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
@@ -68,6 +69,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const [sync, setSync] = useState<SyncState>({ phase: 'idle', blocked: null });
   const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [networkDown, setNetworkDown] = useState(false);
+  const networkDownRef = useRef(false); networkDownRef.current = networkDown;
   const [authNotice, setAuthNotice] = useState('');
 
   const dataRef = useRef(data); dataRef.current = data;
@@ -76,8 +78,12 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const running = useRef(false);
   const again = useRef(false);
   const blockedRef = useRef<SyncBlock>(null);
+  const failures = useRef(0);
+  const lastRunAt = useRef(0);
+  const syncRef = useRef<SyncState>({ phase: 'idle', blocked: null });
   const sessionRef = useRef<SessionInfo | undefined>(undefined);
   sessionRef.current = session;
+  syncRef.current = sync;
 
   const setSession = useCallback((s: SessionInfo | undefined) => { if (s) setAuthNotice(''); csrfRef.current = s?.csrfToken; setSessionState(s); setStatus(s ? 'signed-in' : 'signed-out'); }, []);
   const entitled = status === 'signed-in' && session?.license?.status === 'active';
@@ -85,16 +91,23 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   useEffect(() => { loadSyncMeta().then(m => { metaRef.current = m; setConflicts(m.conflicts); }).catch(() => { metaRef.current = emptyMeta(); }); }, []);
   useEffect(() => {
     if (!auth) return;
-    let alive = true;
-    const check = () => auth.currentSession().then(r => {
+    let alive = true, timer: ReturnType<typeof setTimeout> | undefined, tries = 0;
+    const check = (): Promise<void> => auth.currentSession().then(r => {
       if (!alive) return;
-      setNetworkDown(!r.ok && r.reason === 'network');
+      const down = !r.ok && r.reason === 'network';
+      setNetworkDown(down);
       setSession(r.ok ? r.value : undefined);
+      // Sem rede ao abrir: confirma a sessão de novo sozinho (com espera crescente), sem depender do evento `online`.
+      clearTimeout(timer);
+      if (down) timer = setTimeout(() => { void check(); }, retryDelayMs(tries++)); else tries = 0;
     });
     void check();
+    const again = () => { if (alive && document.visibilityState !== 'hidden') void check(); };
     const onOnline = () => { void check(); }; // volta a internet: confirma o acesso de verdade
     window.addEventListener('online', onOnline);
-    return () => { alive = false; window.removeEventListener('online', onOnline); };
+    const onWake = () => { if (networkDownRef.current) again(); };
+    window.addEventListener('focus', onWake); document.addEventListener('visibilitychange', onWake);
+    return () => { alive = false; clearTimeout(timer); window.removeEventListener('online', onOnline); window.removeEventListener('focus', onWake); document.removeEventListener('visibilitychange', onWake); };
   }, [auth, setSession]);
   // Registra o último acesso verificado (só a hora; nenhum dado pessoal) para a tolerância offline.
   useEffect(() => { if (entitled) writeLastAccess(Date.now()); }, [entitled]);
@@ -112,7 +125,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
     if (!base || !sess || sess.license?.status !== 'active' || !metaRef.current) return;
     if (running.current) { again.current = true; return; }
     if (blockedRef.current && !opts.allowInitialMerge) return;
-    running.current = true;
+    running.current = true; lastRunAt.current = Date.now();
     setSync(s => ({ ...s, phase: 'syncing', message: undefined }));
     try {
       let meta = metaRef.current;
@@ -132,13 +145,24 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
         // Licença revogada (ou conta sem licença): relê a sessão para o app refletir a perda do direito. Os dados locais ficam intactos.
         const cur = await auth?.currentSession();
         if (cur?.ok) setSession(cur.value); else if (cur && cur.reason === 'unauthorized') setSession(undefined);
-        setSync({ phase: 'attention', message: r.message, blocked: null });
+        setSync(s => ({ ...s, phase: 'attention', message: r.message, blocked: null }));
         return;
       }
       blockedRef.current = null;
       const pendingMoney = meta.conflicts.filter(isOpenFinancial).length;
-      if (pendingMoney > 0 && r.status === 'synced') { setSync({ phase: 'attention', message: 'Há recebimentos aguardando a sua reconciliação (veja em Configurações).', lastSyncedAt: new Date().toISOString(), blocked: null }); return; }
-      setSync({ phase: r.status === 'synced' ? 'synced' : r.status === 'offline' ? 'offline' : r.status === 'needs-attention' ? 'attention' : 'error', message: r.status === 'synced' ? undefined : r.message, lastSyncedAt: r.status === 'synced' ? new Date().toISOString() : undefined, blocked: null });
+      if (pendingMoney > 0 && r.status === 'synced') { failures.current = 0; setSync({ phase: 'attention', message: 'Há recebimentos aguardando a sua reconciliação (veja em Configurações).', lastSyncedAt: new Date().toISOString(), blocked: null }); return; }
+      const ok = r.status === 'synced';
+      const transient = r.status === 'offline' || r.status === 'error';
+      failures.current = ok ? 0 : transient ? failures.current + 1 : failures.current;
+      const nowIso = new Date().toISOString();
+      setSync(s => ({
+        phase: ok ? 'synced' : r.status === 'offline' ? 'offline' : r.status === 'needs-attention' ? 'attention' : 'error',
+        message: ok ? undefined : r.message,
+        // A confirmação remota anterior é preservada durante falhas (para o horário no aviso); só uma nova confirmação a substitui.
+        lastSyncedAt: ok ? nowIso : s.lastSyncedAt,
+        failingSince: ok ? undefined : s.failingSince ?? nowIso,
+        blocked: null,
+      }));
     } finally {
       running.current = false;
       if (again.current) { again.current = false; void run(); }
@@ -158,6 +182,28 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
     window.addEventListener('online', onOnline);
     return () => window.removeEventListener('online', onOnline);
   }, [entitled, ready, run]);
+
+  // Nova tentativa automática depois de falha de rede/servidor, com espera crescente (não depende do evento `online`,
+  // que o navegador nem sempre emite — por exemplo ao sair de "Offline" nas ferramentas de desenvolvedor).
+  useEffect(() => {
+    if (!entitled || !ready || sync.blocked || (sync.phase !== 'offline' && sync.phase !== 'error')) return;
+    const t = setTimeout(() => void run(), retryDelayMs(Math.max(0, failures.current - 1)));
+    return () => clearTimeout(t);
+  }, [sync.phase, sync.blocked, entitled, ready, run]);
+  // Ao voltar para a janela/aba: confirma a conexão e puxa o que mudou em outro dispositivo (com intervalo mínimo).
+  useEffect(() => {
+    if (!entitled || !ready) return;
+    const wake = () => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+      const p = syncRef.current.phase;
+      const min = p === 'offline' || p === 'error' ? WAKE_MIN_INTERVAL_FAILING_MS : WAKE_MIN_INTERVAL_MS;
+      if (Date.now() - lastRunAt.current >= min) void run();
+    };
+    window.addEventListener('focus', wake); document.addEventListener('visibilitychange', wake);
+    return () => { window.removeEventListener('focus', wake); document.removeEventListener('visibilitychange', wake); };
+  }, [entitled, ready, run]);
+  // Pendência real = diferença entre os dados locais e a última versão confirmada pelo servidor (guardada no IndexedDB).
+  const hasPending = useMemo(() => (entitled && ready && metaRef.current ? buildPushes(data, metaRef.current).length > 0 : false), [data, entitled, ready, sync, conflicts]);
 
   const value: Ctx = {
     status, session, auth, quotes, entitled, access, requireLogin, setSession,
@@ -182,7 +228,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
       metaRef.current = { ...metaRef.current, conflicts: kept }; void saveSyncMeta(metaRef.current).catch(() => undefined); setConflicts(kept);
     },
     openFinancial: conflicts.filter(isOpenFinancial).length,
-    dirty: entitled && ready && lastApplied.current !== null && data !== lastApplied.current,
+    hasPending,
     resolveFinancial(conflictId, action) {
       const meta = metaRef.current; const c = meta?.conflicts.find(x => x.id === conflictId);
       if (!meta || !c) throw new Error('Pendência não encontrada.');
