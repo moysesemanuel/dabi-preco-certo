@@ -25,10 +25,12 @@ export function OrderSearch({ value, onChange }: Props) {
     if (value) { onChange(''); input.current?.focus(); } else setOpen(false);
   };
   if (!open) return <button ref={opener} type="button" className="search-toggle" onClick={() => setOpen(true)} aria-expanded="false" aria-controls={id}><Search size={16} aria-hidden="true" /> Pesquisar</button>;
-  return <div id={id} className="search-box" role="search">
-    <Search size={16} aria-hidden="true" className="search-icon" />
-    <input ref={input} type="search" aria-label="Pesquisar pedidos" placeholder="Código, cliente ou produto..." value={value} onChange={e => onChange(e.target.value)} onKeyDown={onKey} autoComplete="off" enterKeyHint="search" />
-    {value && <button type="button" className="search-btn" onClick={() => { onChange(''); input.current?.focus(); }} aria-label="Limpar pesquisa"><X size={14} /></button>}
+  return <div id={id} className="search-row" role="search">
+    <div className="search-field">
+      <Search size={16} aria-hidden="true" className="search-icon" />
+      <input ref={input} type="search" aria-label="Pesquisar pedidos" placeholder="Código, cliente ou produto..." value={value} onChange={e => onChange(e.target.value)} onKeyDown={onKey} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} enterKeyHint="search" />
+      {value && <button type="button" className="search-btn" onClick={() => { onChange(''); input.current?.focus(); }} aria-label="Limpar pesquisa"><X size={16} aria-hidden="true" /></button>}
+    </div>
     <button type="button" className="search-close" onClick={close} aria-label="Fechar pesquisa e mostrar todos os pedidos">Fechar</button>
   </div>;
 }
