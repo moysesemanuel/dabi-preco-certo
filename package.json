@@ -14,6 +14,7 @@
     "worker:dev": "wrangler dev --local --config worker/wrangler.toml",
     "licenses": "node worker/scripts/licenses.ts",
     "typecheck": "tsc -b",
+    "costs": "COST_REPORT=1 vitest run tests/costs/report.test.ts",
     "audit": "npm audit --audit-level=high",
     "check:secrets": "sh scripts/check-secrets.sh"
   },

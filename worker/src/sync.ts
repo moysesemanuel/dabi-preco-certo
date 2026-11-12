@@ -20,8 +20,10 @@ const same = sameEntity;
 
 export type SyncState = { revision: number; settingsRev: number; settings: Settings | null };
 export async function getState(db: D1Like, userId: string, now: string): Promise<SyncState> {
-  await db.prepare('INSERT OR IGNORE INTO sync_state (user_id, revision, updated_at) VALUES (?, 0, ?)').bind(userId, now).run();
-  const r = await db.prepare('SELECT revision, settings_rev, settings_json FROM sync_state WHERE user_id = ?').bind(userId).first<{ revision: number; settings_rev: number; settings_json: string | null }>();
+  type Row = { revision: number; settings_rev: number; settings_json: string | null };
+  const read = () => db.prepare('SELECT revision, settings_rev, settings_json FROM sync_state WHERE user_id = ?').bind(userId).first<Row>();
+  let r = await read(); // caso comum (conta já existe): 1 consulta em vez de 2
+  if (!r) { await db.prepare('INSERT OR IGNORE INTO sync_state (user_id, revision, updated_at) VALUES (?, 0, ?)').bind(userId, now).run(); r = await read(); }
   return { revision: r?.revision ?? 0, settingsRev: r?.settings_rev ?? 0, settings: r?.settings_json ? (JSON.parse(r.settings_json) as Settings) : null };
 }
 
@@ -66,8 +68,19 @@ async function existing<T>(db: D1Like, userId: string, table: 'ingredients' | 'r
   for (const row of r.results) out.set(row.id as string, { rev: num(row.rev), deleted: row.deleted_at !== null, entity: map(row) });
   return out;
 }
-const activeIds = async (db: D1Like, userId: string, table: 'ingredients' | 'recipes'): Promise<Set<string>> =>
-  new Set((await db.prepare(`SELECT id FROM ${table} WHERE user_id = ? AND deleted_at IS NULL`).bind(userId).all<{ id: string }>()).results.map(r => r.id));
+/**
+ * Quais dos ids INFORMADOS existem e estão ativos. Só os ids que o envio referencia são consultados (pela chave primária):
+ * ler a lista inteira de ids ativos da conta a cada envio custava uma linha lida por ingrediente/receita, e crescia com a conta.
+ */
+const activeIds = async (db: D1Like, userId: string, table: 'ingredients' | 'recipes', wanted: Iterable<string>): Promise<Set<string>> => {
+  const ids = [...new Set(wanted)];
+  if (!ids.length) return new Set();
+  const r = await db.prepare(`SELECT id FROM ${table} WHERE user_id = ?1 AND deleted_at IS NULL AND id IN (SELECT value FROM json_each(?2))`).bind(userId, JSON.stringify(ids)).all<{ id: string }>();
+  return new Set(r.results.map(x => x.id));
+};
+/** Ids referenciados (texto) em uma lista ainda NÃO validada; entradas de formato inesperado são ignoradas aqui e recusadas depois pela validação. */
+const referenced = (list: unknown[], pick: (item: Record<string, unknown>) => unknown[]): string[] =>
+  list.flatMap(x => (typeof x === 'object' && x !== null ? pick(x as Record<string, unknown>) : [])).filter((v): v is string => typeof v === 'string' && v.length <= 64);
 
 export type PushOutcome =
   | { ok: true; result: PushOk }
@@ -96,8 +109,8 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   if (req.baseRevision > state.revision) return bad(400, { error: 'INVALID_PAYLOAD', message: 'Revisão base maior que a do servidor.' });
 
   // ---- valida o conteúdo das entidades (mesmas regras do backup) ----
-  const activeIng = await activeIds(db, userId, 'ingredients');
-  const activeRec = await activeIds(db, userId, 'recipes');
+  const activeIng = await activeIds(db, userId, 'ingredients', referenced(req.upserts.recipes as unknown[], r => (Array.isArray(r.items) ? r.items.map(i => (typeof i === 'object' && i !== null ? (i as Record<string, unknown>).ingredientId : undefined)) : [])));
+  const activeRec = await activeIds(db, userId, 'recipes', referenced(req.upserts.orders as unknown[], o => [o.recipeId]));
   const delIng = new Set(req.deletes.ingredients), delRec = new Set(req.deletes.recipes);
   let ingredients: Ingredient[], recipes: Recipe[], orders: Order[], settings: Settings | undefined;
   try {

@@ -4,6 +4,7 @@ import { createHandler, type Env } from '../../worker/src/index';
 import { issueLicenseSql } from '../../worker/src/licenseAdmin';
 import { generateLicenseId, generateLicenseKey, hashLicenseKey } from '../../worker/src/licenses';
 import { createCompositeAuthorizer, createSessionAuthorizer } from '../../worker/src/session';
+import { meterD1 } from './costMeter';
 import { createTestD1 } from './d1';
 
 export const BASE = 'https://api.exemplo.test';
@@ -13,12 +14,15 @@ export const SECRET = 'segredo-de-teste-que-so-existe-no-ambiente-de-teste';
 export type Session = { cookie: string; csrf: string; sessionId: string };
 
 /** Servidor de teste completo (Worker real + SQLite com as migrações reais) com contas, e-mail em memória e relógio controlável. */
-export function makeServer(start = new Date('2026-11-12T15:00:00Z')) {
+export function makeServer(start = new Date('2026-11-12T15:00:00Z'), opts: { meter?: boolean } = {}) {
   const db = createTestD1();
+  const meter = opts.meter ? meterD1(db.d1, db.raw) : undefined; // medição de consumo do D1 (só quando pedida)
   const mail = new MemoryEmailSender();
   const state = { clock: new Date(start) };
-  const env: Env = { DB: db.d1, PUBLIC_BASE_URL: BASE, ALLOWED_ORIGINS: ORIGIN, AUTH_SECRET: SECRET };
-  const handle = createHandler({ authorize: createCompositeAuthorizer(createLicenseAuthorizer(), createSessionAuthorizer({ writesPerMinute: 10_000, verifyPerMinute: 10_000 })), now: () => state.clock, email: () => mail });
+  const env: Env = { DB: meter ? meter.d1 : db.d1, PUBLIC_BASE_URL: BASE, ALLOWED_ORIGINS: ORIGIN, AUTH_SECRET: SECRET };
+  const rawHandle = createHandler({ authorize: createCompositeAuthorizer(createLicenseAuthorizer(), createSessionAuthorizer({ writesPerMinute: 10_000, verifyPerMinute: 10_000 })), now: () => state.clock, email: () => mail });
+
+  const handle = ((request: Request, e: Env) => { meter?.request(); return rawHandle(request, e); }) as typeof rawHandle;
 
   async function issueFor(email: string) {
     const id = generateLicenseId();
@@ -40,6 +44,6 @@ export function makeServer(start = new Date('2026-11-12T15:00:00Z')) {
   /** `fetch` que entrega as requisições direto ao Worker de teste, levando o cookie e a origem do app (como o navegador faria). */
   const fetchFor = (session?: Session): typeof fetch => (async (url: string, init: RequestInit = {}) =>
     handle(new Request(url, { ...init, headers: { ...(init.headers as Record<string, string>), ...(session ? { cookie: session.cookie } : {}), origin: ORIGIN } }), env)) as typeof fetch;
-  return { db, env, mail, state, handle, issueFor, request, login, fetchFor, table: (name: string) => db.raw.prepare(`SELECT * FROM ${name}`).all() as Record<string, unknown>[] };
+  return { db, meter, env, mail, state, handle, issueFor, request, login, fetchFor, table: (name: string) => db.raw.prepare(`SELECT * FROM ${name}`).all() as Record<string, unknown>[] };
 }
 export type Server = ReturnType<typeof makeServer>;

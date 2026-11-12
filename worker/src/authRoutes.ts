@@ -1,4 +1,4 @@
-import { addMs, CODE_DIGITS, CODE_RESEND_COOLDOWN_SECONDS, CODE_TTL_MINUTES, generateNumericCode, hmacHex, MAX_SESSIONS, newCodeId, newSessionId, newUserId, normalizeDeviceLabel, normalizeEmail, randomToken, sha256Hex, timingSafeEqual } from './accounts';
+import { addMs, CODE_DIGITS, CODE_REQUESTS_PER_EMAIL_PER_DAY, EMAIL_DAILY_LIMIT_DEFAULT, EMAIL_DAILY_LIMIT_MAX, CODE_RESEND_COOLDOWN_SECONDS, CODE_TTL_MINUTES, generateNumericCode, hmacHex, MAX_SESSIONS, newCodeId, newSessionId, newUserId, normalizeDeviceLabel, normalizeEmail, randomToken, sha256Hex, timingSafeEqual } from './accounts';
 import {
   bindLicenseToUser, claimAttempt, createVerifiedUser, discardCode, findUserByEmail, insertSessionWithinLimit, latestOpenCode, licenseForEmail,
   listActiveSessions, markCodeUsed, recentOpenCode, replaceCode, revokeSession, type AccountLicense, type SessionRow,
@@ -7,14 +7,19 @@ import { EmailSendError, type EmailSender } from './email';
 import { loginCodeEmail } from './emailTemplates';
 import { apiError, json, readJsonBody, respond } from './http';
 import { checkCsrf, clearSessionCookie, resolveSession, sessionCookie, sessionIdleMs, sessionMaxAgeSeconds, type SessionEnv } from './session';
-import { consumeRateLimit } from './store';
+import { consumeRateLimit, windowCount } from './store';
 
-export type AuthEnv = SessionEnv & { AUTH_SECRET?: string };
+export type AuthEnv = SessionEnv & { AUTH_SECRET?: string; /** Limite diário de e-mails de código (padrão 80). */ EMAIL_DAILY_LIMIT?: string };
 export type AuthDeps = { now: () => Date; email: (env: AuthEnv) => EmailSender };
 
 /** Limites por hora. A defesa principal é POR E-MAIL (e por código); o limite por IP é só uma rede de proteção ampla (30/60 por hora), nunca o único bloqueio. */
 export const LOGIN_LIMITS = { requestPerEmail: 5, requestPerIp: 30, verifyPerEmail: 15, verifyPerIp: 60 } as const;
 const HOUR = 3600;
+const DAY = 86_400;
+const GLOBAL_EMAIL_KEY = 'global';
+const EMAIL_BUDGET_SCOPE = 'email-send-day';
+const emailDailyLimit = (env: AuthEnv) => { const n = Number(env.EMAIL_DAILY_LIMIT); return Number.isInteger(n) && n >= 1 && n <= EMAIL_DAILY_LIMIT_MAX ? n : EMAIL_DAILY_LIMIT_DEFAULT; };
+const budgetExhausted = (retryAfterSeconds: number) => apiError(503, 'EMAIL_DAILY_BUDGET', 'O envio de códigos de acesso atingiu o limite de hoje. Tente novamente amanhã ou fale com o suporte.', { 'Retry-After': String(retryAfterSeconds) });
 const ID_SESSION = /^ses_[0-9a-f]{16}$/;
 
 const ipOf = (request: Request) => request.headers.get('cf-connecting-ip') ?? 'unknown';
@@ -25,6 +30,10 @@ async function throttle(env: AuthEnv, request: Request, now: Date, scope: 'login
   const [byEmail, byIp] = await Promise.all([sha256Hex(`email:${email}`), sha256Hex(`ip:${ipOf(request)}`)]);
   const a = await consumeRateLimit(env.DB, `e_${byEmail}`, scope, limits[0], HOUR, now.getTime());
   if (!a.allowed) return tooMany(a.retryAfterSeconds);
+  if (scope === 'login-request') { // teto diário por e-mail: sem ele, 5 por hora seriam 120 e-mails/dia para um único cliente
+    const day = await consumeRateLimit(env.DB, `e_${byEmail}`, 'login-request-day', CODE_REQUESTS_PER_EMAIL_PER_DAY, DAY, now.getTime());
+    if (!day.allowed) return tooMany(day.retryAfterSeconds);
+  }
   const b = await consumeRateLimit(env.DB, `i_${byIp}`, scope, limits[1], HOUR, now.getTime());
   return b.allowed ? null : tooMany(b.retryAfterSeconds);
 }
@@ -45,6 +54,12 @@ export async function requestCode(request: Request, env: AuthEnv, deps: AuthDeps
   const limited = await throttle(env, request, now, 'login-request', email);
   if (limited) return limited;
 
+  // Orçamento diário de e-mails (cota do Resend). A checagem vem ANTES de consultar a licença: a resposta de "limite do dia" é igual para qualquer
+  // e-mail, então não revela quem é cliente.
+  const limit = emailDailyLimit(env);
+  const secondsToMidnight = DAY - (Math.floor(now.getTime() / 1000) % DAY);
+  if ((await windowCount(env.DB, GLOBAL_EMAIL_KEY, EMAIL_BUDGET_SCOPE, DAY, now.getTime())) >= limit) return budgetExhausted(secondsToMidnight);
+
   const ok = () => json({ ok: true, expiresInMinutes: CODE_TTL_MINUTES }, 202);
   const license = await licenseForEmail(env.DB, email);
   if (!license || license.status !== 'active') return ok(); // sem conta/licença: mesma resposta, nenhum e-mail
@@ -52,6 +67,8 @@ export async function requestCode(request: Request, env: AuthEnv, deps: AuthDeps
   const iso = now.toISOString();
   // Intervalo mínimo: um segundo clique (ou um robô) não gera outro e-mail nem invalida o código que acabou de ser enviado.
   if (await recentOpenCode(env.DB, email, addMs(iso, -CODE_RESEND_COOLDOWN_SECONDS * 1000), iso)) return ok();
+  // Consome 1 unidade do orçamento do dia de forma atômica (requisições simultâneas não passam do limite).
+  if (!(await consumeRateLimit(env.DB, GLOBAL_EMAIL_KEY, EMAIL_BUDGET_SCOPE, limit, DAY, now.getTime())).allowed) return budgetExhausted(secondsToMidnight);
   const code = generateNumericCode();
   const row = { id: newCodeId(), email, code_hash: await hmacHex(env.AUTH_SECRET, `${email}|${code}`), created_at: iso, expires_at: addMs(iso, CODE_TTL_MINUTES * 60_000), attempts: 0, used_at: null };
   await replaceCode(env.DB, row, iso);

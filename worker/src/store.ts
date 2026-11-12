@@ -57,8 +57,16 @@ export async function consumeRateLimit(db: D1Like, licenseId: string, scope: str
      ON CONFLICT (license_id, scope, window_start) DO UPDATE SET count = count + 1 WHERE count < ?4
      RETURNING count`,
   ).bind(licenseId, scope, windowStart, limit).first<{ count: number }>();
-  if (row && row.count === 1) await db.prepare('DELETE FROM rate_limits WHERE license_id = ?1 AND window_start < ?2').bind(licenseId, windowStart).run();
+  // Limpa só janelas ANTIGAS DO MESMO ESCOPO (antes apagava também as de outros escopos, o que zerava limites de janela maior, como o diário).
+  if (row && row.count === 1) await db.prepare('DELETE FROM rate_limits WHERE license_id = ?1 AND scope = ?2 AND window_start < ?3').bind(licenseId, scope, windowStart).run();
   return { allowed: row !== null, retryAfterSeconds: windowStart + windowSeconds - nowSec };
+}
+
+/** Quanto já foi consumido na janela atual (só leitura; não consome). */
+export async function windowCount(db: D1Like, licenseId: string, scope: string, windowSeconds: number, nowMs: number): Promise<number> {
+  const nowSec = Math.floor(nowMs / 1000);
+  const row = await db.prepare('SELECT count FROM rate_limits WHERE license_id = ?1 AND scope = ?2 AND window_start = ?3').bind(licenseId, scope, nowSec - (nowSec % windowSeconds)).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 export const countQuotaUsage = (db: D1Like, ownerId: string, dayStartIso: string) =>

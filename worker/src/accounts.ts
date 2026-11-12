@@ -5,6 +5,14 @@ export const SESSION_IDLE_DAYS = 30;
 export const SESSION_MAX_DAYS = 90;
 /** Cooldown entre pedidos de código para o mesmo e-mail: dentro dele não se envia outro (não invalida o anterior). */
 export const CODE_RESEND_COOLDOWN_SECONDS = 60;
+/**
+ * Orçamento diário de e-mails de código de acesso. O plano gratuito do Resend permite 100 e-mails/dia (dia UTC); usamos 80 por padrão,
+ * com folga, e o valor pode ser mudado com a variável EMAIL_DAILY_LIMIT (ex.: ao contratar um plano maior). Zerar não desliga o limite.
+ */
+export const EMAIL_DAILY_LIMIT_DEFAULT = 80;
+export const EMAIL_DAILY_LIMIT_MAX = 100_000;
+/** Máximo de pedidos de código por e-mail por dia (UTC), além do limite por hora. */
+export const CODE_REQUESTS_PER_EMAIL_PER_DAY = 12;
 export const CODE_TTL_MINUTES = 10;
 export const CODE_MAX_ATTEMPTS = 5;
 export const CODE_DIGITS = 8;

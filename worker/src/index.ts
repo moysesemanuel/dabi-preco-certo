@@ -22,6 +22,8 @@ export interface Env {
   RESEND_API_KEY?: string;
   /** Remetente verificado no Resend, ex.: `PedidoCerto <acesso@seudominio.com.br>`. Não é segredo. */
   EMAIL_FROM?: string;
+  /** Limite diário de e-mails de código de acesso (padrão 80, abaixo dos 100/dia do plano gratuito do Resend). Ajuste ao mudar de plano. */
+  EMAIL_DAILY_LIMIT?: string;
   /** `on` reativa a autenticação antiga por chave de licença (Bearer). Padrão: desligada. */
   LEGACY_KEY_AUTH?: string;
 }
