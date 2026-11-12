@@ -59,7 +59,7 @@ Branch: `feat/etapa-1-beta`. Nada foi publicado, nenhum DNS foi alterado e nenhu
 
 **Decisões**
 - Servidor = fonte autoritativa; IndexedDB = cache + alterações pendentes.
-- Conflito na mesma entidade: **servidor vence + cópia local preservada** (em vez de "último a gravar vence" ou fusão por campo), por ser a opção que não perde dados e não exige adivinhar a intenção do usuário.
+- Conflito na mesma entidade: ~~servidor vence + cópia local preservada~~ **substituído na Etapa 2 (veja o fim deste documento): as duas versões ficam preservadas e o usuário decide.**
 - Configurações (tamanho da xícara) sincronizam como uma entidade única.
 - Entidade → linhas: itens de receita em tabela própria, gravados por `json_each` (um comando por receita, respeita o limite de parâmetros do D1).
 
@@ -218,3 +218,20 @@ Os textos "Sincronizando…/Sincronizado" foram trocados por um ponto ao lado do
 **Correções.** Retry automático com espera 5 s → 10 s → 20 s… até 2 min (`src/sync/retry.ts`); nova tentativa ao voltar o foco/visibilidade (mín. 3 s em falha, 15 s normal) e `online`; tempo limite de 20 s por requisição; a checagem de sessão sem rede também é repetida; pendência real (`hasPending`) = diferença para a última versão confirmada pelo servidor; `lastSyncedAt` só muda com confirmação remota e `failingSince` marca a falha; indicador com rótulo visível quando não está verde e balão acessível (hover, foco, toque, Esc); falha de servidor com o navegador online vira vermelha se persistir. O aviso de salvamento ("Ingrediente atualizado…") continua dizendo só que foi salvo localmente.
 
 Testes: `tests/ui/offline-sync.test.tsx`, `tests/sync-retry.test.ts`, `tests/ui/sync-indicator.test.tsx`.
+
+
+## Etapa 2: conflitos de sincronização sem perda silenciosa
+
+**Causa raiz.** A política anterior era "servidor vence + cópia local guardada": ao reconectar, `applyPull` aplicava a versão da nuvem nos dados locais (R$ 12 → R$ 13) e só deixava a versão local em `meta.conflicts`, visível apenas numa lista em Configurações (sem banner, sem comparação, sem forma de restaurar e com "Dispensar avisos"). Para quem usa o app, o valor local simplesmente desaparecia.
+
+**Nova regra** (`src/sync/engine.ts`, `src/sync/resolve.ts`):
+- Mesma entidade alterada aqui e na nuvem a partir da mesma base: **nada é aplicado nem enviado**. O conflito (`pending: true`) guarda `local`, `server` (+ `serverRev`) e `base`, é persistido no IndexedDB com o resto de `meta`, e a base/revisão da entidade não avançam. A versão local continua nos dados.
+- O envio da entidade é retido (`buildPushes`), assim como o de quem depende de algo que a nuvem excluiu. As demais alterações sincronizam normalmente.
+- Novos pulls/retries só **atualizam** a versão da nuvem do conflito (`serverRev`); nunca o eliminam. Se as duas versões ficarem iguais, ele se encerra como `identical` sem perda. `healConflicts` corrige o caso de queda entre gravar os dados e gravar o estado.
+- Decisão: *manter minha alteração* (a versão da nuvem vira a base com a revisão dela; se a nuvem mudar de novo, o servidor recusa, o pull atualiza o conflito e pede nova decisão) ou *manter a da nuvem* (a versão local fica no histórico). Ambas exigem confirmação na interface. A escolha feita sobre uma comparação desatualizada é recusada.
+- Encomendas: dinheiro mexido nos dois lados continua na reconciliação financeira explícita; ao manter a versão local de uma encomenda, recebimentos da nuvem nunca são descartados (união por id) e passar do total é recusado.
+- Sem fusão automática por campo: só campos divergentes são mostrados. Fusão automática só seria segura onde os campos são independentes, o que não é demonstrável para custos derivados; na dúvida, o usuário decide.
+
+**Interface.** `ConflictBanner` (App) derivado do estado persistido, `ConflictDialog` + `Modal` (comparação, confirmação, foco/Esc/"decidir depois"), `FinancialConflict` (extraído do painel de Configurações e reutilizado), indicador âmbar com a quantidade, painel de Configurações com os conflitos pendentes e o histórico. Conflitos de outra conta guardados no aparelho nunca aparecem.
+
+Testes: `tests/conflict-resolution.test.ts` (motor + Worker real + IndexedDB), `tests/ui/conflicts.test.tsx`, `tests/sync-engine.test.ts`, `tests/ui/sync-indicator.test.tsx`.

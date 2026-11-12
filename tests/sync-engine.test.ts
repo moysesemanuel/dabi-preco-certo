@@ -65,16 +65,17 @@ describe('Motor: mesclagem (3 vias)', () => {
     expect(out.meta.revision).toBe(2); expect(out.meta.revs.ingredients).toEqual({ a: 2, b: 1, c: 2 });
     expect(out.meta.baseline.ingredients.find(i => i.id === 'b')!.purchasePrice).toBe(6); // b continua "alterado aqui" até ser enviado
   });
-  it('mesma entidade alterada nos dois lados: o servidor vence e a versão local fica GUARDADA', () => {
+  it('mesma entidade alterada nos dois lados: NADA é sobrescrito; local, nuvem e base ficam guardadas e o envio é retido', () => {
     const base = data({ ingredients: [ing('a')] });
     const meta = metaWith(base, 1, { ingredients: { a: 1 }, recipes: {}, orders: {} });
     const mine = ing('a', { purchasePrice: 100 }), theirs = ing('a', { purchasePrice: 8 });
     const out = applyPull(data({ ingredients: [mine] }), meta, pullOf({ revision: 2, ingredients: [E('a', 2, theirs)] }), NOW);
-    expect(out.local.ingredients[0]).toEqual(theirs);
+    expect(out.local.ingredients[0]).toEqual(mine); // a versão daqui continua nos dados
     expect(out.conflicts).toHaveLength(1);
-    expect(out.conflicts[0]).toMatchObject({ kind: 'ingredients', entityId: 'a', reason: 'edited-elsewhere', local: mine, server: theirs, at: NOW.toISOString() });
+    expect(out.conflicts[0]).toMatchObject({ kind: 'ingredients', entityId: 'a', reason: 'edited-elsewhere', local: mine, server: theirs, base: ing('a'), serverRev: 2, pending: true, at: NOW.toISOString() });
     expect(out.meta.conflicts).toHaveLength(1);
-    expect(buildPushes(out.local, out.meta)).toEqual([]); // nada a reenviar: convergiu
+    expect(out.meta.baseline.ingredients[0]).toEqual(ing('a')); expect(out.meta.revs.ingredients.a).toBe(1); // a base e a revisão não avançam
+    expect(buildPushes(out.local, out.meta)).toEqual([]); // enviar sobrescreveria a nuvem: retido até a decisão
   });
   it('alterações idênticas dos dois lados não são conflito', () => {
     const base = data({ ingredients: [ing('a')] });
@@ -83,15 +84,16 @@ describe('Motor: mesclagem (3 vias)', () => {
     const out = applyPull(data({ ingredients: [same] }), meta, pullOf({ revision: 2, ingredients: [E('a', 2, same)] }), NOW);
     expect(out.conflicts).toEqual([]); expect(buildPushes(out.local, out.meta)).toEqual([]);
   });
-  it('exclusão no servidor de algo que não mudei é aplicada; se eu tinha editado, é conflito e a edição fica guardada', () => {
+  it('exclusão no servidor de algo que não mudei é aplicada; se eu tinha editado, é conflito pendente e a minha edição continua nos dados', () => {
     const base = data({ ingredients: [ing('a'), ing('b')] });
     const meta = metaWith(base, 1, { ingredients: { a: 1, b: 1 }, recipes: {}, orders: {} });
     const local = data({ ingredients: [ing('a'), ing('b', { purchasePrice: 50 })] });
     const out = applyPull(local, meta, pullOf({ revision: 2, ingredients: [E<Ingredient>('a', 2), E<Ingredient>('b', 2)] }), NOW);
-    expect(out.local.ingredients).toEqual([]);
-    expect(out.conflicts.map(c => [c.entityId, c.reason])).toEqual([['b', 'deleted-elsewhere']]);
+    expect(out.local.ingredients).toEqual([ing('b', { purchasePrice: 50 })]);
+    expect(out.conflicts.map(c => [c.entityId, c.reason, c.pending])).toEqual([['b', 'deleted-elsewhere', true]]);
     expect(out.conflicts[0].local).toEqual(ing('b', { purchasePrice: 50 }));
-    expect(out.meta.revs.ingredients).toEqual({ a: 2, b: 2 }); // guarda a revisão da exclusão (permite recriar)
+    expect(out.conflicts[0]).toMatchObject({ server: null, serverRev: 2 }); // guarda a revisão da exclusão (permite recriar ao decidir)
+    expect(out.meta.revs.ingredients).toEqual({ a: 2, b: 1 }); expect(buildPushes(out.local, out.meta)).toEqual([]);
   });
   it('se o servidor excluiu um ingrediente do qual uma receita NOVA daqui depende, ele é restaurado (sem referência quebrada)', () => {
     const base = data({ ingredients: [ing('a')] });
@@ -112,12 +114,13 @@ describe('Motor: mesclagem (3 vias)', () => {
     expect(findDanglingRefs(out.local)).toEqual([]);
     expect(out.local.recipes.map(r => r.id)).toEqual(['r']); expect(out.local.ingredients.map(i => i.id)).toEqual(['a']);
   });
-  it('configurações: servidor vence em conflito, preservando a local', () => {
+  it('configurações: conflito pendente; a versão local continua e não é enviada', () => {
     const base = data({ settings: { cupSizeMl: 240 } });
     const meta = { ...metaWith(base, 1, { ingredients: {}, recipes: {}, orders: {}, settings: 1 }) };
     const out = applyPull(data({ settings: { cupSizeMl: 200 } }), meta, pullOf({ revision: 2, settings: { rev: 2, data: { cupSizeMl: 250 } } }), NOW);
-    expect(out.local.settings).toEqual({ cupSizeMl: 250 });
-    expect(out.conflicts[0]).toMatchObject({ kind: 'settings', local: { cupSizeMl: 200 }, server: { cupSizeMl: 250 } });
+    expect(out.local.settings).toEqual({ cupSizeMl: 200 });
+    expect(out.conflicts[0]).toMatchObject({ kind: 'settings', local: { cupSizeMl: 200 }, server: { cupSizeMl: 250 }, pending: true });
+    expect(buildPushes(out.local, out.meta)).toEqual([]);
     const noLocalEdit = applyPull(data({ settings: { cupSizeMl: 240 } }), meta, pullOf({ revision: 2, settings: { rev: 2, data: { cupSizeMl: 250 } } }), NOW);
     expect(noLocalEdit.local.settings).toEqual({ cupSizeMl: 250 }); expect(noLocalEdit.conflicts).toEqual([]);
   });
@@ -167,7 +170,7 @@ describe('Dois dispositivos', () => {
     expect(A.data.orders[0].status).toBe('Entregue'); expect(A.data.ingredients.map(i => i.id)).toContain('novo');
     expect(A.meta.conflicts).toEqual([]); expect(B.meta.conflicts).toEqual([]);
   });
-  it('mesma entidade nos dois: o primeiro a sincronizar vence; a edição do outro fica GUARDADA, sem perda silenciosa', async () => {
+  it('mesma entidade nos dois: conflito pendente; as DUAS versões ficam preservadas e nada é sobrescrito', async () => {
     const A = await device(), B = await device('bia@exemplo.com', 'Notebook');
     A.edit(() => full()); await A.sync(); await B.sync();
     A.edit(d => ({ ...d, ingredients: d.ingredients.map(i => (i.id === 'f' ? { ...i, purchasePrice: 9 } : i)) }));
@@ -175,13 +178,16 @@ describe('Dois dispositivos', () => {
     await A.sync();
     const rb = await B.sync();
     expect(rb.status).toBe('synced');
-    expect(B.data.ingredients.find(i => i.id === 'f')!.purchasePrice).toBe(9); // servidor vence
+    expect(B.data.ingredients.find(i => i.id === 'f')!.purchasePrice).toBe(100); // a minha alteração NÃO foi substituída
     expect(rb.newConflicts).toHaveLength(1);
-    expect(rb.newConflicts[0]).toMatchObject({ kind: 'ingredients', entityId: 'f', reason: 'edited-elsewhere' });
-    expect((rb.newConflicts[0].local as Ingredient).purchasePrice).toBe(100); // a versão perdida continua disponível para o usuário
+    expect(rb.newConflicts[0]).toMatchObject({ kind: 'ingredients', entityId: 'f', reason: 'edited-elsewhere', pending: true });
+    expect((rb.newConflicts[0].local as Ingredient).purchasePrice).toBe(100);
+    expect((rb.newConflicts[0].server as Ingredient).purchasePrice).toBe(9); // a versão da nuvem também fica guardada
     expect(B.meta.conflicts).toHaveLength(1);
-    await A.sync();
-    expect(norm(A.data)).toEqual(norm(B.data));
+    await B.sync(); await A.sync(); // novas rodadas não eliminam nem enviam nada
+    expect(A.data.ingredients.find(i => i.id === 'f')!.purchasePrice).toBe(9);
+    expect(B.data.ingredients.find(i => i.id === 'f')!.purchasePrice).toBe(100);
+    expect(B.meta.conflicts[0].pending).toBe(true);
   });
   it('exclusões se propagam, sem apagar nada de verdade no servidor', async () => {
     const A = await device(), B = await device('bia@exemplo.com', 'Notebook');

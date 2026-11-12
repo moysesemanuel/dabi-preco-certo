@@ -1,6 +1,6 @@
 /**
- * Reconciliação financeira explícita. Quando duas pontas mexem no dinheiro da MESMA encomenda, o servidor vence na sincronização,
- * mas o que esta ponta fez fica registrado como pendência e só sai por escolha do usuário:
+ * Reconciliação financeira explícita. Quando duas pontas mexem no dinheiro da MESMA encomenda, a versão do servidor é aplicada na sincronização
+ * (o dinheiro nunca é decidido em silêncio), mas o que esta ponta fez fica registrado como pendência e só sai por escolha do usuário:
  *  - "merge" (somar): acrescenta à encomenda os recebimentos lançados aqui (ignora os que já existem), sem passar do total;
  *    se a encomenda foi excluída no outro dispositivo, recria uma CÓPIA (novo id) com os dados locais.
  *  - "keep-server": mantém só o que o servidor tem (a tela exige confirmar o descarte dos valores listados).

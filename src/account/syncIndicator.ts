@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { SyncState } from './AccountContext';
 
-/** ok = verde (saudável) · wait = cinza (offline, pendência ou sem confirmação) · bad = vermelho (exige atenção). */
-export type IndicatorLevel = 'ok' | 'wait' | 'bad';
+/** ok = verde (saudável) · wait = cinza (offline, pendência ou sem confirmação) · conflict = âmbar (conflito aguardando decisão) · bad = vermelho (falha/atenção). */
+export type IndicatorLevel = 'ok' | 'wait' | 'conflict' | 'bad';
 export type IndicatorInput = {
   sync: SyncState;
   /** Há alteração local ainda sem confirmação remota (diferença para a última versão confirmada pelo servidor). */
   hasPending: boolean;
-  openFinancial: number;
+  /** Conflitos aguardando decisão (dados e recebimentos). Nunca é mascarado por uma sincronização bem-sucedida de outros registros. */
+  conflicts: number;
   entitled: boolean;
   /** `navigator.onLine`: false = o navegador sabe que está sem rede. Padrão: online. */
   browserOnline?: boolean;
@@ -27,13 +28,13 @@ export const formatSyncTime = (iso?: string): string | undefined => {
  * Deriva a saúde da sincronização SOMENTE dos estados existentes. Verde exige: uma confirmação remota real (`lastSyncedAt`),
  * nenhuma falha em andamento e nenhuma alteração local pendente. Nada aqui inventa sucesso.
  */
-export function deriveIndicator({ sync, hasPending, openFinancial, entitled, browserOnline = true }: IndicatorInput): Indicator {
+export function deriveIndicator({ sync, hasPending, conflicts, entitled, browserOnline = true }: IndicatorInput): Indicator {
   const last = formatSyncTime(sync.lastSyncedAt);
   const lastText = last ? ` Última confirmação do servidor às ${last}.` : ' Ainda não houve confirmação do servidor nesta sessão.';
   const saved = hasPending ? ' Suas alterações estão salvas neste dispositivo, mas ainda não foram confirmadas pelo servidor.' : '';
   if (!entitled) return { level: 'wait', label: 'Sem sincronização', detail: 'A sincronização não está ativa para esta conta.', failing: false };
   if (sync.blocked) return { level: 'bad', label: 'Precisa da sua decisão', detail: `A sincronização precisa da sua decisão em Configurações. Nada foi enviado ainda.${lastText}`, failing: false };
-  if (openFinancial > 0) return { level: 'bad', label: 'Recebimentos a reconciliar', detail: `Há recebimentos aguardando a sua reconciliação (veja em Configurações).${lastText}`, failing: false };
+  if (conflicts > 0) return { level: 'conflict', label: conflicts === 1 ? 'Conflito aguardando decisão' : `${conflicts} conflitos aguardando decisão`, detail: `${conflicts === 1 ? 'Um registro foi alterado aqui e em outro dispositivo.' : `${conflicts} registros foram alterados aqui e em outro dispositivo.`} As duas versões estão preservadas; nada foi sobrescrito. Escolha qual manter em "Acessar conflitos".${saved}${lastText}`, failing: false };
   if (sync.phase === 'attention') return { level: 'bad', label: 'Precisa de atenção', detail: `${sync.message ?? 'A sincronização precisa de atenção.'}${saved}${lastText}`, failing: false };
   if (sync.phase === 'offline' || !browserOnline) {
     // Sem rede conhecida pelo navegador é uma condição normal (cinza). Servidor inalcançável com o navegador "online" é falha: vira vermelha se persistir.
@@ -57,7 +58,7 @@ export function useStableIndicator(raw: Indicator): IndicatorLevel {
   const shownRef = useRef(shown); shownRef.current = shown;
   useEffect(() => {
     const timers: ReturnType<typeof setTimeout>[] = [];
-    if (raw.level === 'ok' || raw.level === 'bad') setShown(raw.level);
+    if (raw.level === 'ok' || raw.level === 'bad' || raw.level === 'conflict') setShown(raw.level);
     else {
       if (shownRef.current !== 'wait') timers.push(setTimeout(() => setShown('wait'), INDICATOR_TIMING.toWaitMs));
       if (raw.failing) timers.push(setTimeout(() => setShown('bad'), INDICATOR_TIMING.failingToBadMs));

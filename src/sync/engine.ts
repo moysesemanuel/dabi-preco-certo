@@ -4,9 +4,11 @@
  * Modelo: o servidor é a fonte autoritativa quando há conta + licença; o IndexedDB é cache offline + alterações pendentes.
  * `meta.baseline` é o último estado do servidor que este dispositivo conhece; "alterações locais" = local − baseline.
  * Ciclo: puxar e mesclar (3 vias) → enviar o que é só local (atômico, em blocos) → puxar de novo para fixar as revisões.
- * Conflito (mesma entidade alterada aqui e em outro dispositivo): o servidor vence, e a versão local perdida é GUARDADA em
- * `meta.conflicts` (nunca descartada em silêncio). Exclusões no servidor são lógicas; se algo novo aqui ainda depende de um
- * item excluído lá, o item é restaurado em vez de deixar referência quebrada.
+ * Conflito (mesma entidade alterada aqui e em outro dispositivo, a partir da mesma base): NADA é sobrescrito. A versão local continua
+ * nos dados, a versão da nuvem e a base ficam em `meta.conflicts` (persistido no IndexedDB), o envio dessa entidade é retido e o
+ * usuário decide (`resolveConflict`). Exceção: dinheiro de encomendas segue a reconciliação financeira explícita (`reconcile.ts`).
+ * Exclusões no servidor são lógicas; se algo novo aqui ainda depende de um item excluído lá, o item é restaurado em vez de deixar
+ * referência quebrada.
  */
 import { emptyPush, KINDS, SYNC_LIMITS, sameEntity, type Kind, type PullResponse, type PushRequest, type RevMap } from '../../shared/sync';
 import type { DataSet, Ingredient, Order, Payment, Recipe } from '../domain/types';
@@ -18,12 +20,24 @@ type KindMaps = { ingredients: Map<string, Ingredient>; recipes: Map<string, Rec
 /** O que este dispositivo fez com o DINHEIRO de uma encomenda e o servidor não tem. Exige reconciliação explícita. */
 export type FinancialDiff = { addedPayments: Payment[]; removedPayments: Payment[]; deposit?: { local: number; server: number | null } };
 export type ConflictRecord = { id: string; kind: Kind | 'settings'; entityId: string; at: string; reason: 'edited-elsewhere' | 'deleted-elsewhere' | 'restored'; local: unknown | null; server: unknown | null;
+  /** true = aguarda decisão do usuário: a versão local segue nos dados, o envio é retido e a nuvem NÃO foi aplicada. */
+  pending?: boolean;
+  /** Versão-base (último estado comum aos dois lados); null = a entidade não existia na base. */
+  base?: unknown | null;
+  /** Revisão da versão da nuvem guardada em `server` (usada como base ao enviar a versão local). */
+  serverRev?: number;
+  /** Última vez que a versão da nuvem mudou enquanto o conflito esperava. */
+  updatedAt?: string;
   /** Só em encomendas: recebimentos/sinal alterados aqui e não refletidos no servidor. Nunca é descartado sem escolha do usuário. */
   financial?: FinancialDiff;
   /** Preenchido quando o usuário resolveu a pendência financeira. */
-  resolution?: { action: 'merge' | 'keep-server'; at: string } };
+  resolution?: { action: 'merge' | 'keep-server' | 'keep-local' | 'identical'; at: string } };
 /** Pendência financeira ainda sem decisão do usuário. */
 export const isOpenFinancial = (c: ConflictRecord): boolean => !!c.financial && !c.resolution;
+/** Conflito aguardando decisão (comparação local × nuvem). */
+export const isPendingConflict = (c: ConflictRecord): boolean => c.pending === true && !c.resolution;
+/** Qualquer pendência que impede dizer "sincronizado": conflito de dados ou dinheiro sem decisão. */
+export const isUnresolved = (c: ConflictRecord): boolean => isPendingConflict(c) || isOpenFinancial(c);
 
 /**
  * Diferença financeira que ESTE dispositivo criou em relação ao baseline e que o servidor não tem:
@@ -71,6 +85,7 @@ const fromMaps = (like: DataSet, m: KindMaps): DataSet => {
 };
 const sameOpt = (a: unknown, b: unknown) => (a === undefined || b === undefined ? a === b : sameEntity(a, b));
 const clone = <T,>(v: T): T => structuredClone(v);
+export const sameOptEntity = sameOpt;
 
 /** Referências quebradas (receita → ingrediente, encomenda → receita). Vazio = íntegro. */
 export function findDanglingRefs(d: DataSet): string[] {
@@ -81,23 +96,38 @@ export function findDanglingRefs(d: DataSet): string[] {
   return out;
 }
 
-/** Mescla (3 vias) as alterações do servidor no estado local. O servidor vence em conflitos, que são registrados. */
+/** Mescla (3 vias) as alterações do servidor no estado local. Conflitos ficam pendentes (nada é sobrescrito) até o usuário decidir. */
 export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, now: Date = new Date()): { local: DataSet; meta: SyncMeta; conflicts: ConflictRecord[] } {
   const L = toMaps(local), B = toMaps(meta.baseline), revs = clone(meta.revs), conflicts: ConflictRecord[] = [];
+  const all: ConflictRecord[] = meta.conflicts.map(c => ({ ...c }));
   const at = now.toISOString();
   const removed = { ingredients: new Map<string, Ingredient>(), recipes: new Map<string, Recipe>() };
+  const pendingFor = (kind: ConflictRecord['kind'], id: string) => all.find(c => isPendingConflict(c) && c.kind === kind && c.entityId === id);
 
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
     for (const ent of pull[kind] as { id: string; rev: number; deleted: boolean; data?: Entity }[]) {
       const lo = Lk.get(ent.id), ba = Bk.get(ent.id), server = ent.deleted ? undefined : ent.data;
+      const pend = pendingFor(kind, ent.id);
+      if (pend) {
+        // Já há um conflito aguardando decisão: só atualizamos a versão da nuvem. Nada local é tocado e a base é preservada.
+        if (sameOpt(lo, server)) { pend.pending = false; pend.resolution = { action: 'identical', at }; if (server) Bk.set(ent.id, server); else Bk.delete(ent.id); (revs[kind] as RevMap)[ent.id] = ent.rev; }
+        else { pend.server = server ?? null; pend.serverRev = ent.rev; pend.updatedAt = at; pend.reason = server ? 'edited-elsewhere' : 'deleted-elsewhere'; }
+        continue;
+      }
       if (!sameOpt(lo, server)) {
         if (sameOpt(lo, ba)) { // sem alteração local: aceita o servidor
           if (server) Lk.set(ent.id, server); else { Lk.delete(ent.id); if (kind !== 'orders' && lo) (removed[kind] as Map<string, Entity>).set(ent.id, lo); }
-        } else { // alterado aqui E no servidor: o servidor vence e a versão local fica guardada
+        } else {
           const financial = kind === 'orders' && lo ? financialDiff(lo as Order, ba as Order | undefined, server as Order | undefined) : undefined;
-          conflicts.push({ id: `${kind}:${ent.id}:${ent.rev}`, kind, entityId: ent.id, at, reason: server ? 'edited-elsewhere' : 'deleted-elsewhere', local: lo ?? null, server: server ?? null, ...(financial ? { financial } : {}) });
-          if (server) Lk.set(ent.id, server); else { Lk.delete(ent.id); if (kind !== 'orders' && lo) (removed[kind] as Map<string, Entity>).set(ent.id, lo); }
+          if (financial) { // dinheiro mexido aqui e lá: reconciliação financeira explícita (o servidor é aplicado e o que foi lançado aqui fica pendente)
+            conflicts.push({ id: `${kind}:${ent.id}:${ent.rev}`, kind, entityId: ent.id, at, reason: server ? 'edited-elsewhere' : 'deleted-elsewhere', local: lo ?? null, server: server ?? null, financial });
+            if (server) Lk.set(ent.id, server); else Lk.delete(ent.id);
+          } else { // alterado aqui E no servidor: preserva as duas versões e a base; a decisão é do usuário
+            conflicts.push({ id: `${kind}:${ent.id}:${ent.rev}`, kind, entityId: ent.id, at, reason: server ? 'edited-elsewhere' : 'deleted-elsewhere', local: lo ?? null, server: server ?? null, base: ba ?? null, serverRev: ent.rev, pending: true });
+            all.push(conflicts[conflicts.length - 1]);
+            continue; // não altera local, base nem revisão desta entidade
+          }
         }
       }
       if (server) Bk.set(ent.id, server); else Bk.delete(ent.id);
@@ -115,17 +145,41 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
 
   let settings = local.settings, baselineSettings = meta.baseline.settings;
   if (pull.settings) {
-    const srv = pull.settings.data;
-    if (!sameOpt(settings, srv)) {
-      if (!settings || sameOpt(settings, baselineSettings)) settings = srv;
-      else { conflicts.push({ id: `settings:settings:${pull.settings.rev}`, kind: 'settings', entityId: 'settings', at, reason: 'edited-elsewhere', local: settings, server: srv }); settings = srv; }
-    }
-    baselineSettings = srv; revs.settings = pull.settings.rev;
+    const srv = pull.settings.data, pend = pendingFor('settings', 'settings');
+    if (pend) {
+      if (sameOpt(settings, srv)) { pend.pending = false; pend.resolution = { action: 'identical', at }; baselineSettings = srv; revs.settings = pull.settings.rev; }
+      else { pend.server = srv; pend.serverRev = pull.settings.rev; pend.updatedAt = at; }
+    } else if (!sameOpt(settings, srv)) {
+      if (!settings || sameOpt(settings, baselineSettings)) { settings = srv; baselineSettings = srv; revs.settings = pull.settings.rev; }
+      else { const c: ConflictRecord = { id: `settings:settings:${pull.settings.rev}`, kind: 'settings', entityId: 'settings', at, reason: 'edited-elsewhere', local: settings, server: srv, base: baselineSettings ?? null, serverRev: pull.settings.rev, pending: true }; conflicts.push(c); all.push(c); }
+    } else { baselineSettings = srv; revs.settings = pull.settings.rev; }
   }
 
   const merged = { ...fromMaps(local, L), ...(settings ? { settings } : {}) };
   const baseline = { ...fromMaps(meta.baseline, B), ...(baselineSettings ? { settings: baselineSettings } : {}) };
-  return { local: merged, meta: { revision: pull.revision, revs, baseline, conflicts: [...meta.conflicts, ...conflicts] }, conflicts };
+  // `all` já contém os conflitos novos que aguardam decisão; os demais (financeiros, restaurações) entram aqui.
+  const extra = conflicts.filter(c => !all.includes(c));
+  return { local: merged, meta: { revision: pull.revision, revs, baseline, conflicts: [...all, ...extra] }, conflicts };
+}
+
+/**
+ * Autocorreção: um conflito pendente cuja versão local já é igual à da nuvem não tem mais divergência (por exemplo, a escolha foi
+ * gravada nos dados, mas o aparelho fechou antes de gravar o estado de sincronização). Nada é perdido ao fechá-lo.
+ */
+export function healConflicts(local: DataSet, meta: SyncMeta, now: Date = new Date()): SyncMeta {
+  const L = toMaps(local); let changed = false;
+  const baseline = clone(meta.baseline), B = toMaps(baseline), revs = clone(meta.revs);
+  const conflicts = meta.conflicts.map(c => {
+    if (!isPendingConflict(c)) return c;
+    const cur = c.kind === 'settings' ? local.settings : (L[c.kind] as Map<string, Entity>).get(c.entityId);
+    if (!sameOpt(cur, c.server ?? undefined)) return c;
+    changed = true;
+    if (c.kind === 'settings') { if (c.server) baseline.settings = c.server as DataSet['settings']; if (c.serverRev !== undefined) revs.settings = c.serverRev; }
+    else { const Bk = B[c.kind] as Map<string, Entity>; if (c.server) Bk.set(c.entityId, c.server as Entity); else Bk.delete(c.entityId); if (c.serverRev !== undefined) (revs[c.kind] as RevMap)[c.entityId] = c.serverRev; }
+    return { ...c, pending: false, resolution: { action: 'identical' as const, at: now.toISOString() } };
+  });
+  if (!changed) return meta;
+  return { ...meta, conflicts, revs, baseline: { ...fromMaps(baseline, B), ...(baseline.settings ? { settings: baseline.settings } : {}) } };
 }
 
 /** Alterações que existem só aqui, divididas em envios de até 100 itens, na ordem das dependências. */
@@ -133,16 +187,23 @@ export function buildPushes(local: DataSet, meta: SyncMeta): PushRequest[] {
   const L = toMaps(local), B = toMaps(meta.baseline);
   type Op = { kind: Kind; id: string; apply: (p: PushRequest) => void };
   const upserts: Op[] = [], deletes: Op[] = [];
+  // Entidades com conflito aguardando decisão NUNCA são enviadas (enviar sobrescreveria a nuvem). Quem depende de algo que a nuvem excluiu também espera.
+  const pend = meta.conflicts.filter(isPendingConflict);
+  const held = (kind: Kind, id: string) => pend.some(c => c.kind === kind && c.entityId === id);
+  const goneInCloud = (kind: Kind, id: string) => pend.some(c => c.kind === kind && c.entityId === id && c.server === null);
+  const blocked = (kind: Kind, e: Entity) => held(kind, e.id)
+    || (kind === 'recipes' && (e as Recipe).items.some(it => goneInCloud('ingredients', it.ingredientId)))
+    || (kind === 'orders' && goneInCloud('recipes', (e as Order).recipeId));
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
-    for (const [id, e] of Lk) if (!sameOpt(e, Bk.get(id))) upserts.push({ kind, id, apply: p => { (p.upserts[kind] as Entity[]).push(e); if (revOf(meta, kind, id) !== undefined) p.baseRevs[kind][id] = revOf(meta, kind, id) as number; } });
-    for (const id of Bk.keys()) if (!Lk.has(id)) deletes.push({ kind, id, apply: p => { p.deletes[kind].push(id); p.baseRevs[kind][id] = revOf(meta, kind, id) ?? 0; } });
+    for (const [id, e] of Lk) if (!blocked(kind, e) && !sameOpt(e, Bk.get(id))) upserts.push({ kind, id, apply: p => { (p.upserts[kind] as Entity[]).push(e); if (revOf(meta, kind, id) !== undefined) p.baseRevs[kind][id] = revOf(meta, kind, id) as number; } });
+    for (const id of Bk.keys()) if (!Lk.has(id) && !held(kind, id)) deletes.push({ kind, id, apply: p => { p.deletes[kind].push(id); p.baseRevs[kind][id] = revOf(meta, kind, id) ?? 0; } });
   }
   const rank = (k: Kind, del: boolean) => (del ? { orders: 0, recipes: 1, ingredients: 2 }[k] : { ingredients: 0, recipes: 1, orders: 2 }[k]);
   const ops = [...upserts.sort((a, b) => rank(a.kind, false) - rank(b.kind, false)), ...deletes.sort((a, b) => rank(a.kind, true) - rank(b.kind, true))];
   const pushes: PushRequest[] = [];
   let current = emptyPush(meta.revision), count = 0;
-  if (local.settings && !sameOpt(local.settings, meta.baseline.settings)) { current.upserts.settings = local.settings; current.baseRevs.settings = meta.revs.settings ?? 0; count++; }
+  if (local.settings && !sameOpt(local.settings, meta.baseline.settings) && !pend.some(c => c.kind === 'settings')) { current.upserts.settings = local.settings; current.baseRevs.settings = meta.revs.settings ?? 0; count++; }
   for (const op of ops) {
     if (count >= SYNC_LIMITS.maxChangesPerPush) { pushes.push(current); current = emptyPush(meta.revision); count = 0; }
     op.apply(current); count++;
@@ -169,7 +230,7 @@ const pulledCount = (p: PullResponse) => p.ingredients.length + p.recipes.length
  * Reexecutar após uma falha é seguro (o servidor trata reenvios idênticos como "sem alteração").
  */
 export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opts: { allowInitialMerge?: boolean; now?: Date } = {}): Promise<SyncResult> {
-  let L = local, M = meta, pulled = 0, pushed = 0;
+  let L = local, M = healConflicts(local, meta, opts.now), pulled = 0, pushed = 0;
   const newConflicts: ConflictRecord[] = [];
   const result = (status: SyncStatus, message?: string): SyncResult => ({ status, message, local: L, meta: M, pulled, pushed, newConflicts });
   try {

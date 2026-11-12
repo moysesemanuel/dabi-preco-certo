@@ -1,5 +1,6 @@
 import type { DataSet } from '../../src/domain/types';
 import { createHttpSyncApi } from '../../src/sync/api';
+import { resolveConflict, type ConflictAction } from '../../src/sync/resolve';
 import { emptyDataSet, emptyMeta, rebaseLocal, syncOnce, type SyncApi, type SyncMeta } from '../../src/sync/engine';
 import { BASE, ORIGIN, type Server, type Session } from './server';
 
@@ -22,6 +23,11 @@ export class Device {
     this.api = createHttpSyncApi({ baseUrl: BASE, getCsrfToken: () => session.csrf, fetchImpl });
   }
   edit(fn: (d: DataSet) => DataSet) { this.data = fn(this.data); }
+  /** Decide um conflito como a interface faz (função pura do app) e atualiza os dados e o estado de sincronização do dispositivo. */
+  resolve(conflictId: string, action: ConflictAction, expectedServerRev?: number) {
+    const r = resolveConflict(this.data, this.meta, conflictId, action, new Date('2026-11-12T16:00:00Z'), expectedServerRev);
+    this.data = r.data; this.meta = r.meta; return r.conflict;
+  }
   async sync(opts: { allowInitialMerge?: boolean } = {}) {
     const started = this.data;
     const r = await syncOnce(this.api, started, this.meta, opts);
