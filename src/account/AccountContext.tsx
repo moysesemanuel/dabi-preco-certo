@@ -169,6 +169,10 @@ export function AccountProvider({ data, setData, ready: readyProp, epoch = 0, me
       if (r.status === 'forbidden') {
         // Licença revogada (ou conta sem licença): relê a sessão para o app refletir a perda do direito. Os dados locais ficam intactos.
         const cur = await auth?.currentSession();
+        if (cur?.ok && cur.value.user.id !== sess.user.id) {
+          // Outra aba saiu e entrou com OUTRA conta neste navegador: esta aba não assume a identidade nova em silêncio (os dados locais continuam intactos).
+          setSession(undefined); setAuthNotice('A conta usada neste navegador mudou em outra aba. Entre de novo para continuar.'); setSync({ phase: 'idle', blocked: null }); return;
+        }
         if (cur?.ok) setSession(cur.value); else if (cur && cur.reason === 'unauthorized') setSession(undefined);
         setSync(s => ({ ...s, phase: 'attention', message: r.message, blocked: null }));
         return;

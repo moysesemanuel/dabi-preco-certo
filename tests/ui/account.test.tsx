@@ -8,14 +8,16 @@ const BASE = 'https://api.exemplo.test';
 const SESSION = { user: { id: 'usr_1', email: 'bia@exemplo.com' }, csrfToken: 'csrf-de-teste', sessionId: 'ses_aaaaaaaaaaaaaaaa', license: { status: 'active', quotaActive: 100, quotaDaily: 30 } };
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 
-type Server = { logout: 'ok' | 'network' | 'error' | 'expired'; signedIn: boolean; deviceLimit: boolean; offline: boolean; calls: { method: string; path: string; body?: unknown }[] };
+type Server = { otherUser: boolean; logout: 'ok' | 'network' | 'error' | 'expired'; signedIn: boolean; deviceLimit: boolean; offline: boolean; calls: { method: string; path: string; body?: unknown }[] };
 function fakeServer(): Server {
-  const s: Server = { logout: 'ok', signedIn: false, deviceLimit: false, offline: false, calls: [] };
+  const s: Server = { otherUser: false, logout: 'ok', signedIn: false, deviceLimit: false, offline: false, calls: [] };
   vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => {
     if (s.offline) throw new TypeError('Failed to fetch');
     const path = url.replace(BASE, ''); const method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     s.calls.push({ method, path, body });
+    if (s.otherUser && path === '/api/sync/push') return json(403, { error: 'CSRF' }); // outra aba entrou com OUTRA conta: o token desta aba não vale
+    if (s.otherUser && path === '/api/auth/session') return json(200, { ...SESSION, user: { id: 'usr_2', email: 'caio@exemplo.com' }, csrfToken: 'csrf-do-caio' });
     if (path === '/api/auth/session') return s.signedIn ? json(200, SESSION) : json(401, { error: 'UNAUTHORIZED' });
     if (path === '/api/auth/request-code') return json(202, { ok: true, expiresInMinutes: 10 });
     if (path === '/api/auth/verify-code') {
@@ -146,6 +148,24 @@ describe('Logout só é confirmado quando o servidor confirma', () => {
     await u.click(screen.getByRole('button', { name: /Sair desta conta/ }));
     expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
   });
+});
+
+describe('Troca de conta em outra aba', () => {
+  it('uma aba com a sessão antiga NÃO assume em silêncio a identidade da outra conta nem envia dados', async () => {
+    const u = userEvent.setup(); const server = fakeServer(); server.signedIn = true;
+    await boot(BASE); await nav(u, 'Configurações'); await screen.findByText(/Conectado como/);
+    server.otherUser = true; // outra aba saiu e entrou como outra pessoa
+    await nav(u, 'Ingredientes');
+    await u.type(screen.getByLabelText('Nome do ingrediente'), 'Farinha');
+    fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: '6' } });
+    await u.click(screen.getByRole('button', { name: /Adicionar ingrediente/ }));
+    await waitFor(() => expect(server.calls.some(c => c.path === '/api/sync/push')).toBe(true), { timeout: 8000 });
+    await nav(u, 'Configurações');
+    expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
+    expect(screen.queryByText(/caio@exemplo.com/)).toBeNull();
+    expect(screen.getByText(/A conta usada neste navegador mudou em outra aba/)).toBeTruthy();
+    await nav(u, 'Ingredientes'); expect(screen.getByText('Farinha')).toBeTruthy(); // dados locais preservados
+  }, 20000);
 });
 
 describe('Sincronização na interface', () => {

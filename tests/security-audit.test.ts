@@ -97,3 +97,20 @@ describe('API: limites, métodos, CORS e vazamento de informação', () => {
     expect(srv.table('users').length).toBeGreaterThan(0); expect((await pull(A)).ingredients.find(i => i.id === 'i9')!.data!.name).toBe(evil);
   });
 });
+
+describe('Logout no servidor (homologação)', () => {
+  it('revoga a sessão, libera a vaga do limite de 2 e o cookie antigo não sincroniza mais (nem de outra aba)', async () => {
+    const a2 = await srv.login('ana@exemplo.com', 'A2', '10.0.0.1'); // Ana agora tem 2 sessões: A e A2
+    expect((await srv.request('POST', '/api/auth/logout', { session: A })).status).toBe(200);
+    for (const [m, path] of [['GET', '/api/sync?since=0'], ['GET', '/api/auth/session'], ['GET', '/api/sessions']]) expect((await srv.request(m, path, { session: A })).status).toBe(401);
+    expect((await srv.request('POST', '/api/sync/push', { session: A, body: emptyPush(0) })).status).toBe(401);
+    const a3 = await srv.login('ana@exemplo.com', 'A3', '10.0.0.1'); // a vaga voltou: entra sem substituir ninguém
+    expect((await srv.request('GET', '/api/auth/session', { session: a2 })).status).toBe(200);
+    expect((await srv.request('GET', '/api/auth/session', { session: a3 })).status).toBe(200);
+  });
+  it('o CSRF de uma sessão encerrada não vale na nova sessão da mesma conta', async () => {
+    const old = A; await srv.request('POST', '/api/auth/logout', { session: A });
+    const fresh = await srv.login('ana@exemplo.com', 'A-nova', '10.0.0.1');
+    expect((await srv.request('POST', '/api/sync/push', { session: { ...fresh, csrf: old.csrf }, body: emptyPush(0) })).status).toBe(403);
+  });
+});
