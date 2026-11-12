@@ -1,12 +1,16 @@
 import { RefreshCw } from 'lucide-react';
 import { useAccount } from '../../account/AccountContext';
-import { isOpenFinancial, type ConflictRecord } from '../../sync/engine';
-import { describeFinancial } from '../../sync/reconcile';
+import { isOpenFinancial, isPendingConflict, type ConflictRecord } from '../../sync/engine';
+import { conflictName, conflictTitle, KIND_LABEL } from '../../sync/describe';
+import { FinancialConflict } from './FinancialConflict';
 
-const KIND_NAME: Record<ConflictRecord['kind'], string> = { ingredients: 'ingrediente', recipes: 'receita', orders: 'encomenda', settings: 'configurações' };
-const nameOf = (c: ConflictRecord): string => { const e = (c.local ?? c.server) as { name?: string; customer?: string } | null; return e?.name ?? e?.customer ?? ''; };
+const KIND_NAME = KIND_LABEL;
+const nameOf = (c: ConflictRecord): string => conflictName(c);
 const describe = (c: ConflictRecord): string => {
   const what = `${KIND_NAME[c.kind]}${nameOf(c) ? ` “${nameOf(c)}”` : ''}`;
+  if (c.resolution?.action === 'keep-local') return `Você manteve a sua alteração em ${what}; a versão da nuvem foi substituída.`;
+  if (c.resolution?.action === 'keep-server') return `Você manteve a versão da nuvem de ${what}; sua alteração ficou guardada aqui.`;
+  if (c.resolution?.action === 'identical') return `${what}: as duas versões ficaram iguais; nada foi perdido.`;
   if (c.reason === 'edited-elsewhere') return `Sua alteração em ${what} foi substituída por outra, feita em outro dispositivo.`;
   if (c.reason === 'deleted-elsewhere') return `O ${what} foi excluído em outro dispositivo, e sua alteração não foi mantida.`;
   return `O ${what} foi mantido porque algo novo daqui depende dele.`;
@@ -31,22 +35,21 @@ export function SyncPanel({ inform }: { inform: (m: string) => void }) {
 
     {acc.entitled && !sync.blocked && <div><button className="secondary" onClick={() => void acc.syncNow()} disabled={sync.phase === 'syncing'}><RefreshCw size={16} /> Sincronizar agora</button></div>}
 
+    {acc.pendingConflicts.length > 0 && <div className="notice warn stack" style={{ gap: 10 }} aria-label="Conflitos aguardando decisão">
+      <strong>Conflitos aguardando decisão ({acc.pendingConflicts.length})</strong>
+      <span>{acc.pendingConflicts.map(conflictTitle).join(' · ')}. As duas versões estão preservadas; nada foi sobrescrito.</span>
+      <div><button className="primary" onClick={() => acc.setConflictsOpen(true)}>Acessar conflitos</button></div></div>}
+
     {acc.conflicts.filter(isOpenFinancial).length > 0 && <div className="stack" style={{ gap: 10 }} aria-label="Recebimentos a reconciliar">
       <strong style={{ fontSize: 14 }}>Recebimentos a reconciliar ({acc.conflicts.filter(isOpenFinancial).length})</strong>
       <p className="muted" style={{ margin: 0 }}>Estes valores foram lançados aqui, mas a mesma encomenda foi alterada em outro dispositivo. Nada foi descartado: escolha o que fazer com cada um.</p>
-      {acc.conflicts.filter(isOpenFinancial).map(c => <div key={c.id} className="notice warn stack" style={{ gap: 8 }}>
-        <strong>Encomenda de “{nameOf(c)}”{c.reason === 'deleted-elsewhere' ? ' (excluída em outro dispositivo)' : ''}</strong>
-        <ul style={{ margin: 0, paddingLeft: 18 }}>{describeFinancial(c).map((l, i) => <li key={i}>{l}</li>)}</ul>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="primary" onClick={() => { try { acc.resolveFinancial(c.id, 'merge'); inform(c.reason === 'deleted-elsewhere' ? 'Encomenda recuperada com os recebimentos.' : 'Recebimentos somados à encomenda.'); } catch (e) { inform(e instanceof Error ? e.message : 'Não foi possível reconciliar.'); } }}>{c.reason === 'deleted-elsewhere' ? 'Recuperar encomenda e recebimentos' : 'Somar os meus recebimentos'}</button>
-          <button className="secondary" onClick={() => { if (confirm(`Manter só o que o servidor tem?\n\nOs valores abaixo NÃO serão aplicados:\n${describeFinancial(c).join('\n')}`)) { acc.resolveFinancial(c.id, 'keep-server'); inform('Mantida a versão do servidor.'); } }}>Manter a versão do servidor</button>
-        </div></div>)}
+      {acc.conflicts.filter(isOpenFinancial).map(c => <FinancialConflict key={c.id} c={c} inform={inform} />)}
     </div>}
 
-    {acc.conflicts.length > 0 && <div className="stack" style={{ gap: 8 }}><strong style={{ fontSize: 14 }}>Alterações substituídas por outro dispositivo ({acc.conflicts.length})</strong>
-      <p className="muted" style={{ margin: 0 }}>Quando o mesmo item é alterado em dois dispositivos, vale a versão do servidor e a sua fica guardada aqui, para você refazer a mudança se precisar.</p>
-      {acc.conflicts.map(c => <details key={c.id} style={{ border: '1px solid #f0d9b5', borderRadius: 10, padding: '8px 12px', background: '#fffaf2' }}><summary style={{ cursor: 'pointer', fontSize: 14 }}>{describe(c)} <span className="muted">({when(c.at)})</span></summary>
+    {acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).length > 0 && <div className="stack" style={{ gap: 8 }}><strong style={{ fontSize: 14 }}>Histórico de conflitos ({acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).length})</strong>
+      <p className="muted" style={{ margin: 0 }}>Versões que foram substituídas ficam guardadas aqui até você dispensar, para refazer a mudança se precisar.</p>
+      {acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).map(c => <details key={c.id} style={{ border: '1px solid #f0d9b5', borderRadius: 10, padding: '8px 12px', background: '#fffaf2' }}><summary style={{ cursor: 'pointer', fontSize: 14 }}>{describe(c)} <span className="muted">({when(c.at)})</span></summary>
         {c.local ? <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: '8px 0 0' }}>Sua versão: {JSON.stringify(c.local, null, 2)}</pre> : null}</details>)}
-      <div><button className="secondary" onClick={() => acc.dismissConflicts()}>Dispensar avisos já tratados</button> {acc.openFinancial > 0 && <span className="muted">Pendências financeiras não são dispensadas.</span>}</div></div>}
+      <div><button className="secondary" onClick={() => acc.dismissConflicts()}>Dispensar avisos já tratados</button> {(acc.openFinancial > 0 || acc.pendingConflicts.length > 0) && <span className="muted">Conflitos sem decisão não são dispensados.</span>}</div></div>}
   </section>;
 }

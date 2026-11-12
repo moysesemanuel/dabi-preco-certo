@@ -5,6 +5,8 @@ import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
 import { AccountProvider, useAccount } from './account/AccountContext';
+import { ConflictDialog } from './features/account/ConflictDialog';
+import { conflictTitle } from './sync/describe';
 import { SyncDot } from './components/SyncDot';
 import { deriveIndicator, useBrowserOnline, useStableIndicator } from './account/syncIndicator';
 import { AccessGate } from './components/AccessGate';
@@ -31,16 +33,31 @@ function SyncBanner({ focus }: { focus: (p: Page) => void }) {
   return <div className="notice warn" role="alert"><strong>A sincronização precisa da sua decisão.</strong> Nada foi alterado ainda. <button className="secondary" onClick={() => focus('settings')}>Resolver em Configurações</button></div>;
 }
 
+/** Banner persistente de conflitos: derivado do estado salvo (não é um toast e não some sozinho). */
+function ConflictBanner() {
+  const acc = useAccount();
+  if (acc.status !== 'signed-in' || acc.sync.blocked) return null;
+  const list = acc.pendingConflicts;
+  const total = list.length + acc.openFinancial;
+  if (total === 0) return null;
+  const first = list[0];
+  const text = total === 1 && first
+    ? `${conflictTitle(first)} foi modificado em outro dispositivo. Sua alteração foi preservada e nada foi sobrescrito.`
+    : `${total} registros foram modificados aqui e em outro dispositivo. As suas alterações foram preservadas e nada foi sobrescrito.`;
+  return <div className="notice warn conflict-banner" role="region" aria-label="Conflitos de sincronização"><div><strong>{total > 1 ? `Encontramos ${total} alterações diferentes` : 'Encontramos alterações diferentes'}</strong><br />{text}</div>
+    <button className="secondary" onClick={() => acc.setConflictsOpen(true)}>Acessar conflitos{total > 1 ? ` (${total})` : ''}</button></div>;
+}
+
 /** Estado dos dados no topo: local, ou o e-mail da conta com um indicador circular da saúde da sincronização. */
 function TopbarStatus() {
   const acc = useAccount();
   const online = useBrowserOnline();
-  const raw = deriveIndicator({ sync: acc.sync, hasPending: acc.hasPending, openFinancial: acc.openFinancial, entitled: acc.entitled, browserOnline: online });
+  const raw = deriveIndicator({ sync: acc.sync, hasPending: acc.hasPending, conflicts: acc.pendingConflicts.length + acc.openFinancial, entitled: acc.entitled, browserOnline: online });
   const level = useStableIndicator(raw);
   if (acc.status !== 'signed-in') return <span role="status">Dados salvos neste dispositivo</span>;
   const email = acc.session?.user.email;
   if (!acc.entitled) return <span role="status">{email} · sem licença ativa</span>;
-  return <span className="sync-status">{email}<SyncDot level={level} label={raw.label} detail={raw.detail} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
+  return <span className="sync-status">{email}<SyncDot level={level} label={raw.label} detail={raw.detail} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' || level === 'conflict' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
 }
 
 export default function App() {
@@ -71,6 +88,7 @@ export default function App() {
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><ClipboardCheck size={22} /></div><span>Pedido<span style={{ color: '#ff982b' }}>Certo</span></span></div><nav className="nav" aria-label="Navegação principal">{pages.map(p => { const Icon = p.icon; return <button key={p.id} className={page === p.id ? 'active' : ''} aria-current={page === p.id ? 'page' : undefined} onClick={() => focus(p.id)}><Icon size={18} />{p.label}</button>; })}</nav><div className="sidebar-foot"><strong style={{ color: 'white' }}>Versão beta</strong><br />Seus dados ficam neste navegador e, se você entrar numa conta (opcional), também no servidor. Exporte backups regularmente.</div></aside>
     <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><ChefHat size={16} /></div></header><div className="content" id="conteudo">
       <SyncBanner focus={focus} />
+      <ConflictBanner />
       <ErrorBoundary key={page}>{!ready ? <div className="empty" role="status" aria-live="polite">Carregando seus dados…</div> : <>
       {page === 'dashboard' && <DashboardPage {...props} />}
       {page === 'ingredients' && <IngredientsPage {...props} />}
@@ -81,6 +99,6 @@ export default function App() {
       {page === 'settings' && <SettingsPage {...props} />}
       {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}
       </>}</ErrorBoundary>
-    </div></main>{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
+    </div></main><ConflictDialog inform={inform} />{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
   </div></AccessGate></AccountProvider>;
 }

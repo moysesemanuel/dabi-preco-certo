@@ -3,8 +3,9 @@ import type { DataSet } from '../domain/types';
 import { createQuotesClient, type QuotesClient } from '../features/sharing/quotes';
 import { loadSyncMeta, saveSyncMeta } from '../storage/db';
 import { createHttpSyncApi } from '../sync/api';
-import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, isPendingConflict, isUnresolved, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
 import { retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
+import { resolveConflict as resolveConflictPure, type ConflictAction } from '../sync/resolve';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
 import { createAuthClient, type AuthClient, type SessionInfo } from './authClient';
 import { API_URL, REQUIRE_LOGIN, safeApiBase } from './http';
@@ -45,6 +46,12 @@ type Ctx = {
   /** Resolve uma pendência financeira. Lança Error com a explicação se a regra de negócio impedir (ex.: passaria do total). */
   resolveFinancial(conflictId: string, action: ReconcileAction): void;
   openFinancial: number;
+  /** Conflitos de dados aguardando decisão (derivado do estado persistido; some só quando resolvido). */
+  pendingConflicts: ConflictRecord[];
+  /** Mantém a versão daqui ou a da nuvem. `expectedServerRev` evita decidir sobre uma comparação desatualizada. Lança Error se a regra impedir. */
+  resolveConflict(conflictId: string, action: ConflictAction, expectedServerRev?: number): void;
+  conflictsOpen: boolean;
+  setConflictsOpen(open: boolean): void;
   /** Há alteração local ainda não confirmada pelo servidor (comparação com a última versão confirmada, guardada no IndexedDB). */
   hasPending: boolean;
 };
@@ -67,14 +74,16 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const [status, setStatus] = useState<AccountStatus>(base ? 'loading' : 'unconfigured');
   const [session, setSessionState] = useState<SessionInfo | undefined>();
   const [sync, setSync] = useState<SyncState>({ phase: 'idle', blocked: null });
-  const [conflicts, setConflicts] = useState<ConflictRecord[]>([]);
   const [networkDown, setNetworkDown] = useState(false);
   const networkDownRef = useRef(false); networkDownRef.current = networkDown;
   const [authNotice, setAuthNotice] = useState('');
+  const [conflictsOpen, setConflictsOpen] = useState(false);
+  const [conflictState, setConflictState] = useState<{ list: ConflictRecord[]; owner?: string }>({ list: [] });
 
   const dataRef = useRef(data); dataRef.current = data;
   const metaRef = useRef<SyncMeta | null>(null); // null = ainda não carregado: não sincroniza
   const lastApplied = useRef<DataSet | null>(null);
+  const setConflicts = (list: ConflictRecord[]) => setConflictState({ list, owner: metaRef.current?.userId });
   const running = useRef(false);
   const again = useRef(false);
   const blockedRef = useRef<SyncBlock>(null);
@@ -87,6 +96,9 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
 
   const setSession = useCallback((s: SessionInfo | undefined) => { if (s) setAuthNotice(''); csrfRef.current = s?.csrfToken; setSessionState(s); setStatus(s ? 'signed-in' : 'signed-out'); }, []);
   const entitled = status === 'signed-in' && session?.license?.status === 'active';
+  // Conflitos só aparecem para a conta a que pertencem (nunca os de outra conta guardados neste aparelho).
+  const conflicts = status === 'signed-in' && session && (!conflictState.owner || conflictState.owner === session.user.id) ? conflictState.list : [];
+  const pendingConflicts = conflicts.filter(isPendingConflict);
 
   useEffect(() => { loadSyncMeta().then(m => { metaRef.current = m; setConflicts(m.conflicts); }).catch(() => { metaRef.current = emptyMeta(); }); }, []);
   useEffect(() => {
@@ -149,8 +161,12 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
         return;
       }
       blockedRef.current = null;
-      const pendingMoney = meta.conflicts.filter(isOpenFinancial).length;
-      if (pendingMoney > 0 && r.status === 'synced') { failures.current = 0; setSync({ phase: 'attention', message: 'Há recebimentos aguardando a sua reconciliação (veja em Configurações).', lastSyncedAt: new Date().toISOString(), blocked: null }); return; }
+      const waiting = meta.conflicts.filter(isPendingConflict).length, pendingMoney = meta.conflicts.filter(isOpenFinancial).length;
+      if (waiting + pendingMoney > 0 && r.status === 'synced') {
+        failures.current = 0;
+        setSync({ phase: 'attention', message: waiting ? 'Há alterações diferentes aguardando a sua decisão.' : 'Há recebimentos aguardando a sua reconciliação (veja em Configurações).', lastSyncedAt: new Date().toISOString(), blocked: null });
+        return;
+      }
       const ok = r.status === 'synced';
       const transient = r.status === 'offline' || r.status === 'error';
       failures.current = ok ? 0 : transient ? failures.current + 1 : failures.current;
@@ -224,10 +240,19 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
     authNotice, conflicts,
     dismissConflicts() {
       if (!metaRef.current) return;
-      const kept = metaRef.current.conflicts.filter(isOpenFinancial); // dinheiro pendente nunca some em silêncio
+      const kept = metaRef.current.conflicts.filter(isUnresolved); // decisões e dinheiro pendentes nunca somem em silêncio
       metaRef.current = { ...metaRef.current, conflicts: kept }; void saveSyncMeta(metaRef.current).catch(() => undefined); setConflicts(kept);
     },
     openFinancial: conflicts.filter(isOpenFinancial).length,
+    pendingConflicts, conflictsOpen, setConflictsOpen,
+    resolveConflict(conflictId, action, expectedServerRev) {
+      const meta = metaRef.current; if (!meta) throw new Error('Os dados de sincronização ainda não foram carregados.');
+      const res = resolveConflictPure(dataRef.current, meta, conflictId, action, new Date(), expectedServerRev); // lança se a regra impedir; nada é alterado antes disso
+      metaRef.current = res.meta; dataRef.current = res.data; lastApplied.current = res.data;
+      setData(() => res.data); setConflicts(res.meta.conflicts);
+      // Primeiro o estado de sincronização (com a base nova), depois a tentativa de envio.
+      void saveSyncMeta(res.meta).catch(() => undefined).then(() => run());
+    },
     hasPending,
     resolveFinancial(conflictId, action) {
       const meta = metaRef.current; const c = meta?.conflicts.find(x => x.id === conflictId);

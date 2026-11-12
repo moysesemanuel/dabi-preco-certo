@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { deriveIndicator, INDICATOR_TIMING, useStableIndicator, type IndicatorInput } from '../../src/account/syncIndicator';
 
 const base = (o: Partial<IndicatorInput['sync']> = {}, rest: Partial<IndicatorInput> = {}): IndicatorInput => ({
-  sync: { phase: 'synced', blocked: null, lastSyncedAt: '2026-11-11T12:30:00.000Z', ...o }, hasPending: false, openFinancial: 0, entitled: true, ...rest,
+  sync: { phase: 'synced', blocked: null, lastSyncedAt: '2026-11-11T12:30:00.000Z', ...o }, hasPending: false, conflicts: 0, entitled: true, ...rest,
 });
 
 describe('deriveIndicator', () => {
@@ -33,10 +33,15 @@ describe('deriveIndicator', () => {
     expect(deriveIndicator(base({ phase: 'offline' })).level).toBe('wait');
     const e = deriveIndicator(base({ phase: 'error' })); expect(e.level).toBe('wait'); expect(e.failing).toBe(true);
   });
-  it('vermelho para atenção, decisão pendente e recebimentos a reconciliar', () => {
+  it('vermelho para atenção e decisão de combinação pendente', () => {
     expect(deriveIndicator(base({ phase: 'attention', message: 'Licença revogada' })).level).toBe('bad');
     expect(deriveIndicator(base({ blocked: 'needs-decision' })).level).toBe('bad');
-    expect(deriveIndicator(base({}, { openFinancial: 1 })).level).toBe('bad');
+  });
+  it('âmbar com conflito aguardando resolução, com a quantidade; nenhuma sincronização bem-sucedida o mascara', () => {
+    const one = deriveIndicator(base({ phase: 'synced' }, { conflicts: 1 }));
+    expect(one.level).toBe('conflict'); expect(one.label).toMatch(/Conflito aguardando decisão/); expect(one.detail).toMatch(/preservadas/);
+    expect(deriveIndicator(base({ phase: 'syncing' }, { conflicts: 3 })).label).toMatch(/3 conflitos/);
+    expect(deriveIndicator(base({ phase: 'attention', message: 'x' }, { conflicts: 2 })).level).toBe('conflict');
   });
   it('tooltip traz o estado e o horário da última confirmação', () => {
     const t = deriveIndicator(base({ phase: 'offline' }, { browserOnline: false })).detail;
@@ -76,6 +81,12 @@ describe('useStableIndicator', () => {
     rerender({ i: base({ phase: 'error' }) }); act(() => { vi.advanceTimersByTime(5000); });
     rerender({ i: base() }); act(() => { vi.advanceTimersByTime(60000); });
     expect(result.current.shown).toBe('ok');
+  });
+  it('conflito aparece na hora e não some com sincronizações normais', () => {
+    const { result, rerender } = run(base());
+    rerender({ i: base({}, { conflicts: 1 }) }); expect(result.current.shown).toBe('conflict');
+    for (let n = 0; n < 10; n++) { rerender({ i: base({ phase: 'syncing' }, { conflicts: 1 }) }); act(() => { vi.advanceTimersByTime(500); }); rerender({ i: base({}, { conflicts: 1 }) }); expect(result.current.shown).toBe('conflict'); }
+    rerender({ i: base() }); expect(result.current.shown).toBe('ok');
   });
   it('exigência de atenção aparece na hora', () => {
     const { result, rerender } = run(base());
