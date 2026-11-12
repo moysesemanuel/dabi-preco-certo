@@ -14,7 +14,7 @@ const ingredientOf = (r: Row): Ingredient => ({ id: r.id as string, name: r.name
 const catalogRefOf = (json: string): Pick<Ingredient, 'catalogRef'> => { try { return { catalogRef: parseCatalogRef(JSON.parse(json)) }; } catch { return {}; } };
 const recipeOf = (r: Row, items: Row[]): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), ...(r.prep_minutes !== null ? { prepMinutes: num(r.prep_minutes) } : {}), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })) });
 const paymentOf = (p: Row): Payment => ({ id: p.id as string, amount: num(p.amount), receivedAt: p.received_at as string, ...(p.method !== null ? { method: p.method as NonNullable<Payment['method']> } : {}), ...(p.note !== null ? { note: p.note as string } : {}) });
-const orderOf = (r: Row, pays: Row[] = []): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}) });
+const orderOf = (r: Row, pays: Row[] = []): Order => ({ id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}), ...(typeof r.quote_code === 'string' ? { quoteCode: r.quote_code } : {}) });
 
 const same = sameEntity;
 
@@ -127,6 +127,8 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   for (const [id, e] of exRec) e.entity = recipeOf(e.entity as unknown as Row, recItems.get(id) ?? []);
   const ordPays = await paymentsFor(db, userId, [...exOrd.keys()]);
   for (const [id, e] of exOrd) e.entity = orderOf(e.entity as unknown as Row, ordPays.get(id) ?? []);
+  // O código de atendimento é permanente: se a encomenda já tem um no servidor, ele prevalece (um envio sem código ou com outro valor não o altera).
+  orders = orders.map(o => { const kept = exOrd.get(o.id)?.entity.quoteCode; return kept && o.quoteCode !== kept ? { ...o, quoteCode: kept } : o; });
 
   const conflicts: Conflict[] = [];
   const toUpsert = { ingredients: [] as Ingredient[], recipes: [] as Recipe[], orders: [] as Order[] };
@@ -155,6 +157,16 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
     else settingsChanged = !state.settings || !same(state.settings, settings);
   }
   if (conflicts.length) return bad(409, { error: 'CONFLICT', conflicts, revision: state.revision });
+
+  // ---- unicidade do código de atendimento por conta (inclui encomendas excluídas) ----
+  const coded = toUpsert.orders.filter(o => o.quoteCode);
+  if (coded.length) {
+    const taken = new Set<string>(), firstOf = new Map<string, string>();
+    for (const o of coded) { if (firstOf.has(o.quoteCode!)) taken.add(o.id); else firstOf.set(o.quoteCode!, o.id); }
+    const rows = await db.prepare('SELECT id, quote_code FROM orders WHERE user_id = ?1 AND quote_code IN (SELECT value FROM json_each(?2))').bind(userId, JSON.stringify([...firstOf.keys()])).all<{ id: string; quote_code: string }>();
+    for (const r of rows.results) { const mine = firstOf.get(r.quote_code); if (mine && mine !== r.id) taken.add(mine); }
+    if (taken.size) return bad(409, { error: 'CODE_TAKEN', orderIds: [...taken], revision: state.revision });
+  }
 
   // ---- integridade referencial das exclusões ----
   if (toDelete.ingredients.length) {
@@ -193,11 +205,11 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
       SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.ingredientId'), json_extract(j.value, '$.quantity'), json_extract(j.value, '$.unit') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, r.id, JSON.stringify(r.items), newPushId));
   }
   for (const o of toUpsert.orders) {
-    batch.push(p(`INSERT INTO orders (user_id, id, customer, recipe_id, quantity, unit_price, deposit, delivery_date, status, created_at, cost_per_unit, cost_captured_at, rev, deleted_at)
-      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, NULL WHERE ${g('?1', '?14')}
+    batch.push(p(`INSERT INTO orders (user_id, id, customer, recipe_id, quantity, unit_price, deposit, delivery_date, status, created_at, cost_per_unit, cost_captured_at, quote_code, rev, deleted_at)
+      SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?15, ?13, NULL WHERE ${g('?1', '?14')}
       ON CONFLICT (user_id, id) DO UPDATE SET customer = excluded.customer, recipe_id = excluded.recipe_id, quantity = excluded.quantity, unit_price = excluded.unit_price, deposit = excluded.deposit,
-        delivery_date = excluded.delivery_date, status = excluded.status, created_at = excluded.created_at, cost_per_unit = excluded.cost_per_unit, cost_captured_at = excluded.cost_captured_at, rev = excluded.rev, deleted_at = NULL`,
-      userId, o.id, o.customer, o.recipeId, o.quantity, o.unitPrice, o.deposit, o.deliveryDate, o.status, o.createdAt, o.costSnapshot?.costPerUnit ?? null, o.costSnapshot?.capturedAt ?? null, rev, newPushId));
+        delivery_date = excluded.delivery_date, status = excluded.status, created_at = excluded.created_at, cost_per_unit = excluded.cost_per_unit, cost_captured_at = excluded.cost_captured_at, quote_code = COALESCE(orders.quote_code, excluded.quote_code), rev = excluded.rev, deleted_at = NULL`,
+      userId, o.id, o.customer, o.recipeId, o.quantity, o.unitPrice, o.deposit, o.deliveryDate, o.status, o.createdAt, o.costSnapshot?.costPerUnit ?? null, o.costSnapshot?.capturedAt ?? null, rev, newPushId, o.quoteCode ?? null));
     batch.push(p(`DELETE FROM order_payments WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, o.id, newPushId));
     if (o.payments?.length) batch.push(p(`INSERT INTO order_payments (user_id, order_id, position, id, amount, received_at, method, note)
       SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.id'), json_extract(j.value, '$.amount'), json_extract(j.value, '$.receivedAt'), json_extract(j.value, '$.method'), json_extract(j.value, '$.note') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, o.id, JSON.stringify(o.payments), newPushId));
@@ -213,7 +225,13 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   }
   if (settingsChanged && settings) batch.push(p('UPDATE sync_state SET settings_json = ?2, settings_rev = ?3 WHERE user_id = ?1 AND last_push_id = ?4', userId, JSON.stringify(settings), rev, newPushId));
 
-  const results = await db.batch(batch);
+  let results: Awaited<ReturnType<D1Like['batch']>>;
+  try { results = await db.batch(batch); }
+  catch (error) {
+    // Corrida rara: outro envio gravou o mesmo código entre a conferência e a gravação. Nada foi aplicado; o app repete e a conferência acusa o código.
+    if (error instanceof Error && /UNIQUE/i.test(error.message)) return bad(409, { error: 'STALE', revision: (await getState(db, userId, now)).revision });
+    throw error;
+  }
   if ((results[0]?.meta.changes ?? 0) !== 1) return bad(409, { error: 'STALE', revision: (await getState(db, userId, now)).revision }); // outro envio ganhou a corrida; nada foi aplicado
   return { ok: true, result: { revision: rev, changed: true } };
 }

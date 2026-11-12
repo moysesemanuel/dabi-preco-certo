@@ -6,6 +6,7 @@
  *  - "keep-server": mantém só o que o servidor tem (a tela exige confirmar o descarte dos valores listados).
  * Nenhuma das duas altera outra coisa além do dinheiro dessa pendência; erros de regra (passa do total, receita ausente) são lançados.
  */
+import { uniqueQuoteCode } from '../../shared/quoteCode';
 import { orderTotal, totalReceived } from '../domain/payments';
 import { toCents2 } from '../domain/money';
 import type { DataSet, Order } from '../domain/types';
@@ -26,7 +27,9 @@ export function reconcileFinancial(data: DataSet, conflict: ConflictRecord, acti
     const local = conflict.local as Order | null;
     if (!local) throw new Error('Não há mais dados locais para recuperar.');
     if (!data.recipes.some(r => r.id === local.recipeId)) throw new Error('A receita desta encomenda não existe mais. Recrie a receita antes de recuperar a encomenda.');
-    const copy: Order = { ...local, id: newId() };
+    // A cópia é uma encomenda nova: recebe o seu próprio código de atendimento (o do original continua reservado).
+    const used = new Set(data.orders.map(o => o.quoteCode).filter((c): c is string => !!c));
+    const copy: Order = { ...local, id: newId(), quoteCode: uniqueQuoteCode(used) };
     if (toCents2(totalReceived(copy)) > orderTotal(copy) + 0.005) throw new Error('Os recebimentos passam do total da encomenda.');
     return { data: { ...data, orders: [...data.orders, copy] }, conflict: resolved };
   }

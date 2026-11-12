@@ -1,6 +1,9 @@
 import { CURRENT_SCHEMA_VERSION, type DataSet } from '../domain/types';
 import { migrateStored, validateDataSet } from '../../shared/dataset';
+import { withQuoteCodes } from '../../shared/quoteCode';
 import { emptyMeta, type SyncMeta } from '../sync/engine';
+/** Encomendas antigas (sem código de atendimento) recebem o código derivado do id; só esse campo é acrescentado (valores e recebimentos não mudam). */
+export const withCodes = (d: DataSet): DataSet => { const orders = withQuoteCodes(d.orders); return orders === d.orders ? d : { ...d, orders }; };
 export const emptyData = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [] });
 const DB_NAME = 'pedidocerto-v1';
 const STORE = 'app';
@@ -17,7 +20,7 @@ export async function loadData(): Promise<DataSet> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
     const request = tx.objectStore(STORE).get('data');
-    request.onsuccess = () => resolve(request.result ? migrateStored(request.result) : emptyData());
+    request.onsuccess = () => resolve(request.result ? withCodes(migrateStored(request.result)) : emptyData());
     request.onerror = () => reject(request.error);
     tx.oncomplete = () => db.close();
   });
@@ -32,7 +35,7 @@ export async function saveData(data: DataSet): Promise<void> {
   });
 }
 /** Validação estrita de backups importados. Nada é restaurado se algo estiver inválido. */
-export const validateBackup = (value: unknown): DataSet => validateDataSet(value);
+export const validateBackup = (value: unknown): DataSet => withCodes(validateDataSet(value));
 
 /** Metadados da sincronização (revisões e último estado do servidor), guardados à parte dos dados do usuário. */
 export async function loadSyncMeta(): Promise<SyncMeta> {

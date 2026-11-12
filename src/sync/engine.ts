@@ -10,6 +10,7 @@
  * Exclusões no servidor são lógicas; se algo novo aqui ainda depende de um item excluído lá, o item é restaurado em vez de deixar
  * referência quebrada.
  */
+import { uniqueQuoteCode } from '../../shared/quoteCode';
 import { emptyPush, KINDS, SYNC_LIMITS, sameEntity, type Kind, type PullResponse, type PushRequest, type RevMap } from '../../shared/sync';
 import type { DataSet, Ingredient, Order, Payment, Recipe } from '../domain/types';
 import { CURRENT_SCHEMA_VERSION } from '../domain/types';
@@ -67,7 +68,7 @@ export type SyncMeta = {
 export const emptyDataSet = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [] });
 export const emptyMeta = (): SyncMeta => ({ revision: 0, revs: { ingredients: {}, recipes: {}, orders: {} }, baseline: emptyDataSet(), conflicts: [] });
 
-export type PushResponse = { ok: true; revision: number; changed: boolean } | { ok: false; kind: 'conflict' | 'stale' };
+export type PushResponse = { ok: true; revision: number; changed: boolean } | { ok: false; kind: 'conflict' | 'stale' } | { ok: false; kind: 'code'; orderIds: string[] };
 export interface SyncApi {
   pull(since: number): Promise<PullResponse>;
   push(request: PushRequest): Promise<PushResponse>;
@@ -85,6 +86,7 @@ const fromMaps = (like: DataSet, m: KindMaps): DataSet => {
 };
 const sameOpt = (a: unknown, b: unknown) => (a === undefined || b === undefined ? a === b : sameEntity(a, b));
 const clone = <T,>(v: T): T => structuredClone(v);
+const withoutCode = (o: Order): Omit<Order, 'quoteCode'> => { const { quoteCode: _q, ...rest } = o; return rest; };
 export const sameOptEntity = sameOpt;
 
 /** Referências quebradas (receita → ingrediente, encomenda → receita). Vazio = íntegro. */
@@ -107,7 +109,18 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
     for (const ent of pull[kind] as { id: string; rev: number; deleted: boolean; data?: Entity }[]) {
-      const lo = Lk.get(ent.id), ba = Bk.get(ent.id), server = ent.deleted ? undefined : ent.data;
+      let lo = Lk.get(ent.id);
+      const ba = Bk.get(ent.id), server = ent.deleted ? undefined : ent.data;
+      if (kind === 'orders' && lo && server && !pendingFor(kind, ent.id)) {
+        // O código de atendimento é um campo de sistema, permanente e decidido pelo servidor: nunca gera conflito.
+        const sc = (server as Order).quoteCode, lc = (lo as Order).quoteCode;
+        const sameBeyondCode = ba !== undefined && sameOpt(withoutCode(lo as Order), withoutCode(ba as Order));
+        if (sameBeyondCode) { // aqui só pode ter mudado o código: vale a versão do servidor (mantendo o código local se o servidor ainda não tem um)
+          Lk.set(ent.id, sc || !lc ? server : { ...(server as Order), quoteCode: lc });
+          Bk.set(ent.id, server); (revs[kind] as RevMap)[ent.id] = ent.rev; continue;
+        }
+        if (sc && lc !== sc) { lo = { ...(lo as Order), quoteCode: sc }; Lk.set(ent.id, lo); }
+      }
       const pend = pendingFor(kind, ent.id);
       if (pend) {
         // Já há um conflito aguardando decisão: só atualizamos a versão da nuvem. Nada local é tocado e a base é preservada.
@@ -250,6 +263,11 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
       let revision = M.revision;
       for (const req of pushes) {
         const resp = await api.push({ ...req, baseRevision: revision });
+        if (!resp.ok && resp.kind === 'code') { // colisão rara de código gerado offline: troca o código das encomendas ainda não confirmadas e tenta de novo
+          const taken = new Set(resp.orderIds), used = new Set(L.orders.map(o => o.quoteCode).filter((c): c is string => !!c));
+          const orders = L.orders.map(o => (taken.has(o.id) ? { ...o, quoteCode: uniqueQuoteCode(used) } : o));
+          L = { ...L, orders }; again = true; break;
+        }
         if (!resp.ok) { again = true; break; } // mudou no servidor: puxa de novo, mescla e tenta outra vez
         revision = resp.revision; pushed += countOf(req);
       }

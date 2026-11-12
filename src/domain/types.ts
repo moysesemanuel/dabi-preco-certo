@@ -27,6 +27,8 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 /** Um recebimento (parcial ou final) de uma encomenda. O total recebido nunca ultrapassa o total do pedido. */
 export type Payment = { id: string; amount: number; /** AAAA-MM-DD */ receivedAt: string; method?: PaymentMethod; note?: string };
 export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; costSnapshot?: CostSnapshot;
+  /** Código permanente de atendimento (ex.: ORC-K7M42P). Gerado na criação e nunca muda. Ausente só em encomendas antigas, que recebem um código derivado do id. */
+  quoteCode?: string;
   /** Recebimentos posteriores ao sinal (`deposit`). Ausente = nenhum. */
   payments?: Payment[] };
 export type Settings = {

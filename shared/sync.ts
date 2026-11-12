@@ -32,6 +32,8 @@ export type PushOk = { revision: number; changed: boolean };
 export type PushError =
   | { error: 'CONFLICT'; conflicts: Conflict[]; revision: number }
   | { error: 'STALE'; revision: number }
+  /** Algum código de orçamento já existe em outra encomenda da conta: o app troca o código das encomendas indicadas e reenvia. */
+  | { error: 'CODE_TAKEN'; orderIds: string[]; revision: number }
   | { error: 'REFERENCE_ERROR' | 'INVALID_PAYLOAD' | 'TOO_MANY_CHANGES'; message: string };
 
 export const emptyPush = (baseRevision: number): PushRequest => ({ baseRevision, baseRevs: { ingredients: {}, recipes: {}, orders: {} }, upserts: { ingredients: [], recipes: [], orders: [] }, deletes: { ingredients: [], recipes: [], orders: [] } });

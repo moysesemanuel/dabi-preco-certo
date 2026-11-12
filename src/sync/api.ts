@@ -41,7 +41,11 @@ export function createHttpSyncApi({ baseUrl, getCsrfToken, fetchImpl = fetch, ti
       const csrf = getCsrfToken();
       const res = await call('/api/sync/push', { method: 'POST', headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) }, body: JSON.stringify(request) });
       if (res.status === 200) { const b = await res.json() as { revision: number; changed: boolean }; return { ok: true, revision: b.revision, changed: b.changed }; }
-      if (res.status === 409) { const b = await res.json().catch(() => ({})) as { error?: string }; return { ok: false, kind: b.error === 'STALE' ? 'stale' : 'conflict' }; }
+      if (res.status === 409) {
+        const b = await res.json().catch(() => ({})) as { error?: string; orderIds?: unknown };
+        if (b.error === 'CODE_TAKEN') return { ok: false, kind: 'code', orderIds: Array.isArray(b.orderIds) ? b.orderIds.filter((x): x is string => typeof x === 'string') : [] };
+        return { ok: false, kind: b.error === 'STALE' ? 'stale' : 'conflict' };
+      }
       return fail(res);
     },
   };

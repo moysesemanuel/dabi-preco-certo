@@ -4,7 +4,7 @@ import type { Order, Recipe, Settings } from '../src/domain/types';
 import { buildPublicQuote, createQuotesClient, QUOTE_MESSAGES, quoteNumberOf, toCents, whatsappShareUrl } from '../src/features/sharing/quotes';
 import { makeServer } from './helpers/server';
 
-const order = (over: Partial<Order> = {}): Order => ({ id: '7f3a9c2e-1111-4222-8333-444455556666', customer: 'Maria Cliente Secreta', recipeId: 'r', quantity: 2, unitPrice: 65, deposit: 10, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: { costPerUnit: 31.5, capturedAt: '2026-11-11T10:00:00.000Z' }, ...over });
+const order = (over: Partial<Order> = {}): Order => ({ id: '7f3a9c2e-1111-4222-8333-444455556666', quoteCode: 'ORC-K7M42P', customer: 'Maria Cliente Secreta', recipeId: 'r', quantity: 2, unitPrice: 65, deposit: 10, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: { costPerUnit: 31.5, capturedAt: '2026-11-11T10:00:00.000Z' }, ...over });
 const recipe: Recipe = { id: 'r', name: 'Bolo de chocolate', yield: 10, items: [{ ingredientId: 'f', quantity: 500 }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 37.5 };
 const settings: Settings = { cupSizeMl: 240, businessName: 'Doces da Bia', businessPhone: '5541999990000' };
 const opts = { issuedAt: '2026-11-11', validUntil: '2026-11-15' };
@@ -14,7 +14,7 @@ describe('Montagem do orçamento público', () => {
     const r = buildPublicQuote(order(), recipe, settings, { ...opts, deliveryFee: 15, discount: 5, notes: ' Reserva sujeita à confirmação ' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
-    expect(r.quote).toEqual({ version: 1, quoteNumber: '7F3A9C', businessName: 'Doces da Bia', businessPhone: '5541999990000', issuedAt: '2026-11-11', validUntil: '2026-11-15', items: [{ description: 'Bolo de chocolate', quantity: 2, unitPriceCents: 6500 }], deliveryFeeCents: 1500, discountCents: 500, notes: 'Reserva sujeita à confirmação' });
+    expect(r.quote).toEqual({ version: 1, quoteNumber: 'ORC-K7M42P', businessName: 'Doces da Bia', businessPhone: '5541999990000', issuedAt: '2026-11-11', validUntil: '2026-11-15', items: [{ description: 'Bolo de chocolate', quantity: 2, unitPriceCents: 6500 }], deliveryFeeCents: 1500, discountCents: 500, notes: 'Reserva sujeita à confirmação' });
     expect(computeTotals(r.quote)).toMatchObject({ subtotalCents: 13000, totalCents: 14000 });
   });
   it('NUNCA inclui custo, margem, dados do cliente, sinal, ids internos ou preço de compra', () => {
@@ -44,12 +44,13 @@ describe('Montagem do orçamento público', () => {
     expect(buildPublicQuote(order({ quantity: 0 }), recipe, settings, opts)).toMatchObject({ ok: false });
   });
   it('número do orçamento estável e legível; mensagem do WhatsApp codificada', () => {
-    expect(quoteNumberOf({ id: '7f3a9c2e-1111' })).toBe('7F3A9C'); expect(quoteNumberOf({ id: '---' })).toBe('S-N');
+    expect(quoteNumberOf({ id: '7f3a9c2e-1111', quoteCode: 'ORC-K7M42P' })).toBe('ORC-K7M42P'); // o número é o código permanente
+    expect(quoteNumberOf({ id: '7f3a9c2e-1111' })).toMatch(/^ORC-[A-Z2-9]{6}$/); expect(quoteNumberOf({ id: '7f3a9c2e-1111' })).not.toContain('7F3A9C'); // pedido antigo: derivado, nunca o id
     const r = buildPublicQuote(order(), recipe, { ...settings, businessName: 'A&B Doces #1' }, opts);
     if (!r.ok) throw new Error(r.error);
     const url = whatsappShareUrl(r.quote, 'https://orcamento.exemplo.test/o/abc?x=1&y=2');
     expect(url.startsWith('https://wa.me/?text=')).toBe(true);
-    expect(decodeURIComponent(url.split('text=')[1])).toBe('Olá! Segue seu orçamento da A&B Doces #1, nº 7F3A9C. Acesse: https://orcamento.exemplo.test/o/abc?x=1&y=2');
+    expect(decodeURIComponent(url.split('text=')[1])).toBe('Olá! Segue seu orçamento da A&B Doces #1, nº ORC-K7M42P. Acesse: https://orcamento.exemplo.test/o/abc?x=1&y=2');
     expect(url).not.toMatch(/text=[^%]*[&#]/); // & e # do texto não podem quebrar a URL
   });
 });
@@ -97,7 +98,7 @@ describe('Publicar contra o Worker real', () => {
     const page = await (await s.request('GET', `/o/${pub.value.id}`)).text();
     for (const text of ['Doces da Bia', '2 × Bolo de chocolate', 'R$ 145,00', 'Reserva sujeita à confirmação']) expect(page).toContain(text);
     for (const secret of ['Maria', 'Secreta', 'Margem', 'desiredMargin', 'Custo', 'custo', '31,5', 'costSnapshot']) expect(page).not.toContain(secret); // ('margin' existe no CSS, por isso não é testado)
-    expect(await client.list()).toMatchObject({ ok: true, value: [{ id: pub.value.id, status: 'active', quoteNumber: '7F3A9C', totalCents: 14500 }] });
+    expect(await client.list()).toMatchObject({ ok: true, value: [{ id: pub.value.id, status: 'active', quoteNumber: 'ORC-K7M42P', totalCents: 14500 }] });
     expect((await client.revoke(pub.value.id)).ok).toBe(true);
     expect((await s.request('GET', `/o/${pub.value.id}`)).status).toBe(410);
     expect(await client.list()).toMatchObject({ ok: true, value: [{ status: 'revoked' }] });

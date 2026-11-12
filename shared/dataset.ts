@@ -10,6 +10,7 @@
  */
 import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CatalogRef, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
 import { isMoney, isPositiveQuantity } from '../src/domain/money';
+import { isQuoteCode } from './quoteCode';
 
 export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, itemsPerRecipe: 200, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
 export { CURRENT_SCHEMA_VERSION };
@@ -125,6 +126,7 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
     if (!isObj(c) || !isMoney(c.costPerUnit) || !isIsoDateTime(c.capturedAt)) return fail(`${at}: custo registrado inválido.`);
     costSnapshot = { costPerUnit: c.costPerUnit, capturedAt: c.capturedAt };
   }
+  if (o.quoteCode !== undefined && !isQuoteCode(o.quoteCode)) return fail(`${at}: código do orçamento inválido.`);
   let payments: Payment[] | undefined;
   if (o.payments !== undefined) {
     if (!Array.isArray(o.payments) || o.payments.length > DATASET_LIMITS.paymentsPerOrder) return fail(`${at}: lista de recebimentos inválida.`);
@@ -142,7 +144,7 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
     if (received > Math.round(o.quantity * o.unitPrice * 100) / 100 + 0.005) return fail(`${at}: o total recebido é maior que o total da encomenda.`);
     if (parsed.length) payments = parsed;
   }
-  return { id: o.id, customer: o.customer.trim(), recipeId: o.recipeId, quantity: o.quantity, unitPrice: o.unitPrice, deposit: o.deposit, deliveryDate: o.deliveryDate, status: o.status as Order['status'], createdAt: o.createdAt, ...(costSnapshot ? { costSnapshot } : {}), ...(payments ? { payments } : {}) };
+  return { id: o.id, customer: o.customer.trim(), recipeId: o.recipeId, quantity: o.quantity, unitPrice: o.unitPrice, deposit: o.deposit, deliveryDate: o.deliveryDate, status: o.status as Order['status'], createdAt: o.createdAt, ...(costSnapshot ? { costSnapshot } : {}), ...(payments ? { payments } : {}), ...(o.quoteCode !== undefined ? { quoteCode: o.quoteCode as string } : {}) };
 }
 
 /** Validação estrita (backup e sincronização). Aceita versões 1 e 2 e devolve sempre a versão atual. */
@@ -155,6 +157,8 @@ export function validateDataSet(value: unknown): DataSet {
   const ingredients = value.ingredients.map((i, n) => ingredientOf(i, n, ingredientIds));
   const recipes = value.recipes.map((r, n) => recipeOf(r, n, recipeIds, ingredientIds));
   const orders = value.orders.map((o, n) => orderOf(o, n, orderIds, recipeIds));
+  const codes = new Set<string>();
+  for (const o of orders) { if (!o.quoteCode) continue; if (codes.has(o.quoteCode)) return fail(`Código de orçamento repetido no backup: ${o.quoteCode}.`); codes.add(o.quoteCode); }
 
   const result: DataSet = { schemaVersion: CURRENT_SCHEMA_VERSION, ingredients, recipes, orders };
   if (value.settings !== undefined) {
