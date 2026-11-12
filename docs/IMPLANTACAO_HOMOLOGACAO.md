@@ -32,7 +32,7 @@ npx wrangler secret put RESEND_API_KEY --env staging --config worker/wrangler.to
 ```bash
 npm run d1 -- migrate --env staging        # mostra o banco de destino (dabi-orcamentos-staging) antes de aplicar
 ```
-As migrações só **criam** tabelas e colunas (nenhuma apaga dados). Exporte um backup antes de migrações futuras. A migração `0007_catalog_ref.sql` (referência do catálogo de medidas no ingrediente) deve ser aplicada **antes** de publicar o Worker e o app desta versão (veja `docs/CATALOGO_DE_MEDIDAS.md`).
+As migrações só **criam** tabelas e colunas (nenhuma apaga dados). Exporte um backup antes de migrações futuras. As migrações `0007_catalog_ref.sql` (referência do catálogo de medidas) e `0008_quote_code.sql` (código permanente do orçamento, com índice único por conta) devem ser aplicadas, nessa ordem, **antes** de publicar o Worker e o app desta versão (veja `docs/CATALOGO_DE_MEDIDAS.md` e `docs/CODIGO_DO_ORCAMENTO.md`).
 
 ## 4. Publicar o Worker e o app
 

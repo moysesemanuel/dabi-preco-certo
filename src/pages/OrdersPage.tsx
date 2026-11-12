@@ -8,6 +8,10 @@ import { money } from '../domain/pricing';
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../domain/payments';
 import { PAYMENT_METHODS, type Order, type PaymentMethod } from '../domain/types';
 import { Field } from '../components/Field';
+import { OrderSearch } from '../components/OrderSearch';
+import { QuoteCode } from '../components/QuoteCode';
+import { filterOrders } from '../domain/orderSearch';
+import { effectiveQuoteCodes, uniqueQuoteCode } from '../../shared/quoteCode';
 import { QuoteSharePanel } from '../features/sharing/QuoteSharePanel';
 import { FORECAST_DISCLAIMER, forecastUntil, formatMinutes } from '../domain/schedule';
 import { brDate, localToday, newId, parse, priceRecipe, tryApply, type PageProps } from '../utils';
@@ -35,6 +39,10 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
   const [payDate, setPayDate] = useState('');
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('');
   const [payNote, setPayNote] = useState('');
+  const [query, setQuery] = useState('');
+  // Código permanente de atendimento de cada pedido (os antigos, sem código, recebem o derivado do id).
+  const codes = useMemo(() => effectiveQuoteCodes(data.orders), [data.orders]);
+  const visible = useMemo(() => filterOrders(data.orders, query, { codes, productOf: o => data.recipes.find(r => r.id === o.recipeId)?.name ?? '' }), [data.orders, data.recipes, codes, query]);
 
   function resetForm() { setEditingId(null); setCustomer(''); setRecipeId(''); setQty('1'); setUnitPrice(''); setDeposit('0'); setDate(''); }
   function startEdit(id: string) {
@@ -63,7 +71,7 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
     const now = new Date();
     // Registra o custo de hoje: ele não muda quando ingredientes ou a receita forem alterados depois.
     const snapshot = captureCostSnapshot(data.recipes.find(r => r.id === recipeId)!, data, now);
-    const order: Order = { id: newId(), customer: customer.trim(), recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep, status: 'Orçamento', createdAt: now.toISOString(), ...(snapshot ? { costSnapshot: snapshot } : {}) };
+    const order: Order = { id: newId(), quoteCode: uniqueQuoteCode(new Set(codes.values())), customer: customer.trim(), recipeId, quantity: q, unitPrice: price, deliveryDate: date, deposit: dep, status: 'Orçamento', createdAt: now.toISOString(), ...(snapshot ? { costSnapshot: snapshot } : {}) };
     update(d => ({ ...d, orders: [...d.orders, order] }));
     setCustomer(''); setDeposit('0'); inform('Encomenda cadastrada.');
   }
@@ -84,7 +92,7 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
   }
   const copyQuote = async (o: Order) => {
     const r = data.recipes.find(x => x.id === o.recipeId);
-    const txt = `Olá, ${o.customer}! Segue seu orçamento:\nProduto: ${r?.name ?? 'Encomenda'}\nQuantidade: ${o.quantity}\nValor unitário: ${money(o.unitPrice)}\nTotal: ${money(o.quantity * o.unitPrice)}\nData solicitada: ${brDate(o.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
+    const txt = `Olá, ${o.customer}! Segue seu orçamento ${codes.get(o.id)}:\nProduto: ${r?.name ?? 'Encomenda'}\nQuantidade: ${o.quantity}\nValor unitário: ${money(o.unitPrice)}\nTotal: ${money(o.quantity * o.unitPrice)}\nData solicitada: ${brDate(o.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
     try { await navigator.clipboard.writeText(txt); inform('Orçamento copiado para enviar no WhatsApp.'); } catch { inform('Não foi possível copiar automaticamente.'); }
   };
   const orderCost = useMemo(() => { const r = data.recipes.find(x => x.id === recipeId); return r ? priceRecipe(r, data) : null; }, [data, recipeId]);
@@ -117,9 +125,10 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
           <div style={{ display: 'flex', gap: 8 }}><button className="primary" disabled={!data.recipes.length} type="submit">{editingId ? <><Save size={17} /> Salvar alterações</> : <><Plus size={17} /> Registrar encomenda</>}</button>{editingId && <button className="secondary" type="button" onClick={resetForm}><X size={16} /> Cancelar</button>}</div>
         </form>
       </section>
-      <section className="card"><h2 className="section-title">Pedidos ({data.orders.length})</h2>
-        {data.orders.length ? <div className="stack" style={{ marginTop: 16 }}>{data.orders.slice().reverse().map(o => <div key={o.id} style={{ border: '1px solid #e6eaf0', borderRadius: 12, padding: 14 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 9 }}><div><strong>{o.customer}</strong><p className="muted">{data.recipes.find(r => r.id === o.recipeId)?.name ?? 'Receita indisponível'} · {o.quantity} un.</p></div><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span className="tag">{o.status}</span><button aria-label={`Editar encomenda de ${o.customer}`} title="Editar" className="inline-icon" onClick={() => startEdit(o.id)}><Pencil size={15} /></button><button aria-label={`Excluir encomenda de ${o.customer}`} title="Excluir" className="inline-icon" onClick={() => deleteOrder(o)}><Trash2 size={15} /></button></div></div>
+      <section className="card"><div className="list-head"><h2 className="section-title">Pedidos ({query.trim() ? `${visible.length} de ${data.orders.length}` : data.orders.length})</h2>{data.orders.length > 0 && <OrderSearch value={query} onChange={setQuery} />}</div>
+        {data.orders.length && !visible.length ? <div className="empty" role="status"><ClipboardCheck size={30} />Nenhum pedido encontrado para “{query.trim()}”.<br /><button type="button" className="secondary" style={{ marginTop: 10 }} onClick={() => setQuery('')}>Mostrar todos os pedidos</button></div> : null}
+        {visible.length ? <div className="stack" style={{ marginTop: 16 }}>{visible.slice().reverse().map(o => <div key={o.id} style={{ border: '1px solid #e6eaf0', borderRadius: 12, padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 9 }}><div><QuoteCode code={codes.get(o.id)!} /><strong>{o.customer}</strong><p className="muted">{data.recipes.find(r => r.id === o.recipeId)?.name ?? 'Receita indisponível'} · {o.quantity} un.</p></div><div style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span className="tag">{o.status}</span><button aria-label={`Editar encomenda de ${o.customer}`} title="Editar" className="inline-icon" onClick={() => startEdit(o.id)}><Pencil size={15} /></button><button aria-label={`Excluir encomenda de ${o.customer}`} title="Excluir" className="inline-icon" onClick={() => deleteOrder(o)}><Trash2 size={15} /></button></div></div>
           <div className="formula-row" style={{ margin: '10px 0' }}><span>Valor: {money(orderTotal(o))}</span><strong>Entrega: {brDate(o.deliveryDate)}</strong></div>
           <div className="formula-row" style={{ margin: '0 0 8px', fontSize: 13 }}><span>Recebido: <strong>{money(totalReceived(o))}</strong></span><span>Saldo pendente: <strong style={{ color: balanceDue(o) > 0 ? '#9a5a0d' : '#16794a' }}>{money(balanceDue(o))}</strong></span></div>
           {o.status === 'Entregue' && balanceDue(o) > 0 && <div className="notice warn" style={{ marginBottom: 8 }}>Entregue com saldo pendente de {money(balanceDue(o))}.</div>}
@@ -143,8 +152,8 @@ export function OrdersPage({ data, update, inform, focus }: PageProps) {
             <Field label="Status"><select value={o.status} onChange={e => update(d => ({ ...d, orders: d.orders.map(x => x.id === o.id ? { ...x, status: e.target.value as Order['status'] } : x) }))}>{statuses.map(s => <option key={s}>{s}</option>)}</select></Field>
             <div style={{ alignSelf: 'end', display: 'grid', gap: 6 }}><button className="secondary" onClick={() => copyQuote(o)} style={{ width: '100%' }}><FileText size={16} /> Copiar orçamento</button><button className="secondary" onClick={() => setQuotingId(quotingId === o.id ? null : o.id)} style={{ width: '100%' }}><Link2 size={16} /> {quotingId === o.id ? 'Fechar orçamento' : 'Orçamento por link'}</button></div>
           </div>
-          {quotingId === o.id && <QuoteSharePanel order={o} data={data} inform={inform} focus={focus} onClose={() => setQuotingId(null)} />}
-        </div>)}</div> : <div className="empty"><ClipboardCheck size={30} />Nenhum pedido cadastrado.</div>}
+          {quotingId === o.id && <QuoteSharePanel order={o} code={codes.get(o.id)!} data={data} update={update} inform={inform} focus={focus} onClose={() => setQuotingId(null)} />}
+        </div>)}</div> : !data.orders.length ? <div className="empty"><ClipboardCheck size={30} />Nenhum pedido cadastrado.</div> : null}
       </section>
     </div>
     <p className="footnote">O status não representa confirmação de pagamento ou disponibilidade. Confirme valores, sinal e prazo diretamente com o cliente.</p>

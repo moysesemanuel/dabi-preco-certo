@@ -21,7 +21,7 @@ export function PublishedLinks({ inform }: { inform: (m: string) => void }) {
   const quotes = acc.quotes;
 
   async function revoke(q: PublishedQuote) {
-    if (!confirm(`Revogar o link do orçamento nº ${q.quoteNumber}? Quem abrir o link verá que ele foi retirado. Isto não pode ser desfeito.`)) return;
+    if (!confirm(`Revogar o link do orçamento ${q.quoteNumber}? Quem abrir o link verá que ele foi retirado. Isto não pode ser desfeito.`)) return;
     const r = await quotes.revoke(q.id);
     if (r.ok) { inform('Link revogado.'); void load(); } else inform(QUOTE_MESSAGES[r.reason]);
   }
@@ -30,7 +30,7 @@ export function PublishedLinks({ inform }: { inform: (m: string) => void }) {
     {error && <div className="notice warn">{error}</div>}
     {list && !list.length && <div className="empty"><Link2 size={30} />Nenhum link publicado ainda.</div>}
     {list?.map(q => <div key={q.id} style={{ border: '1px solid #e6eaf0', borderRadius: 12, padding: 12 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><strong>Nº {q.quoteNumber} · {formatCents(q.totalCents)}</strong><span className={STATUS[q.status].cls}>{STATUS[q.status].label}</span></div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><strong>{/^ORC-/.test(q.quoteNumber) ? q.quoteNumber : `Nº ${q.quoteNumber}`} · {formatCents(q.totalCents)}</strong><span className={STATUS[q.status].cls}>{STATUS[q.status].label}</span></div>
       <p className="muted" style={{ margin: '4px 0 8px', fontSize: 13 }}>Emitido em {brDate(q.issuedAt)}{q.validUntil ? ` · válido até ${brDate(q.validUntil)}` : ''}</p>
       {q.status !== 'revoked' && q.url && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="secondary" onClick={() => void copyText(q.url!).then(ok => inform(ok ? 'Link copiado.' : 'Não foi possível copiar automaticamente.'))}><Copy size={15} /> Copiar link</button>

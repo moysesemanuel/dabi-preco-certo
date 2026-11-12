@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Copy, MessageCircle, Send } from 'lucide-react';
 import { useAccount } from '../../account/AccountContext';
+import { withQuoteCodes } from '../../../shared/quoteCode';
 import { computeTotals, formatCents, formatDate, formatQuantity } from '../../../shared/publicQuote';
 import { addDays } from '../../domain/schedule';
 import type { Order } from '../../domain/types';
@@ -8,10 +9,10 @@ import { Field } from '../../components/Field';
 import { copyText, localToday, parse, type PageProps } from '../../utils';
 import { buildPublicQuote, QUOTE_MESSAGES, whatsappShareUrl } from './quotes';
 
-type Props = Pick<PageProps, 'data' | 'inform' | 'focus'> & { order: Order; onClose: () => void };
+type Props = Pick<PageProps, 'data' | 'update' | 'inform' | 'focus'> & { order: Order; /** código de atendimento permanente do pedido */ code: string; onClose: () => void };
 
 /** Prévia + publicação do orçamento por link. O orçamento público nunca leva custo, margem nem dados do cliente. */
-export function QuoteSharePanel({ order, data, inform, focus, onClose }: Props) {
+export function QuoteSharePanel({ order, code, data, update, inform, focus, onClose }: Props) {
   const acc = useAccount();
   const [validUntil, setValidUntil] = useState(addDays(localToday(), 7));
   const [fee, setFee] = useState('');
@@ -22,7 +23,7 @@ export function QuoteSharePanel({ order, data, inform, focus, onClose }: Props) 
   const [error, setError] = useState('');
   const [published, setPublished] = useState<{ url: string } | null>(null);
 
-  const built = useMemo(() => buildPublicQuote(order, data.recipes.find(r => r.id === order.recipeId), data.settings, {
+  const built = useMemo(() => buildPublicQuote({ ...order, quoteCode: code }, data.recipes.find(r => r.id === order.recipeId), data.settings, {
     issuedAt: localToday(), validUntil: validUntil || undefined, deliveryFee: fee.trim() ? parse(fee) : undefined, discount: discount.trim() ? parse(discount) : undefined, notes,
   }), [order, data, validUntil, fee, discount, notes]);
 
@@ -31,6 +32,8 @@ export function QuoteSharePanel({ order, data, inform, focus, onClose }: Props) 
   async function publish() {
     if (!acc.quotes || !built.ok) return;
     setBusy(true); setError('');
+    // Garante que o código do pedido esteja gravado (encomendas antigas) antes de o link existir; o código não muda ao publicar nem republicar.
+    if (!order.quoteCode) update(d => ({ ...d, orders: withQuoteCodes(d.orders) }));
     const r = await acc.quotes.publish(built.quote);
     setBusy(false);
     if (r.ok) { setPublished({ url: r.value.url }); inform('Link gerado.'); } else setError(QUOTE_MESSAGES[r.reason]);

@@ -243,3 +243,7 @@ Catálogo local (~50 ingredientes, USDA FoodData Central em domínio público), 
 ## Etapa 3 (UX): cadastro de ingredientes simplificado
 
 Formulário reduzido a nome, quantidade, unidade e preço + resumo compacto das medidas (`MeasuresSummary`); ajustes avançados sob demanda em diálogo com rascunho (`MeasuresDialog`, reaproveita `Modal`). Sem mudanças no catálogo, motor de conversão, preços, sincronização ou dados. Ingrediente novo com nome conhecido já grava a referência mostrada no resumo; editar nunca adota referência sozinho. Testes em `tests/ui/measures.test.tsx`.
+
+## Etapa 3: código permanente do orçamento e pesquisa de pedidos
+
+Código `ORC-XXXXXX` por pedido (gerado offline, único por conta, permanente), exibido no card, no orçamento público, no WhatsApp, no texto copiado e nos links publicados; busca expansível por código, cliente, produto e status. Migração `0008_quote_code.sql` preparada (não aplicada). Detalhes em `docs/CODIGO_DO_ORCAMENTO.md`.

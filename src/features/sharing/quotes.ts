@@ -1,4 +1,5 @@
 import { computeTotals, validatePublicQuote, type PublicQuote } from '../../../shared/publicQuote';
+import { legacyQuoteCode } from '../../../shared/quoteCode';
 import { apiCall, field } from '../../account/http';
 import type { Order, Recipe, Settings } from '../../domain/types';
 
@@ -9,7 +10,8 @@ import type { Order, Recipe, Settings } from '../../domain/types';
  */
 export type QuoteOptions = { issuedAt: string; validUntil?: string; deliveryFee?: number; discount?: number; notes?: string };
 export const toCents = (reais: number) => Math.round((reais + Number.EPSILON) * 100);
-export const quoteNumberOf = (order: Pick<Order, 'id'>) => order.id.replace(/[^A-Za-z0-9]/g, '').slice(0, 6).toUpperCase() || 'S-N';
+/** Número do orçamento = código permanente de atendimento do pedido (nunca o id interno nem o token do link). */
+export const quoteNumberOf = (order: Pick<Order, 'id' | 'quoteCode'>) => order.quoteCode ?? legacyQuoteCode(order.id);
 
 export function buildPublicQuote(order: Order, recipe: Recipe | undefined, settings: Settings | undefined, opts: QuoteOptions): { ok: true; quote: PublicQuote } | { ok: false; error: string } {
   if (!settings?.businessName) return { ok: false, error: 'Informe o nome do negócio em Configurações antes de gerar o orçamento.' };
