@@ -44,6 +44,8 @@ type Ctx = {
   /** Resolve uma pendência financeira. Lança Error com a explicação se a regra de negócio impedir (ex.: passaria do total). */
   resolveFinancial(conflictId: string, action: ReconcileAction): void;
   openFinancial: number;
+  /** Há alteração local ainda não confirmada pelo servidor (derivado; não altera a sincronização). */
+  dirty: boolean;
 };
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
@@ -180,6 +182,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
       metaRef.current = { ...metaRef.current, conflicts: kept }; void saveSyncMeta(metaRef.current).catch(() => undefined); setConflicts(kept);
     },
     openFinancial: conflicts.filter(isOpenFinancial).length,
+    dirty: entitled && ready && lastApplied.current !== null && data !== lastApplied.current,
     resolveFinancial(conflictId, action) {
       const meta = metaRef.current; const c = meta?.conflicts.find(x => x.id === conflictId);
       if (!meta || !c) throw new Error('Pendência não encontrada.');

@@ -5,6 +5,7 @@ import { emptyData, loadData, saveData } from './storage/db';
 import { createSaveQueue } from './storage/saveQueue';
 import type { Page, PageProps } from './utils';
 import { AccountProvider, useAccount } from './account/AccountContext';
+import { deriveIndicator, useStableIndicator } from './account/syncIndicator';
 import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/DashboardPage';
@@ -29,15 +30,16 @@ function SyncBanner({ focus }: { focus: (p: Page) => void }) {
   return <div className="notice warn" role="alert"><strong>A sincronização precisa da sua decisão.</strong> Nada foi alterado ainda. <button className="secondary" onClick={() => focus('settings')}>Resolver em Configurações</button></div>;
 }
 
-/** Estado dos dados no topo da tela: local, ou sincronizado quando há conta. */
+/** Estado dos dados no topo: local, ou o e-mail da conta com um indicador circular da saúde da sincronização. */
 function TopbarStatus() {
   const acc = useAccount();
-  const text = acc.status !== 'signed-in' ? 'Dados salvos neste dispositivo'
-    : !acc.entitled ? `${acc.session?.user.email} · sem licença ativa`
-    : acc.sync.blocked ? `${acc.session?.user.email} · precisa da sua decisão`
-    : acc.openFinancial > 0 ? `${acc.session?.user.email} · recebimentos a reconciliar`
-    : ({ idle: 'aguardando', syncing: 'sincronizando…', synced: 'sincronizado', offline: 'sem conexão (será enviado depois)', attention: 'precisa de atenção', error: 'falha ao sincronizar' } as const)[acc.sync.phase];
-  return <span role="status" aria-live="polite">{acc.status === 'signed-in' && acc.entitled && !acc.sync.blocked && acc.openFinancial === 0 ? `${acc.session?.user.email} · ${text}` : text}</span>;
+  const raw = deriveIndicator({ sync: acc.sync, dirty: acc.dirty, openFinancial: acc.openFinancial, entitled: acc.entitled });
+  const level = useStableIndicator(raw);
+  if (acc.status !== 'signed-in') return <span role="status">Dados salvos neste dispositivo</span>;
+  const email = acc.session?.user.email;
+  if (!acc.entitled) return <span role="status">{email} · sem licença ativa</span>;
+  const tip = `${raw.label}. ${raw.detail}`;
+  return <span className="sync-status">{email}<span role="img" className={`sync-dot ${level}`} tabIndex={0} aria-label={`Sincronização: ${tip}`} title={tip} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
 }
 
 export default function App() {

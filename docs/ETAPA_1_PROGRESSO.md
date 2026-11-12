@@ -197,3 +197,14 @@ Problema: `licenses.ts` usava sempre o banco `dabi-orcamentos` sem `--env`, ent�
 - Sessão recusada na sincronização: volta ao login **com explicação** (sem toast falso, sem loop).
 - Testes: `tests/ui/login-flow.test.tsx` (3 dos 5 falham no código antigo; cookie guardado/ não guardado/ perdido, recarregar a página, `same-origin`) e `tests/dev-proxy.test.ts`. Verificado também no Chrome contra o Worker local através do proxy (login, cookie HttpOnly invisível ao JavaScript, recarregar mantém a sessão, sincronizado).
 - Produção: nada foi afrouxado. Aviso: app e API de homologação/produção precisam estar no mesmo site (domínios próprios do mesmo domínio registrável).
+
+## Indicador de sincronização no cabeçalho
+
+Os textos "Sincronizando…/Sincronizado" foram trocados por um ponto ao lado do e-mail (`src/account/syncIndicator.ts`). Ele mostra a **saúde**, não cada operação:
+
+- **Verde**: há confirmação real do servidor (`lastSyncedAt`) e nenhuma alteração local pendente. Sincronizações normais não o tiram do verde.
+- **Cinza**: sem confirmação ainda, offline, alterações a enviar ou falha recente. Só aparece depois de 6 s contínuos (ou imediatamente na primeira entrada, que nunca é verde).
+- **Vermelho**: decisão pendente, recebimentos a reconciliar, atenção/licença, ou falha que persiste por 20 s.
+- O tooltip (`title` e `aria-label`) traz o estado e o horário da última confirmação. Os avisos existentes (faixa de decisão, pendências financeiras) continuam iguais.
+- Nenhuma lógica de sincronização, autenticação ou API foi alterada; o contexto só expõe `dirty`, derivado de dados já existentes.
+- Testes: `tests/ui/sync-indicator.test.tsx`.
