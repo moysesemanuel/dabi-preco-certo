@@ -27,6 +27,7 @@ npm test
 - [`docs/BACKUP_E_RECUPERACAO.md`](docs/BACKUP_E_RECUPERACAO.md): backups e recuperação (aparelho e D1), com ensaio realizado.
 - [`docs/SEGURANCA_CHECKLIST.md`](docs/SEGURANCA_CHECKLIST.md): o que está protegido e o que falta.
 - [`docs/IMPLANTACAO_HOMOLOGACAO.md`](docs/IMPLANTACAO_HOMOLOGACAO.md): roteiro de implantação em homologação (não executado).
+- [`docs/POLITICA_DE_CUSTOS.md`](docs/POLITICA_DE_CUSTOS.md): **política de infraestrutura de custo zero** (limites gratuitos verificados, metas, medição com `npm run costs`, proteções, upgrade). Vale para toda nova funcionalidade.
 - [`docs/ETAPA_1_PROGRESSO.md`](docs/ETAPA_1_PROGRESSO.md): histórico e decisões da Etapa 1.
 - [`worker/README.md`](worker/README.md): API, contas, sincronização, licenças e pendências do servidor.
 

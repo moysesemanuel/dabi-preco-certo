@@ -247,3 +247,7 @@ Formulário reduzido a nome, quantidade, unidade e preço + resumo compacto das 
 ## Etapa 3: código permanente do orçamento e pesquisa de pedidos
 
 Código `ORC-XXXXXX` por pedido (gerado offline, único por conta, permanente), exibido no card, no orçamento público, no WhatsApp, no texto copiado e nos links publicados; busca expansível por código, cliente, produto e status. Migração `0008_quote_code.sql` preparada (não aplicada). Detalhes em `docs/CODIGO_DO_ORCAMENTO.md`.
+
+## Política de infraestrutura de custo zero
+
+Nova diretriz: ficar nos limites gratuitos (Cloudflare Workers/D1/Pages e Resend) enquanto possível. Criados `docs/POLITICA_DE_CUSTOS.md` (limites verificados em 12/11/2026, metas, monitoramento, proteções, upgrade), `npm run costs` (medição e projeção), orçamentos de regressão em `tests/costs/`. Correções: orçamento diário de e-mails (80/dia) e teto de 12/dia por e-mail, limpeza de contadores que apagava outros escopos, validação de referências sem ler a conta inteira, uma consulta a menos por sincronização, retry máximo de 5 min. Gargalo: escritas no D1 (~228 contas ativas na meta de 50%, hipótese típica).

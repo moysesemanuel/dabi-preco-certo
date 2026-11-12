@@ -66,6 +66,7 @@ Equivale a `DEV_API_PROXY_TARGET=<url da API> VITE_API_URL=same-origin VITE_REQU
 | `npm test` | Todos os testes |
 | `npm run typecheck` | Só a verificação de tipos |
 | `npm run audit` | Auditoria de dependências (severidade alta ou crítica) |
+| `npm run costs` | Mede o consumo de requisições e D1 por ação e projeta 10/50/100/500 contas (veja `POLITICA_DE_CUSTOS.md`) |
 | `npm run check:secrets` | Procura segredos acidentais nos arquivos versionados |
 | `npm run worker:migrate` | Aplica as migrações no D1 **local** (igual a `npm run d1 -- migrate --env local`) |
 | `npm run d1 -- <comando> --env <ambiente>` | Migrar, exportar e restaurar o D1 com ambiente explícito (veja `BACKUP_E_RECUPERACAO.md`) |
