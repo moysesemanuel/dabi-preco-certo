@@ -7,7 +7,7 @@ Escopo: código do app, do Worker e das migrações na branch `feat/etapa-1-beta
 - **Nenhuma vulnerabilidade Crítica ou Alta comprovada.**
 - **1 defeito comprovado (Médio), corrigido:** o logout confirmava "saiu" mesmo quando a chamada ao servidor falhava.
 - 1 observação Informativa e 4 riscos residuais documentados abaixo (nenhum comprovado como exploração).
-- Testes: 837 passam (803 existentes + 34 novos desta auditoria, mais 3 de logout), `tsc -b`, build e `npm audit` (0 vulnerabilidades) limpos.
+- Testes: 837 passam (2 ignorados por já estarem marcados como skip): 34 novos testes de segurança e 3 de logout nesta auditoria, `tsc -b`, build e `npm audit` (0 vulnerabilidades) limpos.
 
 ## Achados
 
