@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { ArchiveRestore, CalendarDays, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
 import type { DataSet } from './domain/types';
-import { emptyData, loadData, saveData } from './storage/db';
+import { emptyData, loadDataVersioned, readDataVersion, saveDataCas, StaleWriteError } from './storage/db';
+import { createCoordinator, type Role } from './storage/coordination';
 import { createSaveQueue } from './storage/saveQueue';
-import type { Page, PageProps } from './utils';
+import { downloadBackup, type Page, type PageProps } from './utils';
 import { AccountProvider, useAccount } from './account/AccountContext';
 import { ConflictDialog } from './features/account/ConflictDialog';
 import { conflictTitle } from './sync/describe';
@@ -60,17 +61,71 @@ function TopbarStatus() {
   return <span className="sync-status">{email}<SyncDot level={level} label={raw.label} detail={raw.detail} /><span className="sr-only" role="status" aria-live="polite">{level === 'ok' ? 'Sincronização em dia' : level === 'bad' || level === 'conflict' ? raw.label : 'Sincronização sem confirmação'}</span></span>;
 }
 
+/** Uma por aba (criada ao carregar o módulo): decide qual aba edita e avisa as outras. */
+const coordinator = createCoordinator();
+
+const VIEW_MSG = 'Esta aba está em modo de consulta. Assuma a edição para alterar.';
+/** Aba em modo de consulta: mostra os dados, mas não grava nem sincroniza (evita que duas abas sobrescrevam uma à outra). */
+function ViewerBanner({ canTakeOver, onTakeOver }: { canTakeOver: boolean; onTakeOver: () => void }) {
+  return <div className="notice warn viewer-banner" role="region" aria-label="Modo de consulta"><div><strong>Este aplicativo está aberto em outra aba.</strong><br />Aqui você pode consultar seus dados, mas não alterá-los, para que nada seja perdido. Para editar nesta aba, assuma a edição: a outra aba passa a só consultar.</div>
+    {canTakeOver && <button className="secondary" onClick={onTakeOver}>Editar nesta aba</button>}</div>;
+}
+/** A gravação desta aba foi recusada porque outra aba alterou os dados antes: nada foi apagado, e as alterações desta aba continuam aqui. */
+function LostWorkBanner({ onDownload, onReload }: { onDownload: () => void; onReload: () => void }) {
+  return <div className="notice warn viewer-banner" role="alert"><div><strong>Os dados foram alterados em outra aba.</strong><br />Para não apagar o que foi feito lá, as últimas alterações desta aba <strong>não foram salvas</strong>. Baixe uma cópia delas (se precisar) e carregue os dados atuais.</div>
+    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}><button className="secondary" onClick={onDownload}>Baixar cópia das minhas alterações</button><button className="primary" onClick={onReload}>Carregar os dados atuais</button></div></div>;
+}
+
 export default function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [data, setData] = useState<DataSet>(emptyData);
   const [ready, setReady] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const queue = useRef(createSaveQueue<DataSet>(saveData));
+  const [role, setRole] = useState<Role>('pending');
+  const [blocked, setBlocked] = useState<DataSet | null>(null); // cópia das alterações que NÃO puderam ser salvas (outra aba gravou antes)
+  const [epoch, setEpoch] = useState(0);        // muda ao ASSUMIR a edição: a conta é verificada de novo antes de sincronizar
+  const [metaVersion, setMetaVersion] = useState(0); // muda quando outra aba grava: o estado de sincronização é relido do disco
+  const versionRef = useRef(0);                 // versão do documento que ESTA aba leu/gravou por último
+  const persisted = useRef<DataSet | null>(null);
+  const wasViewer = useRef(false);
+  const eff: Role = blocked ? 'viewer' : role;  // papel efetivo
+  const effRef = useRef(eff); effRef.current = eff;
+  const queue = useRef(createSaveQueue<DataSet>(async d => { const v = await saveDataCas(d, versionRef.current); versionRef.current = v; coordinator.notifySaved(v); }));
 
-  useEffect(() => { let alive = true; loadData().then(d => { if (alive) { setData(d); setReady(true); } }).catch(() => { if (alive) { setFeedback('Armazenamento indisponível. Suas alterações não serão persistidas.'); setReady(true); } }); return () => { alive = false; }; }, []);
-  useEffect(() => { if (!ready) return; queue.current.enqueue(data).catch(() => setFeedback('Não foi possível salvar neste navegador. Exporte um backup dos dados.')); }, [data, ready]);
+  /**
+   * Relê os dados do disco. `refresh`: aba em consulta acompanhando o editor (só se mudou). `promote`: esta aba acabou de assumir a edição
+   * (o bloqueio de edição e de sincronização já foi armado em `onRole`; aqui só se termina de carregar). `reset`: descartar o que não foi salvo e carregar o atual.
+   */
+  const reload = useRef((_mode: 'refresh' | 'promote' | 'reset') => Promise.resolve());
+  reload.current = async mode => {
+    if (mode === 'reset') { setReady(false); setEpoch(n => n + 1); }
+    const { data: d, version } = await loadDataVersioned();
+    if (mode === 'refresh' && version === versionRef.current) return;
+    versionRef.current = version; persisted.current = d; setData(d); setBlocked(null); setMetaVersion(n => n + 1); setReady(true);
+  };
+  const prevRole = useRef<Role>('pending');
+  // Ao PASSAR a editar (depois de ter só consultado), a aba é "travada" no mesmo instante: sem editar nem sincronizar até reler o disco e verificar a conta.
+  const onRole = (r: Role) => { if (r === 'editor' && prevRole.current === 'viewer') { setReady(false); setEpoch(n => n + 1); } prevRole.current = r; setRole(r); };
+
+  useEffect(() => { coordinator.start({ onRole, onRemoteSaved: () => { if (effRef.current !== 'editor') void reload.current('refresh'); } }); return () => coordinator.stop(); }, []);
+  useEffect(() => { let alive = true; loadDataVersioned().then(({ data: d, version }) => { if (alive) { versionRef.current = version; persisted.current = d; setData(d); setReady(true); } }).catch(() => { if (alive) { setFeedback('Armazenamento indisponível. Suas alterações não serão persistidas.'); setReady(true); } }); return () => { alive = false; }; }, []);
+  // Ao assumir a edição depois de ter sido só consulta, os dados são relidos do disco ANTES de permitir alterações.
+  useEffect(() => { if (role === 'viewer') wasViewer.current = true; if (role === 'editor' && wasViewer.current) { wasViewer.current = false; void reload.current('promote'); } }, [role]);
+  // Em consulta: relê ao voltar o foco (sem rede; cobre navegadores sem BroadcastChannel e abas que estavam suspensas).
+  useEffect(() => {
+    const check = () => { if (document.visibilityState === 'hidden' || effRef.current === 'editor') return; void readDataVersion().then(v => { if (v !== versionRef.current) void reload.current('refresh'); }).catch(() => undefined); };
+    window.addEventListener('focus', check); document.addEventListener('visibilitychange', check); return () => { window.removeEventListener('focus', check); document.removeEventListener('visibilitychange', check); };
+  }, []);
+  const onSaveError = (e: unknown, snapshot: DataSet) => { if (e instanceof StaleWriteError) setBlocked(snapshot); else setFeedback('Não foi possível salvar neste navegador. Exporte um backup dos dados.'); };
+  useEffect(() => {
+    if (!ready || eff !== 'editor' || data === persisted.current) return; // só o editor grava; dados recém-lidos do disco não são regravados
+    persisted.current = data; queue.current.enqueue(data).catch(e => onSaveError(e, data));
+  }, [data, ready, eff]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Em consulta, alterações são ignoradas e QUALQUER mensagem das páginas é trocada pelo aviso de consulta (para nunca parecer que algo foi salvo).
+  const guarded = (fn: (d: DataSet) => DataSet) => { if (effRef.current === 'editor') setData(fn); };
+  const informPage = (msg: string) => inform(effRef.current === 'editor' ? msg : VIEW_MSG);
   /** Restaura um backup: atualiza a tela e grava pela MESMA fila, para não competir com gravações em andamento. */
-  const replaceData = (next: DataSet) => { setData(next); return queue.current.enqueue(next); };
+  const replaceData = (next: DataSet) => { if (effRef.current !== 'editor') { inform(VIEW_MSG); return Promise.resolve(); } setData(next); return queue.current.enqueue(next); };
 
   // Leitores de tela: ao trocar de página, o foco vai para o título dela.
   const firstRender = useRef(true);
@@ -82,13 +137,15 @@ export default function App() {
 
   const inform = (msg: string) => { setFeedback(msg); window.setTimeout(() => setFeedback(''), 4500); };
   const focus = (p: Page) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-  const props: PageProps = { data, update: setData, inform, focus };
+  const props: PageProps = { data, update: guarded, inform: informPage, focus };
+  const viewer = eff === 'viewer';
 
-  return <AccountProvider data={data} setData={setData} ready={ready}><AccessGate data={data}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
+  return <AccountProvider data={data} setData={setData} ready={ready && eff === 'editor'} epoch={epoch} metaVersion={metaVersion}><AccessGate data={data}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
     <aside className="sidebar"><div className="brand"><div className="brand-mark"><ClipboardCheck size={22} /></div><span>Pedido<span style={{ color: '#ff982b' }}>Certo</span></span></div><nav className="nav" aria-label="Navegação principal">{pages.map(p => { const Icon = p.icon; return <button key={p.id} className={page === p.id ? 'active' : ''} aria-current={page === p.id ? 'page' : undefined} onClick={() => focus(p.id)}><Icon size={18} />{p.label}</button>; })}</nav><div className="sidebar-foot"><strong style={{ color: 'white' }}>Versão beta</strong><br />Seus dados ficam neste navegador e, se você entrar numa conta (opcional), também no servidor. Exporte backups regularmente.</div></aside>
     <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><ChefHat size={16} /></div></header><div className="content" id="conteudo">
-      <SyncBanner focus={focus} />
-      <ConflictBanner />
+      {blocked ? <LostWorkBanner onDownload={() => downloadBackup(blocked)} onReload={() => { void reload.current('reset'); }} /> : viewer && <ViewerBanner canTakeOver={coordinator.supported} onTakeOver={() => coordinator.takeOver()} />}
+      {!viewer && <SyncBanner focus={focus} />}
+      {!viewer && <ConflictBanner />}
       <ErrorBoundary key={page}>{!ready ? <div className="empty" role="status" aria-live="polite">Carregando seus dados…</div> : <>
       {page === 'dashboard' && <DashboardPage {...props} />}
       {page === 'ingredients' && <IngredientsPage {...props} />}
@@ -96,9 +153,10 @@ export default function App() {
       {page === 'orders' && <OrdersPage {...props} />}
       {page === 'agenda' && <AgendaPage {...props} />}
       {page === 'converter' && <ConverterPage {...props} />}
+      {(page === 'settings' || page === 'backup') && viewer ? <div className="empty" role="status">Esta página só pode ser usada na aba que está editando. Assuma a edição nesta aba para continuar.</div> : <>
       {page === 'settings' && <SettingsPage {...props} />}
-      {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}
+      {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}</>}
       </>}</ErrorBoundary>
-    </div></main><ConflictDialog inform={inform} />{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
+    </div></main>{!viewer && <ConflictDialog inform={inform} />}{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
   </div></AccessGate></AccountProvider>;
 }

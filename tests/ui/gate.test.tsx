@@ -49,7 +49,7 @@ describe('Acesso na versão comercial', () => {
     expect(await screen.findByRole('heading', { name: 'Entrar na conta' }, { timeout: 5000 })).toBeTruthy(); // folga para a suíte inteira rodando em paralelo
     expect(hasApp()).toBe(false);
     expect(screen.queryByText('Farinha Local')).toBeNull();
-    expect(screen.getByText(/não foram apagados/)).toBeTruthy();
+    expect(await screen.findByText(/não foram apagados/)).toBeTruthy(); // os dados locais são lidos do disco em paralelo com a verificação da sessão
     expect(screen.getByRole('button', { name: /Baixar backup/ })).toBeTruthy();
   });
 

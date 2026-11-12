@@ -58,14 +58,18 @@ type Ctx = {
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
 
-type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; children: ReactNode; /** Padrão: VITE_REQUIRE_LOGIN. Existe para testes. */ requireLogin?: boolean };
+type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; /** Muda quando esta aba assume a edição: a sessão é verificada de novo antes de qualquer sincronização. */ epoch?: number; /** Muda quando outra aba gravou: o estado de sincronização é relido do disco. */ metaVersion?: number; children: ReactNode; /** Padrão: VITE_REQUIRE_LOGIN. Existe para testes. */ requireLogin?: boolean };
 
 /**
  * Conta + sincronização. O app continua 100% local sem conta. Com conta e licença ativa, o servidor é a fonte autoritativa
  * e o IndexedDB é o cache. Regras de segurança dos dados: nunca sincroniza antes de carregar os dados locais, nunca mistura
  * contas diferentes no mesmo dispositivo sem decisão do usuário e nunca apaga dados locais sem confirmação.
  */
-export function AccountProvider({ data, setData, ready, children, requireLogin = REQUIRE_LOGIN }: Props) {
+export function AccountProvider({ data, setData, ready: readyProp, epoch = 0, metaVersion = 0, children, requireLogin = REQUIRE_LOGIN }: Props) {
+  // Depois de assumir a edição, a sincronização só começa quando a sessão (cookie, compartilhado entre abas) foi verificada de novo: uma aba que ficou
+  // em consulta pode estar com uma identidade antiga, e sincronizar com ela poderia misturar dados de contas.
+  const [verified, setVerified] = useState(0);
+  const ready = readyProp && verified === epoch;
   const base = safeApiBase(API_URL);
   const auth = useMemo(() => (base ? createAuthClient(base) : null), [base]);
   const csrfRef = useRef<string | undefined>(undefined);
@@ -104,15 +108,17 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
   const conflicts = status === 'signed-in' && session && (!conflictState.owner || conflictState.owner === session.user.id) ? conflictState.list : [];
   const pendingConflicts = conflicts.filter(isPendingConflict);
 
-  useEffect(() => { loadSyncMeta().then(m => { metaRef.current = m; setConflicts(m.conflicts); }).catch(() => { metaRef.current = emptyMeta(); }); }, []);
+  useEffect(() => { loadSyncMeta().then(m => { metaRef.current = m; setConflicts(m.conflicts); }).catch(() => { metaRef.current = emptyMeta(); }); }, [metaVersion]);
+  useEffect(() => { if (epoch > 0) { setSync({ phase: 'idle', blocked: null }); blockedRef.current = null; failures.current = 0; } }, [epoch]);
   useEffect(() => {
-    if (!auth) return;
+    if (!auth) { setVerified(epoch); return; }
     let alive = true, timer: ReturnType<typeof setTimeout> | undefined, tries = 0;
     const check = (): Promise<void> => auth.currentSession().then(r => {
       if (!alive) return;
       const down = !r.ok && r.reason === 'network';
       setNetworkDown(down);
       setSession(r.ok ? r.value : undefined);
+      setVerified(epoch);
       // Sem rede ao abrir: confirma a sessão de novo sozinho (com espera crescente), sem depender do evento `online`.
       clearTimeout(timer);
       if (down) timer = setTimeout(() => { void check(); }, retryDelayMs(tries++)); else tries = 0;
@@ -124,7 +130,7 @@ export function AccountProvider({ data, setData, ready, children, requireLogin =
     const onWake = () => { if (networkDownRef.current) again(); };
     window.addEventListener('focus', onWake); document.addEventListener('visibilitychange', onWake);
     return () => { alive = false; clearTimeout(timer); window.removeEventListener('online', onOnline); window.removeEventListener('focus', onWake); document.removeEventListener('visibilitychange', onWake); };
-  }, [auth, setSession]);
+  }, [auth, setSession, epoch]);
   // Registra o último acesso verificado (só a hora; nenhum dado pessoal) para a tolerância offline.
   useEffect(() => { if (entitled) writeLastAccess(Date.now()); }, [entitled]);
   const access: Access = !requireLogin ? 'open'

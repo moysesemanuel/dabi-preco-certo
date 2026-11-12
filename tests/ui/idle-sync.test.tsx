@@ -147,7 +147,7 @@ describe('Consumo estimado de uma aba (relógio simulado)', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval', 'Date'] });
     await act(async () => { await vi.advanceTimersByTimeAsync(hours * 3_600_000); });
     expect(syncCalls().length - base).toBe(expected); // sem polling: nenhum temporizador periódico
-    for (let i = 0; i < 20; i++) { await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(50); }); }
+    for (let i = 0; i < 20; i++) { await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); window.dispatchEvent(new Event('focus')); await vi.advanceTimersByTimeAsync(50); for (let k = 0; k < 400 && inflight > 0; k++) await vi.advanceTimersByTimeAsync(10); await vi.advanceTimersByTimeAsync(50); }); } // espera o ciclo terminar (o Worker de teste leva tempo REAL)
     expect(syncCalls().length - base).toBe(20); // 20 retornos ao app = 20 verificações (1 requisição cada), independentemente de quantas horas passaram
     process.stdout.write(`\nAba ociosa por ${hours} h: ${expected} requisições; +20 retornos de foco: 20 requisições (antes da correção, em desenvolvimento: ≈ ${Math.round(hours * 3600 / 2.5)} pulls)\n`);
   }, 60_000);
