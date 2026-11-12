@@ -30,7 +30,7 @@ Ao mudar qualquer valor, nome ou sinônimo, altere `CATALOG_VERSION` em `catalog
 - **A xícara do USDA é a americana (236,588 mL), não 240 mL.** O catálogo guarda gramas e o volume real da medida; a densidade (g/mL) sai da divisão, e o peso de uma xícara de 240 mL (ou 200/250) é calculado a partir dela. Por isso "1 xícara de farinha" dá ≈ 126,8 g (não 125 g).
 - **Volume, massa e unidade são tipos diferentes** (`kind: 'volume' | 'unit'`); massa↔massa e volume↔volume não dependem do catálogo.
 - **Correspondência por igualdade**, sem fuzzy: ignora maiúsculas, acentos, plural e adjetivos de preparo ("peneirada", "grandes", "sem sal"). Nome incompleto ou genérico ("farinha", "chocolate") só **sugere**; produtos parecidos não se confundem ("leite" ≠ "leite condensado", "creme de leite" de caixinha ≠ "creme de leite fresco"). Um teste garante que nenhum nome/sinônimo aponta para dois itens.
-- **Nada é aplicado sozinho:** a referência só entra no ingrediente quando a pessoa clica em "Usar medidas de referência" (ou confirma uma importação de receita).
+- **Nada é aplicado às escondidas:** ao cadastrar um ingrediente NOVO com nome conhecido, a referência encontrada aparece no resumo ("Medidas encontradas") e é gravada junto, com a opção de ajustar ou remover. Ao EDITAR um ingrediente existente, nenhuma referência é adotada sozinha: só o que a pessoa escolher em "Ajustar". A importação de receita também só adota ao confirmar.
 - **Itens com medidas incoerentes na fonte** (ex.: creme azedo, 12 g/colher de sopa × 230 g/xícara) usam só a medida coerente; um teste confere que as medidas do mesmo alimento batem entre si (±8%).
 - **Produtos análogos, não idênticos** (açúcar mascavo ← *brown sugar*, fubá ← *cornmeal*, glucose de milho ← *corn syrup*) trazem uma observação visível.
 - **Ingrediente fora do catálogo** continua cadastrável; a pessoa informa os pesos ou deixa em branco (o app recusa o cálculo em vez de assumir).
@@ -61,3 +61,7 @@ Ordem de publicação: **1)** aplicar a migração (`npm run d1 -- migrate --env
 - A fonte é americana: alimentos brasileiros sem equivalente no USDA (polvilho, farinha de mandioca, requeijão, goiabada, achocolatado, creme de leite de caixinha, coco ralado sem açúcar) **não** estão no catálogo, e não foram aproximados por outros.
 - O ovo usa o peso do ovo sem casca por tamanho (grande = 50 g); ovos brasileiros costumam ser classificados de outra forma.
 - A apresentação padrão é uma sugestão; a pessoa pode trocá-la.
+
+## Interface (cadastro de ingredientes)
+
+O formulário tem só nome, quantidade, unidade e preço, mais um **resumo discreto** do que o motor de cálculo realmente usa: *Medidas encontradas* (≈, referência aproximada), *Medida personalizada* (=) ou *Medidas não disponíveis*. "Ajustar" / "Adicionar medida" abre um diálogo (rascunho: nada muda até **Aplicar**; **Cancelar**, Esc e fechar descartam) com apresentação, peso da xícara e da unidade, busca de referência e "Ver fonte". "Restaurar valores do catálogo" (apaga só as medidas informadas) e "Remover referência" (desfaz a associação e mantém o que foi informado) ficam em "Mais opções", cada um com a consequência explicada. IDs, versões e fontes só aparecem sob demanda.

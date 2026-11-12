@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../../src/App';
+import { makeRef } from '../../src/features/measurement/catalog';
 import { saveData } from '../../src/storage/db';
 import { resetStorage } from './setup';
 
@@ -17,86 +18,166 @@ const typeName = async (u: ReturnType<typeof user>, text: string) => { await u.c
 const save = async (u: ReturnType<typeof user>, price = '6') => { fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: price } }); await u.click(screen.getByRole('button', { name: /Adicionar ingrediente|Salvar alterações/ })); };
 const row = (name: string) => screen.getByText(name, { selector: 'td' }).closest('tr')!;
 
-describe('Cadastro de ingrediente com medidas de referência', () => {
-  it('o formulário principal tem só nome, quantidade, unidade e preço; as medidas ficam numa área secundária e opcional', async () => {
+const summary = () => screen.getByRole('group', { name: 'Medidas do ingrediente' });
+const adjust = async (u: ReturnType<typeof user>) => { await u.click(within(summary()).getByRole('button', { name: /Ajustar|Adicionar medida/ })); return screen.findByRole('dialog', { name: 'Ajustar medidas' }); };
+const apply = async (u: ReturnType<typeof user>) => { await u.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Aplicar' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); };
+const cupField = () => screen.getByLabelText('Quanto pesa uma xícara (em gramas)?') as HTMLInputElement;
+const flourSeed = (extra: Record<string, unknown> = {}) => ({ id: 'f', name: 'Farinha de trigo', purchaseQuantity: 1, unit: 'kg' as const, purchasePrice: 6, ...extra });
+const seed = (ingredients: unknown[], recipes: unknown[] = [], orders: unknown[] = []) => saveData({ schemaVersion: 3, settings: { cupSizeMl: 240 }, ingredients, recipes, orders } as never);
+
+describe('Cadastro simples de ingrediente', () => {
+  it('cadastra com só os quatro campos: sem abrir ajustes, sem jargão e sem detalhes técnicos na tela', async () => {
     const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
     const form = screen.getByLabelText('Nome do ingrediente').closest('form')!;
-    expect(within(form).getByLabelText('Quantidade comprada')).toBeTruthy(); expect(within(form).getByLabelText('Preço pago (R$)')).toBeTruthy();
-    const details = within(form).getByText(/Medidas e equivalências/).closest('details')!;
-    expect(details.hasAttribute('open')).toBe(false);
-    expect(screen.queryByText(/densidade/i)).toBeNull(); // sem jargão técnico
-    await typeName(u, 'Ingrediente totalmente desconhecido'); await save(u); // salva sem preencher nenhuma equivalência
+    expect(form.querySelectorAll('input, select').length).toBe(4); // nome, quantidade, unidade, preço (nenhum campo de medida)
+    expect(form.querySelector('details')).toBeNull();
+    expect(within(summary()).getByText('Medidas não disponíveis')).toBeTruthy();
+    expect(within(summary()).getByText('Você pode cadastrar este ingrediente normalmente.')).toBeTruthy();
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await typeName(u, 'Ingrediente totalmente desconhecido'); await save(u);
     expect(await screen.findByText('Ingrediente cadastrado.')).toBeTruthy();
-    expect(within(row('Ingrediente totalmente desconhecido')).queryByText(/xícara/)).toBeNull();
+    expect(row('Ingrediente totalmente desconhecido').textContent).not.toMatch(/xícara/);
+    for (const t of [/densidade/i, /USDA/, /catálogo/i, /FDC/, /versão/i]) expect(within(screen.getByRole('main')).queryByText(t)).toBeNull();
   });
 
-  it('encontra o ingrediente (sem acento, maiúsculas), oferece a referência e mostra fonte e aviso de valor aproximado', async () => {
+  it('nome conhecido: o resumo mostra a referência encontrada (o que será usado) e salva sem abrir nada', async () => {
     const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
     await typeName(u, 'FARINHA de Trigo');
-    const notice = await screen.findByText(/Encontramos medidas de referência para/);
-    expect(notice.textContent).toContain('Farinha de trigo');
-    await u.click(screen.getByRole('button', { name: 'Usar medidas de referência' }));
-    const form = screen.getByLabelText('Nome do ingrediente').closest('form')!;
-    expect(within(form).getByText('valor aproximado')).toBeTruthy();
-    await u.click(within(form).getByText('Ver fonte'));
-    expect(form.textContent).toMatch(/USDA FoodData Central/); expect(form.textContent).toMatch(/CC0/);
-    expect(form.textContent).toMatch(/1 xícara ≈ 126,8 g \(referência\)/);
-    await save(u);
-    await screen.findByText('Ingrediente cadastrado.');
-    expect(row('FARINHA de Trigo').textContent).toMatch(/1 xícara ≈ 126,8 g \(referência\)/);
-  });
-
-  it('o usuário personaliza o peso (prioridade sobre a referência) e pode restaurar a referência', async () => {
-    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
-    await typeName(u, 'Açúcar'); await u.click(await screen.findByRole('button', { name: 'Usar medidas de referência' }));
-    fireEvent.change(screen.getByLabelText('Quanto pesa uma xícara (em gramas)?'), { target: { value: '180' } });
-    expect(screen.getByText('O valor que você informou vale mais do que a referência.')).toBeTruthy();
+    await waitFor(() => expect(within(summary()).getByText('Medidas encontradas')).toBeTruthy());
+    expect(summary().textContent).toMatch(/1 xícara ≈ 126,8 g/); expect(summary().textContent).toMatch(/Referência culinária aproximada/);
+    expect(summary().textContent).not.toMatch(/padrao|farinha-de-trigo|2026/); // sem ids nem versões
+    expect(within(summary()).getByRole('button', { name: 'Ajustar' })).toBeTruthy();
     await save(u); await screen.findByText('Ingrediente cadastrado.');
-    expect(row('Açúcar').textContent).toMatch(/1 xícara ≈ 180 g \(informado por você\)/);
-    await u.click(screen.getByRole('button', { name: 'Editar Açúcar' }));
-    expect((screen.getByLabelText('Quanto pesa uma xícara (em gramas)?') as HTMLInputElement).value).toBe('180'); // só o valor do usuário; a referência não é "copiada" para o campo
-    await u.click(screen.getByRole('button', { name: 'Restaurar referência' }));
-    await u.click(screen.getByRole('button', { name: /Salvar alterações/ }));
-    await screen.findByText(/Ingrediente atualizado/);
-    expect(row('Açúcar').textContent).toMatch(/\(referência\)/); expect(row('Açúcar').textContent).not.toMatch(/informado por você/);
+    expect(row('FARINHA de Trigo').textContent).toMatch(/1 xícara ≈ 126,8 g/);
   });
 
-  it('nome ambíguo só sugere opções (nunca escolhe) e ingrediente desconhecido avisa sem bloquear', async () => {
+  it('nome incompleto ou desconhecido: "Medidas não disponíveis"; nada é inventado nem aplicado', async () => {
     const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
     await typeName(u, 'farinha');
-    const group = await screen.findByRole('group', { name: 'Medidas de referência parecidas' });
-    expect(within(group).getByRole('button', { name: 'Farinha de trigo' })).toBeTruthy(); expect(within(group).getByRole('button', { name: 'Farinha de arroz' })).toBeTruthy();
-    expect(screen.queryByText(/Encontramos medidas de referência para/)).toBeNull();
-    await typeName(u, 'Ingrediente raro xyz');
-    await u.click(screen.getByText(/Medidas e equivalências/));
-    expect(screen.getByText(/Não encontramos uma referência para este ingrediente/)).toBeTruthy();
-    await save(u); expect(await screen.findByText('Ingrediente cadastrado.')).toBeTruthy();
-  });
-
-  it('apresentações diferentes: o usuário escolhe a correta (ex.: açúcar de confeiteiro peneirado ou não)', async () => {
-    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
-    await typeName(u, 'Açúcar de confeiteiro');
-    const select = await screen.findByRole('combobox', { name: 'Apresentação' }) as HTMLSelectElement;
-    expect([...select.options].map(o => o.text)).toEqual(['Sem peneirar', 'Peneirado']);
-    await u.selectOptions(select, 'peneirado');
-    await u.click(screen.getByRole('button', { name: 'Usar medidas de referência' }));
+    expect(within(summary()).getByText('Medidas não disponíveis')).toBeTruthy(); expect(within(summary()).getByRole('button', { name: 'Adicionar medida' })).toBeTruthy();
     await save(u); await screen.findByText('Ingrediente cadastrado.');
-    expect(row('Açúcar de confeiteiro').textContent).toMatch(/1 xícara ≈ 101,4 g/); // 100 g por xícara americana → 240 mL
+    expect(row('farinha').textContent).not.toMatch(/xícara/);
   });
 
-  it('mudar as medidas avisa quais receitas mudaram de custo (sem tocar encomendas) e não altera valores por conta própria', async () => {
-    await saveData({ schemaVersion: 3, settings: { cupSizeMl: 240 }, ingredients: [{ id: 'f', name: 'Farinha de trigo', purchaseQuantity: 1, unit: 'kg', purchasePrice: 6, densityGPerMl: 0.5 }],
-      recipes: [{ id: 'r', name: 'Bolo de teste', yield: 10, items: [{ ingredientId: 'f', quantity: 2, unit: 'xic' }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 30 }],
-      orders: [{ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 10, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: { costPerUnit: 0.24, capturedAt: '2026-11-11T10:00:00.000Z' } }] });
+  it('"Adicionar medida" abre os ajustes com busca de referência; escolher uma e aplicar atualiza o resumo', async () => {
     const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
-    expect(row('Farinha de trigo').textContent).toMatch(/1 xícara ≈ 120 g \(informado por você\)/); // nada mudou sozinho: continua o valor antigo
+    await typeName(u, 'farinha'); await adjust(u);
+    await u.type(screen.getByRole('combobox', { name: 'Buscar uma referência' }), 'farinha de arroz');
+    await u.click(await screen.findByRole('option', { name: /Farinha de arroz/ }));
+    await apply(u);
+    expect(summary().textContent).toMatch(/Medidas encontradas/); expect(summary().textContent).toMatch(/1 xícara ≈ 160,3 g/);
+  });
+
+  it('medida personalizada: aparece como tal ("="), tem mensagem curta e o resumo reflete o que será usado', async () => {
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await typeName(u, 'Açúcar'); await adjust(u);
+    fireEvent.change(cupField(), { target: { value: '180' } });
+    expect(within(screen.getByRole('dialog')).getByText('Você está usando uma medida personalizada.')).toBeTruthy();
+    await apply(u);
+    expect(within(summary()).getByText('Medida personalizada')).toBeTruthy(); expect(summary().textContent).toMatch(/1 xícara = 180 g/);
+    await save(u); await screen.findByText('Ingrediente cadastrado.');
+    expect(row('Açúcar').textContent).toMatch(/1 xícara = 180 g/);
+    expect(screen.queryByText(/vale mais do que a referência/)).toBeNull();
+  });
+
+  it('editar: preserva a personalização, não a troca pela referência e permite restaurar a referência explicitamente', async () => {
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await typeName(u, 'Açúcar'); await adjust(u); fireEvent.change(cupField(), { target: { value: '180' } }); await apply(u); await save(u); await screen.findByText('Ingrediente cadastrado.');
+    await u.click(screen.getByRole('button', { name: 'Editar Açúcar' }));
+    expect(summary().textContent).toMatch(/Medida personalizada/); expect(summary().textContent).toMatch(/1 xícara = 180 g/); // continua o valor da pessoa
+    await adjust(u);
+    expect(cupField().value).toBe('180');
+    await u.click(screen.getByText('Mais opções'));
+    expect(screen.getByText(/Apaga as medidas que você informou e volta a usar a referência aproximada/)).toBeTruthy();
+    await u.click(screen.getByRole('button', { name: 'Restaurar valores do catálogo' }));
+    expect(cupField().value).toBe('');
+    await apply(u);
+    expect(summary().textContent).toMatch(/Medidas encontradas/); expect(summary().textContent).toMatch(/≈ 20[23],\d g/);
+    await u.click(screen.getByRole('button', { name: /Salvar alterações/ })); await screen.findByText(/Ingrediente atualizado/);
+    expect(row('Açúcar').textContent).toMatch(/≈ 20[23],\d g/); expect(row('Açúcar').textContent).not.toMatch(/=/);
+  });
+
+  it('remover referência é diferente de restaurar: desfaz a associação e mantém o que a pessoa informou', async () => {
+    await seed([flourSeed({ catalogRef: makeRef('farinha-de-trigo'), gramsPerUnit: 70 })]);
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
     await u.click(screen.getByRole('button', { name: 'Editar Farinha de trigo' }));
-    await u.click(screen.getByRole('button', { name: 'Usar medidas de referência' }));
-    fireEvent.change(screen.getByLabelText('Quanto pesa uma xícara (em gramas)?'), { target: { value: '' } }); // remove o valor informado: passa a valer a referência
+    expect(summary().textContent).toMatch(/1 xícara ≈ 126,8 g/); expect(summary().textContent).toMatch(/1 unidade = 70 g/);
+    await adjust(u); await u.click(screen.getByText('Mais opções'));
+    expect(screen.getByText(/Desfaz a associação com “Farinha de trigo”/)).toBeTruthy();
+    await u.click(screen.getByRole('button', { name: 'Remover referência' }));
+    await apply(u);
+    expect(summary().textContent).toMatch(/Medida personalizada/); expect(summary().textContent).toMatch(/1 unidade = 70 g/); expect(summary().textContent).not.toMatch(/xícara/);
+    await u.click(screen.getByRole('button', { name: /Salvar alterações/ })); await screen.findByText(/Ingrediente atualizado/);
+    expect(row('Farinha de trigo').textContent).toMatch(/1 unidade = 70 g/); expect(row('Farinha de trigo').textContent).not.toMatch(/xícara/);
+  });
+
+  it('a apresentação escolhida é preservada ao salvar e ao editar de novo', async () => {
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await typeName(u, 'Açúcar de confeiteiro'); await adjust(u);
+    const sel = screen.getByRole('combobox', { name: 'Apresentação' }) as HTMLSelectElement;
+    expect([...sel.options].map(o => o.text)).toEqual(['Sem peneirar', 'Peneirado']);
+    await u.selectOptions(sel, 'peneirado'); await apply(u);
+    expect(summary().textContent).toMatch(/Peneirado/); expect(summary().textContent).toMatch(/≈ 101,4 g/);
+    await save(u); await screen.findByText('Ingrediente cadastrado.');
+    await u.click(screen.getByRole('button', { name: 'Editar Açúcar de confeiteiro' }));
+    expect(summary().textContent).toMatch(/Peneirado/); expect(summary().textContent).toMatch(/≈ 101,4 g/);
+    await adjust(u); expect((screen.getByRole('combobox', { name: 'Apresentação' }) as HTMLSelectElement).value).toBe('peneirado');
+  });
+
+  it('cancelar os ajustes (botão, Esc ou fechar) não altera nada e devolve o foco ao botão de origem', async () => {
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await typeName(u, 'Açúcar');
+    const before = summary().textContent;
+    let dlg = await adjust(u); const opener = within(summary()).getByRole('button', { name: 'Ajustar' });
+    fireEvent.change(cupField(), { target: { value: '999' } });
+    await u.click(within(dlg).getByRole('button', { name: 'Cancelar' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull()); expect(summary().textContent).toBe(before);
+    dlg = await adjust(u); fireEvent.change(cupField(), { target: { value: '999' } });
+    await u.keyboard('{Escape}'); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(summary().textContent).toBe(before); expect(document.activeElement).toBe(within(summary()).getByRole('button', { name: 'Ajustar' })); void opener;
+    await adjust(u); await u.click(screen.getByRole('button', { name: 'Fechar sem salvar' })); await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await adjust(u); expect(cupField().value).toBe(''); // o rascunho descartado não volta
+  });
+
+  it('cancelar a edição do ingrediente não modifica o registro', async () => {
+    await seed([flourSeed({ densityGPerMl: 0.5 })]);
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await u.click(screen.getByRole('button', { name: 'Editar Farinha de trigo' }));
+    await adjust(u); fireEvent.change(cupField(), { target: { value: '300' } }); await apply(u);
+    await u.click(screen.getByRole('button', { name: /Cancelar/ }));
+    expect(row('Farinha de trigo').textContent).toMatch(/1 xícara = 120 g/); // o registro continua igual
+  });
+
+  it('diálogo acessível: modal rotulado, foco dentro, Tab circula sem sair e validação de números', async () => {
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    await typeName(u, 'Açúcar'); const dlg = await adjust(u);
+    expect(dlg.getAttribute('aria-modal')).toBe('true'); expect(dlg.contains(document.activeElement)).toBe(true);
+    for (let n = 0; n < 12; n++) { await u.tab(); expect(dlg.contains(document.activeElement)).toBe(true); }
+    fireEvent.change(cupField(), { target: { value: 'abc' } });
+    expect(within(dlg).getByRole('alert').textContent).toMatch(/maiores que zero/); expect((within(dlg).getByRole('button', { name: 'Aplicar' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('mudar as medidas avisa quais receitas mudaram de custo (sem tocar encomendas); nada muda por conta própria', async () => {
+    await seed([flourSeed({ densityGPerMl: 0.5 })],
+      [{ id: 'r', name: 'Bolo de teste', yield: 10, items: [{ ingredientId: 'f', quantity: 2, unit: 'xic' }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 30 }],
+      [{ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 10, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: { costPerUnit: 0.24, capturedAt: '2026-11-11T10:00:00.000Z' } }]);
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    expect(row('Farinha de trigo').textContent).toMatch(/1 xícara = 120 g/); // compatibilidade: o valor existente continua como era
+    await u.click(screen.getByRole('button', { name: 'Editar Farinha de trigo' }));
+    expect(summary().textContent).toMatch(/Medida personalizada/); // editar não adota referência sozinho
+    await adjust(u); await u.click(screen.getByRole('button', { name: /Usar referência de “Farinha de trigo”/ }));
+    fireEvent.change(cupField(), { target: { value: '' } }); await apply(u);
     await u.click(screen.getByRole('button', { name: /Salvar alterações/ }));
     const msg = await screen.findByText(/as medidas mudaram o cálculo/);
-    expect(msg.textContent).toMatch(/1 receita mudou de custo por unidade: Bolo de teste \(R\$\s0,14 → R\$\s0,15\)/);
-    expect(msg.textContent).toMatch(/Encomendas e custos já registrados não mudaram/);
+    expect(msg.textContent).toMatch(/1 receita mudou de custo por unidade: Bolo de teste \(R\$\s0,14 → R\$\s0,15\)/); expect(msg.textContent).toMatch(/Encomendas e custos já registrados não mudaram/);
+  });
+
+  it('ingredientes existentes (com valor antigo, com referência e sem nada) aparecem corretamente na lista', async () => {
+    await seed([flourSeed({ id: 'a', name: 'Antigo', densityGPerMl: 0.5 }), flourSeed({ id: 'b', name: 'Com referência', catalogRef: makeRef('farinha-de-trigo') }), flourSeed({ id: 'c', name: 'Sem medidas' })]);
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Ingredientes');
+    expect(row('Antigo').textContent).toMatch(/1 xícara = 120 g/); expect(row('Com referência').textContent).toMatch(/1 xícara ≈ 126,8 g/); expect(row('Sem medidas').textContent).not.toMatch(/xícara/);
+    await u.click(screen.getByRole('button', { name: 'Editar Sem medidas' }));
+    expect(within(summary()).getByText('Medidas não disponíveis')).toBeTruthy();
   });
 });
 

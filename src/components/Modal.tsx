@@ -6,7 +6,7 @@ const FOCUSABLE = 'a[href],button:not([disabled]),input:not([disabled]),select:n
  * Janela de diálogo acessível: foco preso dentro dela, Esc fecha ("decidir depois"), o foco volta a quem abriu e a página
  * atrás fica inerte para leitores de tela. Em telas pequenas ocupa a largura toda.
  */
-export function Modal({ title, titleId, onClose, children }: { title: ReactNode; titleId: string; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, titleId, onClose, children, closeLabel = 'Fechar e decidir depois' }: { title: ReactNode; titleId: string; onClose: () => void; children: ReactNode; closeLabel?: string }) {
   const box = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose); closeRef.current = onClose;
   useEffect(() => {
@@ -29,7 +29,7 @@ export function Modal({ title, titleId, onClose, children }: { title: ReactNode;
   }, []);
   return <div className="modal-backdrop" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <div className="modal" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={box}>
-      <div className="modal-head"><h2 id={titleId}>{title}</h2><button type="button" className="secondary" onClick={onClose} aria-label="Fechar e decidir depois">Fechar</button></div>
+      <div className="modal-head"><h2 id={titleId}>{title}</h2><button type="button" className="secondary" onClick={onClose} aria-label={closeLabel}>Fechar</button></div>
       {children}
     </div>
   </div>;

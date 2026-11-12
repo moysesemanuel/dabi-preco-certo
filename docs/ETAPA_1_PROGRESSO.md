@@ -239,3 +239,7 @@ Testes: `tests/conflict-resolution.test.ts` (motor + Worker real + IndexedDB), `
 ## Etapa 3: catálogo de medidas e conversor
 
 Catálogo local (~50 ingredientes, USDA FoodData Central em domínio público), busca segura por nome, referência adotada com valores congelados (`Ingredient.catalogRef`, valor informado pela pessoa tem prioridade), formulário de ingredientes simplificado com a área opcional "Medidas e equivalências", conversor reformulado (frações, exato × convencional × aproximado, ajuste temporário), aviso de impacto nas receitas e migração `0007_catalog_ref.sql` (preparada, **não aplicada**). Fontes, licenças, regras e limitações em `docs/CATALOGO_DE_MEDIDAS.md`.
+
+## Etapa 3 (UX): cadastro de ingredientes simplificado
+
+Formulário reduzido a nome, quantidade, unidade e preço + resumo compacto das medidas (`MeasuresSummary`); ajustes avançados sob demanda em diálogo com rascunho (`MeasuresDialog`, reaproveita `Modal`). Sem mudanças no catálogo, motor de conversão, preços, sincronização ou dados. Ingrediente novo com nome conhecido já grava a referência mostrada no resumo; editar nunca adota referência sozinho. Testes em `tests/ui/measures.test.tsx`.
