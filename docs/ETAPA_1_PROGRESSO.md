@@ -235,3 +235,7 @@ Testes: `tests/ui/offline-sync.test.tsx`, `tests/sync-retry.test.ts`, `tests/ui/
 **Interface.** `ConflictBanner` (App) derivado do estado persistido, `ConflictDialog` + `Modal` (comparação, confirmação, foco/Esc/"decidir depois"), `FinancialConflict` (extraído do painel de Configurações e reutilizado), indicador âmbar com a quantidade, painel de Configurações com os conflitos pendentes e o histórico. Conflitos de outra conta guardados no aparelho nunca aparecem.
 
 Testes: `tests/conflict-resolution.test.ts` (motor + Worker real + IndexedDB), `tests/ui/conflicts.test.tsx`, `tests/sync-engine.test.ts`, `tests/ui/sync-indicator.test.tsx`.
+
+## Etapa 3: catálogo de medidas e conversor
+
+Catálogo local (~50 ingredientes, USDA FoodData Central em domínio público), busca segura por nome, referência adotada com valores congelados (`Ingredient.catalogRef`, valor informado pela pessoa tem prioridade), formulário de ingredientes simplificado com a área opcional "Medidas e equivalências", conversor reformulado (frações, exato × convencional × aproximado, ajuste temporário), aviso de impacto nas receitas e migração `0007_catalog_ref.sql` (preparada, **não aplicada**). Fontes, licenças, regras e limitações em `docs/CATALOGO_DE_MEDIDAS.md`.

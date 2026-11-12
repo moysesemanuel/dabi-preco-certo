@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowRight, BookOpen, ClipboardPaste, Pencil, Plus, Ruler, Save, Trash2, X } from 'lucide-react';
 import { applyEquivalences, updateRecipe } from '../domain/edit';
+import { effectiveEquivalence } from '../domain/equivalence';
 import { money, recipeCost } from '../domain/pricing';
 import type { MeasureUnit, Recipe, RecipeItem } from '../domain/types';
 import { Field } from '../components/Field';
@@ -96,7 +97,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
               const patch = (change: Partial<RecipeItem>) => setItems(list => list.map((x, i) => i === index ? { ...x, ...change } : x));
               let hint = '';
               if (ing && unit !== ing.unit && item.quantity > 0) {
-                const r = convert({ quantity: item.quantity, from: unit, to: ing.unit, densityGPerMl: ing.densityGPerMl, gramsPerUnit: ing.gramsPerUnit, cupSizeMl });
+                const r = convert({ quantity: item.quantity, from: unit, to: ing.unit, ...(({ densityGPerMl, gramsPerUnit }) => ({ densityGPerMl, gramsPerUnit }))(effectiveEquivalence(ing)), cupSizeMl });
                 hint = r.success ? (() => { const f = friendlyAmount(r.value, ing.unit); return `${r.approximate ? '≈' : '='} ${formatQuantity(f.value, f.unit)} ${unitText(f.unit, f.value)} (usado no cálculo do custo)`; })() : conversionErrorMessage(r.error, unit, ing.unit, ing.name);
               }
               return <div key={index} style={{ marginBottom: 10 }}>
