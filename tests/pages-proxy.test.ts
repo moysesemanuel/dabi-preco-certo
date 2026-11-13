@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyPush } from '../shared/sync';
 import { proxy, type ProxyEnv } from '../functions/_shared/proxy';
 import { makeServer, type Server } from './helpers/server';
-import { ENVIRONMENTS, parseArgs, validateDist, verifyProductionRelease } from '../scripts/pages.mjs';
+import { ENVIRONMENTS, parseArgs, validateDist, verifyProductionRelease, verifyStagingRelease } from '../scripts/pages.mjs';
 
 const HOST = 'https://precocerto.dabitech.com.br';
 const req = (path: string, init: RequestInit & { host?: string } = {}) => new Request(`${init.host ?? HOST}${path}`, init);
@@ -160,22 +160,27 @@ describe('Ambientes separados (script de publicação)', () => {
   });
   it('sem --publish nada é publicado; publicar em produção exige confirmação com o nome do projeto', () => {
     expect(parseArgs(['deploy', 'staging'])).toMatchObject({ ok: true, plan: { publish: false } });
-    expect(parseArgs(['deploy', 'staging', '--publish'])).toMatchObject({ ok: true, plan: { publish: true, config: { project: 'dabi-preco-certo-staging' } } });
+    expect(parseArgs(['deploy', 'staging', '--publish']).ok).toBe(false);
+    expect(parseArgs(['deploy', 'staging', '--publish', '--approved-commit', 'a'.repeat(40)]))
+      .toMatchObject({ ok: true, plan: { publish: true, approvedCommit: 'a'.repeat(40), config: { project: 'dabi-preco-certo-staging' } } });
     expect(parseArgs(['deploy', 'production', '--publish']).ok).toBe(false); expect(parseArgs(['deploy', 'production', '--publish', '--confirm-production', 'dabi-preco-certo-staging']).ok).toBe(false);
     expect(parseArgs(['deploy', 'production', '--publish', '--confirm-production', 'dabi-preco-certo']).ok).toBe(false);
     expect(parseArgs(['deploy', 'production', '--publish', '--confirm-production', 'dabi-preco-certo', '--approved-commit', 'a'.repeat(40)])).toMatchObject({ ok: true, plan: { publish: true, approvedCommit: 'a'.repeat(40), config: { project: 'dabi-preco-certo' } } });
     expect(parseArgs(['deploy', 'staging', '--confirm-production', 'x']).ok).toBe(false); expect(parseArgs(['build', 'staging', '--publish']).ok).toBe(false);
   });
-  it('só aceita o commit aprovado em main com checkout limpo antes do upload', () => {
+  it('staging também exige commit aprovado e checkout limpo; produção exige main', () => {
     const dir = mkdtempSync(join(tmpdir(), 'dabi-release-'));
     const git = (...args: string[]) => execFileSync('git', args, { cwd: dir, encoding: 'utf8' }).trim();
     try {
       git('init', '-b', 'main'); git('config', 'user.email', 'test@example.invalid'); git('config', 'user.name', 'Test'); git('config', 'commit.gpgsign', 'false');
       writeFileSync(join(dir, 'release.txt'), 'aprovado'); git('add', 'release.txt'); git('commit', '-m', 'release fixture');
       const sha = git('rev-parse', 'HEAD');
+      expect(verifyStagingRelease(dir, sha)).toEqual([]);
       expect(verifyProductionRelease(dir, sha)).toEqual([]);
+      expect(verifyStagingRelease(dir, 'a'.repeat(40)).join()).toContain('commit');
       expect(verifyProductionRelease(dir, 'a'.repeat(40)).join()).toContain('commit');
       writeFileSync(join(dir, 'release.txt'), 'alterado');
+      expect(verifyStagingRelease(dir, sha).join()).toContain('limpo');
       expect(verifyProductionRelease(dir, sha).join()).toContain('limpo');
       git('checkout', '--', 'release.txt'); git('switch', '-c', 'feature');
       expect(verifyProductionRelease(dir, sha).join()).toContain('main');

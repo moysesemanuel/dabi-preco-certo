@@ -29,7 +29,7 @@ DNS: Vercel (nameservers atuais) ── CNAME precocerto → dabi-preco-certo.pa
 | Service Binding `API` → | Worker `dabi-orcamentos-staging` (D1 de homologação) | Worker `dabi-orcamentos` (D1 de produção, **ainda não criado**) |
 | Variável `APP_ENV` (no projeto Pages) | `staging` | `production` |
 | `ALLOWED_ORIGINS` do Worker | só o Pages de staging e localhost | **só** `https://precocerto.dabitech.com.br` |
-| Script | `npm run pages:deploy:staging` | `npm run pages:deploy:production -- --confirm-production dabi-preco-certo` |
+| Script | `npm run pages:deploy:staging -- --approved-commit <SHA40-aprovado>` | `npm run pages:deploy:production -- --confirm-production dabi-preco-certo --approved-commit <SHA40-aprovado>` |
 
 Camadas de proteção contra engano:
 1. **Script com ambiente obrigatório**: sem `staging`/`production` no comando, nada roda; `deploy` sem `--publish` só constrói e valida; produção exige `--confirm-production dabi-preco-certo`.
@@ -73,7 +73,7 @@ npx wrangler pages project create dabi-preco-certo-staging --production-branch s
 
 # 2. Configurar bindings e variável NO PAINEL (veja §6) e só então publicar:
 npm run pages:deploy:staging:dry      # build + validação, sem enviar
-npm run pages:deploy:staging          # publica (wrangler pages deploy dist --project-name dabi-preco-certo-staging --branch staging)
+npm run pages:deploy:staging -- --approved-commit <SHA40-aprovado>  # publica só o commit aprovado, com checkout limpo
 ```
 
 Conferência (substitua pelo endereço que a Cloudflare mostrar):

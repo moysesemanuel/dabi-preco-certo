@@ -1,5 +1,5 @@
 // Build, validação e publicação do front-end no Cloudflare Pages, com ambiente SEMPRE explícito.
-//   node scripts/pages.mjs build|check|deploy staging|production [--publish] [--confirm-production dabi-preco-certo] [--approved-commit SHA40]
+//   node scripts/pages.mjs build|check|deploy staging|production [--publish] [--approved-commit SHA40] [--confirm-production dabi-preco-certo]
 // Sem --publish nada é enviado à Cloudflare (só build + validação). DNS, segredos, banco e migrações nunca são tocados aqui.
 import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -25,23 +25,25 @@ export function parseArgs(argv) {
   }
   if (publish && command !== 'deploy') return { ok: false, error: '--publish só existe no comando deploy.' };
   if (confirm !== undefined && env !== 'production') return { ok: false, error: '--confirm-production só se aplica a production.' };
-  if (approvedCommit !== undefined && (env !== 'production' || !publish)) return { ok: false, error: '--approved-commit só se aplica à publicação de produção.' };
+  if (approvedCommit !== undefined && (!publish || command !== 'deploy')) return { ok: false, error: '--approved-commit só se aplica a uma publicação.' };
+  if (publish && !/^[0-9a-f]{40}$/i.test(approvedCommit ?? '')) return { ok: false, error: `publicar em ${env} exige --approved-commit com o SHA completo de 40 caracteres.` };
   if (publish && env === 'production' && confirm !== ENVIRONMENTS.production.project) return { ok: false, error: `publicar em PRODUÇÃO exige --confirm-production ${ENVIRONMENTS.production.project}.` };
-  if (publish && env === 'production' && !/^[0-9a-f]{40}$/i.test(approvedCommit ?? '')) return { ok: false, error: 'publicar em PRODUÇÃO exige --approved-commit com o SHA completo de 40 caracteres.' };
   return { ok: true, plan: { command, env, publish, approvedCommit, config: ENVIRONMENTS[env] } };
 }
 
-/** Impede marcar um upload direto como `main` quando os arquivos vieram de outra revisão. */
-export function verifyProductionRelease(cwd, approvedCommit) {
+/** Só permite publicar os artefatos do commit aprovado em um checkout limpo. */
+export function verifyRelease(cwd, env, approvedCommit) {
   const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   try {
     const problems = [];
-    if (git('branch', '--show-current') !== ENVIRONMENTS.production.branch) problems.push(`publicação de produção exige a branch ${ENVIRONMENTS.production.branch}.`);
+    if (env === 'production' && git('branch', '--show-current') !== ENVIRONMENTS.production.branch) problems.push(`publicação de produção exige a branch ${ENVIRONMENTS.production.branch}.`);
     if (git('rev-parse', 'HEAD').toLowerCase() !== approvedCommit.toLowerCase()) problems.push('O commit do checkout não é o commit aprovado.');
     if (git('status', '--porcelain', '--untracked-files=all')) problems.push('O checkout precisa estar limpo antes da publicação.');
     return problems;
   } catch { return ['Não foi possível verificar a branch, o commit e a limpeza do checkout com Git.']; }
 }
+export const verifyStagingRelease = (cwd, approvedCommit) => verifyRelease(cwd, 'staging', approvedCommit);
+export const verifyProductionRelease = (cwd, approvedCommit) => verifyRelease(cwd, 'production', approvedCommit);
 
 const walk = dir => readdirSync(dir).flatMap(n => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 
@@ -80,11 +82,11 @@ function run(cmd, args, env = {}) { execFileSync(cmd, args, { stdio: 'inherit', 
 
 function main(argv) {
   const parsed = parseArgs(argv);
-  if (!parsed.ok) { console.error(`Erro: ${parsed.error}\nUso: node scripts/pages.mjs build|check|deploy staging|production [--publish] [--confirm-production dabi-preco-certo] [--approved-commit SHA40]`); return 1; }
+  if (!parsed.ok) { console.error(`Erro: ${parsed.error}\nUso: node scripts/pages.mjs build|check|deploy staging|production [--publish] [--approved-commit SHA40] [--confirm-production dabi-preco-certo]`); return 1; }
   const { command, env, publish, approvedCommit, config } = parsed.plan;
-  if (command === 'deploy' && publish && env === 'production') {
-    const problems = verifyProductionRelease(process.cwd(), approvedCommit);
-    if (problems.length) { console.error(`Publicação de produção recusada:\n${problems.map(p => `  - ${p}`).join('\n')}`); return 1; }
+  if (command === 'deploy' && publish) {
+    const problems = verifyRelease(process.cwd(), env, approvedCommit);
+    if (problems.length) { console.error(`Publicação de ${env} recusada:\n${problems.map(p => `  - ${p}`).join('\n')}`); return 1; }
   }
   console.error(`\n=== pages ${command} ===\n  Ambiente:  ${env}\n  Projeto:   ${config.project}\n  Worker:    ${config.worker} (Service Binding API; configurado no projeto Pages)\n  Endereço:  ${config.url}\n  ${publish ? 'PUBLICA na Cloudflare' : 'Local: nada é enviado à Cloudflare'}\n`);
   if (command === 'build' || command === 'deploy') run('npm', ['run', 'build'], { VITE_API_URL: 'same-origin', VITE_REQUIRE_LOGIN: 'on' }); // anula qualquer .env local

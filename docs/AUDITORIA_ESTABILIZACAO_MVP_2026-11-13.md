@@ -58,7 +58,7 @@ Referências oficiais consultadas em 13/11/2026:
 
 ## Release e pendências
 
-O script de publicação exige ambiente explícito e a publicação de produção exige `main`, checkout limpo, SHA completo aprovado e confirmação pelo nome do projeto. O caminho de staging não exige SHA aprovado nem checkout limpo; não usar para publicar esta revisão até preparar um commit revisado e inspecionar o diff. O staging publicado está atrasado em relação ao HEAD local. Antes de beta: revisar/commitar as correções, publicar staging sob autorização, repetir homologação funcional na revisão nova, acompanhar picos de Rows Written e Worker invocations no dashboard, confirmar política de backup/restauração e conferir contabilização Pages/Service Binding no plano efetivo.
+Na revisão inicial, a publicação de staging não exigia SHA aprovado nem checkout limpo. Corrigi o script para exigir ambos antes de publicar em staging ou produção; produção continua exigindo também branch `main` e confirmação pelo nome do projeto. O staging publicado está atrasado em relação ao HEAD local. Antes de beta: publicar staging sob autorização com SHA explícito, repetir homologação funcional na revisão nova, acompanhar picos de Rows Written e Worker invocations no dashboard, confirmar política de backup/restauração e conferir contabilização Pages/Service Binding no plano efetivo.
 
 ## Veredito desta revisão
 
