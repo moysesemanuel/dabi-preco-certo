@@ -27,6 +27,8 @@ A revisão de código e a suíte existente cobrem código de uso único, expira�
 
 A coordenação local usa Web Locks, BroadcastChannel e compare-and-swap no IndexedDB. A suíte exercita edição concorrente, troca de conta, resposta de push perdida, rebase durante sync, conflito, recuperação offline e idempotência. Os testes de custo confirmam zero chamadas durante aba ociosa simulada por até 24 horas. A observação positiva anterior do IP Pages → Service Binding → Worker é histórica; esta auditoria não repetiu tail nem gerou tráfego além dos GETs acima.
 
+O Worker usa somente `CF-Connecting-IP` para o rate limit por IP, sem confiar em `X-Real-IP` ou `X-Forwarded-For`. Se o cabeçalho estiver ausente, os pedidos usam o identificador comum `unknown`; a proteção por e-mail e o teto global continuam ativos, mas o bucket por IP pode agrupar usuários. A Cloudflare documenta preservação do IP em subrequisições same-zone e substituição por um IP interno fixo em alguns caminhos cross-zone; o teste controlado positivo anterior é evidência pontual para o fluxo observado, não prova geral do caminho de toda requisição. O IP continua sendo uma camada adicional, não a única barreira de autenticação.
+
 ## Financeiro
 
 As fórmulas de custo, margem, snapshots e orçamentos foram mantidas. Foram adicionadas regressões para precisão em centavos e prevenção de sobrepagamento. A suíte de custo usa SQLite local; não é uma medição de D1 nem previsão oficial. O modelo local mostra que, em hipóteses conservadoras próprias do projeto, escritas no D1 podem limitar o número de contas antes de leituras ou requisições; confira premissas antes de usar a projeção comercial.
@@ -52,6 +54,7 @@ Referências oficiais consultadas em 13/11/2026:
 - [Cloudflare Workers — Pricing e Service Bindings](https://developers.cloudflare.com/workers/platform/pricing/)
 - [Cloudflare D1 — Pricing](https://developers.cloudflare.com/d1/platform/pricing/)
 - [Cloudflare D1 — Limits](https://developers.cloudflare.com/d1/platform/limits/)
+- [Cloudflare HTTP headers — `CF-Connecting-IP` em subrequisições](https://developers.cloudflare.com/fundamentals/reference/http-headers/)
 
 ## Release e pendências
 
