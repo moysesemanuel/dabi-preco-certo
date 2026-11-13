@@ -196,6 +196,9 @@ npx vitest run tests/costs   # orçamentos de regressão (rodam também em `npm 
 ### Painel administrativo (Etapa 5)
 Rotas `/api/admin/*`: autorização no servidor, 120 leituras e 30 escritas por minuto por administrador, paginação por cursor (25 por página), uma consulta agregada para os indicadores, auditoria com retenção de 365 dias. Sem polling e sem serviço novo; uso esperado de dezenas de ações por dia (desprezível frente aos limites). Detalhes em `PAINEL_ADMINISTRATIVO.md` §9.
 
+### Publicação no Pages (Etapa 6)
+Cada chamada `/api/*` e `/o/*` passa por uma Pages Function e pelo Worker (Service Binding). Premissa a confirmar: contar como 2 requisições. Nesse caso a capacidade por requisições cai pela metade (≈132 → ≈66 contas a 50%). Arquivos estáticos não consomem cota. Detalhes em `PUBLICACAO_CLOUDFLARE.md` §9.
+
 ## 12. Critérios para considerar upgrade
 
 Considerar quando **qualquer** um ocorrer (Workers Paid: assinatura mínima de US$ 5/mês por conta, mais uso acima do incluído):

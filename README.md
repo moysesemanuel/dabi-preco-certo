@@ -28,6 +28,7 @@ npm test
 - [`docs/SEGURANCA_CHECKLIST.md`](docs/SEGURANCA_CHECKLIST.md): o que está protegido e o que falta.
 - [`docs/IMPLANTACAO_HOMOLOGACAO.md`](docs/IMPLANTACAO_HOMOLOGACAO.md): roteiro de implantação em homologação (não executado).
 - [`docs/ABAS_E_ARMAZENAMENTO.md`](docs/ABAS_E_ARMAZENAMENTO.md): como várias abas do mesmo navegador convivem com o IndexedDB sem perder alterações (uma aba edita; as outras consultam).
+- [`docs/PUBLICACAO_CLOUDFLARE.md`](docs/PUBLICACAO_CLOUDFLARE.md): publicação no Cloudflare Pages (proxy `/api/*` por Service Binding, SPA, staging × produção, DNS na Vercel, rollback e checklist). Nada foi publicado.
 - [`docs/PAINEL_ADMINISTRATIVO.md`](docs/PAINEL_ADMINISTRATIVO.md): painel do proprietário em `/admin` (autorização no servidor, migração 0009, bootstrap do administrador, endpoints, checklist e plano de publicação no mesmo domínio).
 - [`docs/HOMOLOGACAO_PRE_BETA.md`](docs/HOMOLOGACAO_PRE_BETA.md): homologação pré-beta (o que foi testado em navegador real, o que falta, checklist manual e critérios de aprovação).
 - [`docs/AUDITORIA_SEGURANCA_PRE_BETA.md`](docs/AUDITORIA_SEGURANCA_PRE_BETA.md): auditoria de segurança pré-beta (achados, testes negativos, riscos residuais, recomendação).
