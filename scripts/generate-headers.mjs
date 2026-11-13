@@ -1,11 +1,12 @@
-// Gera dist/_headers (Cloudflare Pages) com a política de segurança do app. Roda depois do `vite build`.
+// Gera dist/_headers e dist/_routes.json (Cloudflare Pages) com a política de segurança do app. Roda depois do `vite build`.
 // A única parte que depende do ambiente é a origem da API (VITE_API_URL), liberada em `connect-src`.
 // Sem VITE_API_URL o app é local-only e a política não libera nenhum destino externo.
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 
 const raw = process.env.VITE_API_URL ?? (existsSync('.env.production') ? /^VITE_API_URL=(.*)$/m.exec(readFileSync('.env.production', 'utf8'))?.[1] : '') ?? '';
 let apiOrigin = '';
-if (raw) {
+// `same-origin`: a API é servida no MESMO host do app (Pages Functions em /api/*); nenhum destino externo é liberado.
+if (raw && raw.trim() !== 'same-origin') {
   const u = new URL(raw.trim()); // lança se for inválida: o build falha em vez de publicar uma política errada
   if (u.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(u.hostname)) throw new Error('VITE_API_URL precisa ser https (ou localhost).');
   apiOrigin = u.origin;
@@ -56,4 +57,6 @@ const headers = `# Gerado por scripts/generate-headers.mjs (não edite o arquivo
   Cache-Control: no-store
 `;
 writeFileSync('dist/_headers', headers);
+// Cloudflare Pages: as Functions só rodam onde são necessárias (o resto é estático, sem consumir a cota de Functions).
+writeFileSync('dist/_routes.json', JSON.stringify({ version: 1, include: ['/api/*', '/o/*'], exclude: [] }, null, 2) + '\n');
 console.log(`dist/_headers gerado (connect-src: ${apiOrigin || "somente 'self'"}).`);

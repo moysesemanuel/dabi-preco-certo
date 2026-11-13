@@ -19,7 +19,16 @@
     "rehearse": "REHEARSE_BACKUP=${BACKUP:?informe BACKUP=backups/arquivo.sql} vitest run tests/ops/migration-rehearsal.test.ts",
     "costs": "COST_REPORT=1 vitest run tests/costs/report.test.ts",
     "audit": "npm audit --audit-level=high",
-    "check:secrets": "sh scripts/check-secrets.sh"
+    "check:secrets": "sh scripts/check-secrets.sh",
+    "pages:build:staging": "node scripts/pages.mjs build staging",
+    "pages:build:production": "node scripts/pages.mjs build production",
+    "pages:check:staging": "node scripts/pages.mjs check staging",
+    "pages:check:production": "node scripts/pages.mjs check production",
+    "pages:dev": "wrangler pages dev dist --service API=dabi-orcamentos --binding APP_ENV=staging --port 8788",
+    "pages:deploy:staging": "node scripts/pages.mjs deploy staging --publish",
+    "pages:deploy:staging:dry": "node scripts/pages.mjs deploy staging",
+    "pages:deploy:production": "node scripts/pages.mjs deploy production --publish",
+    "pages:deploy:production:dry": "node scripts/pages.mjs deploy production"
   },
   "dependencies": {
     "@fontsource-variable/inter": "^5.3.0",
