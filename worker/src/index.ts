@@ -27,6 +27,8 @@ export interface Env {
   EMAIL_DAILY_LIMIT?: string;
   /** `on` reativa a autenticação antiga por chave de licença (Bearer). Padrão: desligada. */
   LEGACY_KEY_AUTH?: string;
+  /** `staging` ou `production`. Se definido, requisições do Pages com `X-Dabi-Expect-Env` de OUTRO ambiente são recusadas (421): um Pages de homologação nunca usa o banco de produção por engano. */
+  APP_ENV?: string;
 }
 
 export type { Authorizer, AuthResult };
@@ -199,6 +201,8 @@ export function createHandler(options: Options) {
 
   return async function handle(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
+    const expected = request.headers.get('x-dabi-expect-env');
+    if (env.APP_ENV && expected && expected !== env.APP_ENV) return apiError(421, 'ENVIRONMENT_MISMATCH', 'Este front-end pertence a outro ambiente.');
     if (request.method.toUpperCase() === 'OPTIONS' && pathname.startsWith('/api/')) {
       const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-CSRF-Token', 'Access-Control-Max-Age': '600' } });
       return withCors(request, env, preflight);

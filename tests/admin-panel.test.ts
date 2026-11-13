@@ -163,7 +163,7 @@ describe('Suspensão e reativação', () => {
 describe('Detalhes e sessões', () => {
   it('detalhes mostram só dados administrativos e NUNCA tokens, códigos nem conteúdo do cliente', async () => {
     const p = emptyPush(0); p.upserts.ingredients.push({ id: 'i1', name: 'Receita secreta', unit: 'g', purchaseQuantity: 1000, purchasePrice: 6 } as never); await srv.request('POST', '/api/sync/push', { session: cli, body: p });
-    await srv.request('POST', '/api/quotes', { session: cli, body: { quoteNumber: 'Q1', businessName: 'Doces Privados', issuedAt: '2026-11-12', items: [{ description: 'Bolo privado', quantity: 1, unitPriceCents: 5000 }] } });
+    expect((await srv.request('POST', '/api/quotes', { session: cli, body: { version: 1, quoteNumber: 'Q1', businessName: 'Doces Privados', issuedAt: '2026-11-12', items: [{ description: 'Bolo privado', quantity: 1, unitPriceCents: 5000 }] } })).status).toBe(201); // o orçamento existe de verdade
     const lic = licenseOf('ana@exemplo.com'); const dump = JSON.stringify([await j(await A('GET', `/customers/${lic}`)), await j(await A('GET', '/customers?q=ana')), await j(await A('GET', '/overview')), await j(await A('GET', '/audit'))]);
     expect(dump).toContain('ana@exemplo.com');
     for (const secret of ['Receita secreta', 'Doces Privados', 'Bolo privado', cli.csrf, cli.cookie.split('=')[1], 'token_hash', 'csrf_token', 'code_hash', 'key_hash', 'purchasePrice']) expect(dump, secret).not.toContain(secret);
