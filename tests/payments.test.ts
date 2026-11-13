@@ -49,6 +49,13 @@ describe('Recebimentos: registrar e remover', () => {
     expect(() => addPayment(paid, 'o', pay(0.01, 'p2'))).toThrow('totalmente paga');
     expect(() => addPayment(paid, 'o', pay(80, 'p3'))).toThrow();
   });
+  it('arredonda o recebimento para centavos antes de comparar com o saldo', () => {
+    const small = base(order({ quantity: 1, unitPrice: 0.01, deposit: 0 }));
+    expect(() => addPayment(small, 'o', pay(0.015))).toThrow('maior que o saldo');
+
+    const twoCents = base(order({ quantity: 1, unitPrice: 0.02, deposit: 0 }));
+    expect(addPayment(twoCents, 'o', pay(0.014)).orders[0].payments?.[0].amount).toBe(0.01);
+  });
   it('rejeita valor inválido, data inválida, id repetido e encomenda inexistente', () => {
     const d = base();
     for (const amount of [0, -5, NaN, Infinity, '10' as unknown as number, 2e9]) expect(() => addPayment(d, 'o', pay(amount)), String(amount)).toThrow();

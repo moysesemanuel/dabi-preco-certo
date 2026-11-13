@@ -9,7 +9,7 @@
  *  - Backups importados e payloads de sincronização passam por `validateDataSet` (estrito).
  */
 import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CatalogRef, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
-import { isMoney, isPositiveQuantity } from '../src/domain/money';
+import { isCentMoney, isPositiveQuantity, toCents2 } from '../src/domain/money';
 import { isQuoteCode } from './quoteCode';
 
 export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, itemsPerRecipe: 200, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
@@ -77,7 +77,7 @@ function ingredientOf(i: unknown, n: number, seen: Set<string>): Ingredient {
   if (!text(v.name)) return fail(`${at}: nome ausente ou longo demais.`);
   if (typeof v.unit !== 'string' || !UNITS.includes(v.unit)) return fail(`${at}: unidade inválida.`);
   if (!isPositiveQuantity(v.purchaseQuantity)) return fail(`${at}: quantidade comprada inválida.`);
-  if (!isMoney(v.purchasePrice)) return fail(`${at}: preço inválido.`);
+  if (!isCentMoney(v.purchasePrice)) return fail(`${at}: preço inválido; use no máximo duas casas decimais.`);
   if (!optPositive(v.densityGPerMl) || !optPositive(v.gramsPerUnit)) return fail(`${at}: equivalência inválida.`);
   return { id: v.id, name: v.name.trim(), unit: v.unit as Ingredient['unit'], purchaseQuantity: v.purchaseQuantity, purchasePrice: v.purchasePrice,
     ...(v.densityGPerMl !== undefined ? { densityGPerMl: v.densityGPerMl as number } : {}), ...(v.gramsPerUnit !== undefined ? { gramsPerUnit: v.gramsPerUnit as number } : {}),
@@ -93,7 +93,7 @@ function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<s
   if (!text(r.name)) return fail(`${at}: nome ausente ou longo demais.`);
   if (!isPositiveQuantity(r.yield)) return fail(`${at}: rendimento inválido.`);
   if (typeof r.desiredMargin !== 'number' || !Number.isFinite(r.desiredMargin) || r.desiredMargin < 0 || r.desiredMargin >= 100) return fail(`${at}: margem deve ficar entre 0 e menos de 100.`);
-  if (![r.packagingPerUnit, r.laborTotal, r.extraTotal].every(isMoney)) return fail(`${at}: custo inválido (embalagem, mão de obra ou extras).`);
+  if (![r.packagingPerUnit, r.laborTotal, r.extraTotal].every(isCentMoney)) return fail(`${at}: custo inválido (use no máximo duas casas decimais).`);
   if (!Array.isArray(r.items) || r.items.length > DATASET_LIMITS.itemsPerRecipe) return fail(`${at}: lista de ingredientes inválida.`);
   const items: RecipeItem[] = r.items.map((it: unknown, k: number) => {
     if (!isObj(it) || typeof it.ingredientId !== 'string') return fail(`${at}: item ${k + 1} inválido.`);
@@ -115,15 +115,16 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
   if (!text(o.customer)) return fail(`${at}: cliente ausente ou longo demais.`);
   if (typeof o.recipeId !== 'string' || !recipeIds.has(o.recipeId)) return fail(`${at}: aponta para uma receita inexistente.`);
   if (!isPositiveQuantity(o.quantity)) return fail(`${at}: quantidade inválida.`);
-  if (!isMoney(o.unitPrice) || !isMoney(o.deposit)) return fail(`${at}: preço ou sinal inválido.`);
-  if (o.deposit > Math.round(o.quantity * o.unitPrice * 100) / 100 + 0.005) return fail(`${at}: sinal maior que o total.`);
+  if (!isCentMoney(o.unitPrice) || !isCentMoney(o.deposit)) return fail(`${at}: preço ou sinal inválido; use no máximo duas casas decimais.`);
+  const orderTotal = toCents2(o.quantity * o.unitPrice);
+  if (o.deposit > orderTotal) return fail(`${at}: sinal maior que o total.`);
   if (!isIsoDate(o.deliveryDate)) return fail(`${at}: data de entrega inválida.`);
   if (!isIsoDateTime(o.createdAt)) return fail(`${at}: data de criação inválida.`);
   if (typeof o.status !== 'string' || !STATUSES.includes(o.status)) return fail(`${at}: status inválido.`);
   let costSnapshot: CostSnapshot | undefined;
   if (o.costSnapshot !== undefined) {
     const c = o.costSnapshot;
-    if (!isObj(c) || !isMoney(c.costPerUnit) || !isIsoDateTime(c.capturedAt)) return fail(`${at}: custo registrado inválido.`);
+    if (!isObj(c) || !isCentMoney(c.costPerUnit) || !isIsoDateTime(c.capturedAt)) return fail(`${at}: custo registrado inválido.`);
     costSnapshot = { costPerUnit: c.costPerUnit, capturedAt: c.capturedAt };
   }
   if (o.quoteCode !== undefined && !isQuoteCode(o.quoteCode)) return fail(`${at}: código do orçamento inválido.`);
@@ -134,14 +135,14 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
     const parsed = o.payments.map((p: unknown, k: number): Payment => {
       if (!isObj(p) || typeof p.id !== 'string' || !ID.test(p.id) || paymentIds.has(p.id)) return fail(`${at}: recebimento ${k + 1} com identificador inválido ou repetido.`);
       paymentIds.add(p.id);
-      if (!isMoney(p.amount) || p.amount <= 0) return fail(`${at}: recebimento ${k + 1} com valor inválido.`);
+      if (!isCentMoney(p.amount) || p.amount <= 0) return fail(`${at}: recebimento ${k + 1} com valor inválido.`);
       if (!isIsoDate(p.receivedAt)) return fail(`${at}: recebimento ${k + 1} com data inválida.`);
       if (p.method !== undefined && !(PAYMENT_METHODS as readonly string[]).includes(p.method as string)) return fail(`${at}: recebimento ${k + 1} com meio de pagamento inválido.`);
       if (p.note !== undefined && (typeof p.note !== 'string' || p.note.length > DATASET_LIMITS.note)) return fail(`${at}: recebimento ${k + 1} com observação inválida.`);
       return { id: p.id, amount: p.amount, receivedAt: p.receivedAt, ...(p.method !== undefined ? { method: p.method as Payment['method'] } : {}), ...(typeof p.note === 'string' && p.note.trim() ? { note: p.note.trim() } : {}) };
     });
-    const received = Math.round((o.deposit + parsed.reduce((s2, p) => s2 + p.amount, 0)) * 100) / 100;
-    if (received > Math.round(o.quantity * o.unitPrice * 100) / 100 + 0.005) return fail(`${at}: o total recebido é maior que o total da encomenda.`);
+    const received = toCents2(o.deposit + parsed.reduce((s2, p) => s2 + p.amount, 0));
+    if (received > orderTotal) return fail(`${at}: o total recebido é maior que o total da encomenda.`);
     if (parsed.length) payments = parsed;
   }
   return { id: o.id, customer: o.customer.trim(), recipeId: o.recipeId, quantity: o.quantity, unitPrice: o.unitPrice, deposit: o.deposit, deliveryDate: o.deliveryDate, status: o.status as Order['status'], createdAt: o.createdAt, ...(costSnapshot ? { costSnapshot } : {}), ...(payments ? { payments } : {}), ...(o.quoteCode !== undefined ? { quoteCode: o.quoteCode as string } : {}) };

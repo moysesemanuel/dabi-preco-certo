@@ -48,6 +48,11 @@ describe('Validação estrita do conjunto de dados', () => {
     for (const when of ['2026-11-11', 'ontem', '2026-13-01T00:00:00Z']) bad(d => { d.orders[0].createdAt = when; }, /data de criação/);
     bad(d => { d.orders[0].status = 'Cancelado'; }, /status/);
   });
+  it('rejeita valores monetários com frações menores que um centavo', () => {
+    bad(d => { d.orders[0].payments = [{ id: 'p1', amount: 0.014, receivedAt: '2026-11-11' }]; }, /recebimento.*valor inválido/);
+    bad(d => { d.orders[0].deposit = 0.015; }, /Encomenda.*duas casas decimais/);
+    bad(d => { d.ingredients[0].purchasePrice = 1.005; }, /Ingrediente.*duas casas decimais/);
+  });
   it('valida o custo registrado (snapshot)', () => {
     bad(d => { (d.orders[0].costSnapshot as { costPerUnit: unknown }).costPerUnit = -1; }, /custo registrado/);
     bad(d => { (d.orders[0].costSnapshot as { capturedAt: unknown }).capturedAt = 'hoje'; }, /custo registrado/);

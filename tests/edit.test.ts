@@ -31,6 +31,12 @@ describe('Edição de cadastros', () => {
   it('rejeita receita inexistente', () => {
     expect(() => updateRecipe(data, 'nada', data.recipes[0])).toThrow();
   });
+  it('normaliza o sinal em centavos antes de verificar o total ao editar uma encomenda', () => {
+    const tinyOrder = { ...data, orders: [{ ...data.orders[0], quantity: 1, unitPrice: 0.01, deposit: 0 }] };
+    expect(() => updateOrder(tinyOrder, 'o', { customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 0.01, deliveryDate: '2026-12-01', deposit: 0.015 })).toThrow('sinal');
+    const rounded = updateOrder(tinyOrder, 'o', { customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 0.02, deliveryDate: '2026-12-01', deposit: 0.014 });
+    expect(rounded.orders[0].deposit).toBe(0.01);
+  });
   it('avisa quando a troca de unidade afeta receitas', () => {
     expect(unitChangeAffectsRecipes(data, 'f', 'kg')).toBe(true);
     expect(unitChangeAffectsRecipes(data, 'f', 'g')).toBe(false);

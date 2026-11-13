@@ -17,11 +17,14 @@ export function addPayment(data: DataSet, orderId: string, payment: Payment): Da
   const order = data.orders.find(o => o.id === orderId);
   if (!order) throw new Error('Encomenda não encontrada.');
   if (!isMoney(payment.amount) || payment.amount <= 0) throw new Error('Informe um valor maior que zero.');
+  const amount = toCents2(payment.amount);
+  if (amount <= 0) throw new Error('Informe um valor maior que zero.');
   if (!isIsoDate(payment.receivedAt)) throw new Error('Informe uma data de recebimento válida.');
   if ((order.payments ?? []).some(p => p.id === payment.id)) throw new Error('Recebimento duplicado.');
   const due = balanceDue(order);
-  if (payment.amount > due + 0.005) throw new Error(due > 0 ? 'O valor é maior que o saldo pendente.' : 'Esta encomenda já está totalmente paga.');
-  return { ...data, orders: data.orders.map(o => (o.id === orderId ? { ...o, payments: [...(o.payments ?? []), payment] } : o)) };
+  if (amount > due) throw new Error(due > 0 ? 'O valor é maior que o saldo pendente.' : 'Esta encomenda já está totalmente paga.');
+  const normalized = amount === payment.amount ? payment : { ...payment, amount };
+  return { ...data, orders: data.orders.map(o => (o.id === orderId ? { ...o, payments: [...(o.payments ?? []), normalized] } : o)) };
 }
 
 /** Remove um recebimento lançado por engano (a tela pede confirmação). Sem recebimentos, o campo some do pedido. */
