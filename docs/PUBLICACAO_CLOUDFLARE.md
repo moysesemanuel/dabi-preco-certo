@@ -1,5 +1,7 @@
 # Publicação na Cloudflare Pages (Etapa 6)
 
+> **Estado em 13/11/2026:** staging está publicado. A API Cloudflare confirmou deployment canônico `a9efb520-07e2-428e-ac77-54d196a0ea01`, `APP_ENV=staging` e `API` → `dabi-orcamentos-staging` em Production e Preview. O texto abaixo é o roteiro histórico da Etapa 6; estado atual e plano de produção: [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md).
+
 > **Nada aqui foi executado contra a Cloudflare, a Vercel ou o DNS.** Esta etapa só preparou arquivos, scripts e testes locais. Quem executa os comandos remotos (e decide quando) é você. As regras de segurança continuam: nenhum segredo em arquivo versionado, `worker/wrangler.toml` e `backups/` não são alterados pelo repositório.
 
 ## 1. Arquitetura final
@@ -117,7 +119,7 @@ Qual projeto recebe o domínio: para a fase de beta com dados de homologação, 
 
 ## 9. Custos e cotas (plano gratuito)
 
-Arquivos estáticos do Pages não têm cota de requisições. Cada chamada `/api/*` ou `/o/*` passa por uma **Pages Function** (conta na cota de 100 mil requisições/dia de Workers) **e** pelo **Worker** via Service Binding. **Premissa não verificada:** que a invocação do Worker por binding conte como uma segunda requisição. Se contar, o consumo de requisições por conta **dobra**: no modelo de `POLITICA_DE_CUSTOS.md`, a capacidade a 50% da cota cai de ≈132 para ≈66 contas por esse limite (passando a ser o limite mais restritivo, abaixo das ≈73 contas do D1). Confirme na documentação/painel atual da Cloudflare e acompanhe o consumo na primeira semana. Se a cota virar problema, as saídas são: servir o app e a API pelo **mesmo Worker com Static Assets** (uma invocação por chamada) ou o plano pago do Workers; ambas exigem decisão sua.
+Arquivos estáticos do Pages não têm cota de requisições. Cada chamada `/api/*` ou `/o/*` passa por uma Pages Function e pelo Worker via Service Binding. A documentação atual da Cloudflare diz que, no modelo Standard usado pelo Pages de staging, a chamada ao Worker vinculado **não acrescenta uma requisição faturável**; a Function conta na cota Workers. Confirmar o uso real em *Functions Metrics* e na visão de cobrança após tráfego representativo. A hipótese histórica de dobrar as requisições não deve ser usada como previsão oficial; veja `POLITICA_DE_CUSTOS.md` e `ETAPA_7_PREPARACAO_PRODUCAO.md`.
 
 ## 10. Checklist de homologação (staging)
 

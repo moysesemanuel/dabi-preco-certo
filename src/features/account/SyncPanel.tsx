@@ -48,7 +48,7 @@ export function SyncPanel({ inform }: { inform: (m: string) => void }) {
 
     {acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).length > 0 && <div className="stack" style={{ gap: 8 }}><strong style={{ fontSize: 14 }}>Histórico de conflitos ({acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).length})</strong>
       <p className="muted" style={{ margin: 0 }}>Versões que foram substituídas ficam guardadas aqui até você dispensar, para refazer a mudança se precisar.</p>
-      {acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).map(c => <details key={c.id} style={{ border: '1px solid #f0d9b5', borderRadius: 10, padding: '8px 12px', background: '#fffaf2' }}><summary style={{ cursor: 'pointer', fontSize: 14 }}>{describe(c)} <span className="muted">({when(c.at)})</span></summary>
+      {acc.conflicts.filter(c => !isPendingConflict(c) && !isOpenFinancial(c)).map(c => <details key={c.id} style={{ border: '1px solid var(--color-warning-border)', borderRadius: 10, padding: '8px 12px', background: 'var(--color-warning-soft)' }}><summary style={{ cursor: 'pointer', fontSize: 14 }}>{describe(c)} <span className="muted">({when(c.at)})</span></summary>
         {c.local ? <pre style={{ whiteSpace: 'pre-wrap', fontSize: 12, margin: '8px 0 0' }}>Sua versão: {JSON.stringify(c.local, null, 2)}</pre> : null}</details>)}
       <div><button className="secondary" onClick={() => acc.dismissConflicts()}>Dispensar avisos já tratados</button> {(acc.openFinancial > 0 || acc.pendingConflicts.length > 0) && <span className="muted">Conflitos sem decisão não são dispensados.</span>}</div></div>}
   </section>;

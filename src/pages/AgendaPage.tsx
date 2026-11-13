@@ -22,7 +22,7 @@ export function AgendaPage({ data, update, focus }: PageProps) {
   const hiddenQuotes = includeQuotes ? 0 : data.orders.filter(o => o.status === 'Orçamento').length;
 
   const Row = ({ order, late }: { order: Order; late?: number }) => (
-    <li style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f0f2f4' }}>
+    <li style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
       <div><strong>{order.customer}</strong><div className="muted" style={{ fontSize: 13 }}>{recipeName(order.recipeId)} · {order.quantity} un. · entrega {brDate(order.deliveryDate)}</div>
         <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {late !== undefined && <span className="tag red">{late} dia(s) de atraso</span>}
@@ -39,14 +39,14 @@ export function AgendaPage({ data, update, focus }: PageProps) {
 
     {hiddenQuotes > 0 && <div className="notice" role="status" style={{ marginBottom: 19 }}>{hiddenQuotes} encomenda(s) em <strong>Orçamento</strong> não aparecem aqui até serem confirmadas. Mude o status em Encomendas, ou marque “Incluir orçamentos”.</div>}
 
-    {agenda.overdue.length > 0 && <section className="card" style={{ marginBottom: 19, borderColor: '#e8b4b4' }}><h2 className="section-title" style={{ color: '#c43d3d' }}>Atrasados ({agenda.overdue.length})</h2><List items={agenda.overdue.map(o => ({ order: o.order, late: o.daysLate }))} /></section>}
+    {agenda.overdue.length > 0 && <section className="card" style={{ marginBottom: 19, borderColor: 'var(--color-error-border)' }}><h2 className="section-title" style={{ color: 'var(--color-error)' }}>Atrasados ({agenda.overdue.length})</h2><List items={agenda.overdue.map(o => ({ order: o.order, late: o.daysLate }))} /></section>}
 
     <div className="two">
       <section className="card"><h2 className="section-title">Hoje · {brDate(today)}</h2>
         {agenda.today.length ? <List items={agenda.today.map(order => ({ order }))} /> : <div className="empty"><CalendarDays size={30} />Nenhuma entrega para hoje.</div>}
         <h2 className="section-title" style={{ marginTop: 24 }}>Próximos dias</h2>
         {agenda.week.map(day => <div key={day.date} style={{ marginBottom: 10 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: '#445268' }}>{day.weekday}, {brDate(day.date)}</div>
+          <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--color-muted-text)' }}>{day.weekday}, {brDate(day.date)}</div>
           {day.orders.length ? <List items={day.orders.map(order => ({ order }))} /> : <div className="muted" style={{ fontSize: 13 }}>Sem entregas.</div>}
         </div>)}
         {agenda.later.length > 0 && <><h2 className="section-title" style={{ marginTop: 18 }}>Mais adiante ({agenda.later.length})</h2><List items={agenda.later.map(order => ({ order }))} /></>}

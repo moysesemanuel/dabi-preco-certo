@@ -44,21 +44,21 @@ export function QuoteSharePanel({ order, code, data, update, inform, focus, onCl
       <div className="notice"><strong>Link gerado.</strong> Envie ao cliente:<br /><span style={{ wordBreak: 'break-all', fontWeight: 700 }}>{published.url}</span></div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <button className="secondary" onClick={() => void copyText(published.url).then(ok => inform(ok ? 'Link copiado.' : 'Não foi possível copiar automaticamente. Selecione e copie o link acima.'))}><Copy size={15} /> Copiar link</button>
-        <a className="secondary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px', borderRadius: 11, border: '1px solid #d9dee5', color: '#101f35', fontWeight: 700 }} href={whatsappShareUrl(built.quote, published.url)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /> Compartilhar no WhatsApp</a>
+        <a className="secondary" style={{ textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: 6, padding: '10px 14px', borderRadius: 11, border: '1px solid var(--color-border)', color: 'var(--color-text)', fontWeight: 700 }} href={whatsappShareUrl(built.quote, published.url)} target="_blank" rel="noopener noreferrer"><MessageCircle size={15} /> Compartilhar no WhatsApp</a>
         <button className="secondary" onClick={onClose}>Fechar</button></div>
       <p className="footnote" style={{ margin: 0 }}>Você pode ver e revogar seus links em Configurações.</p>
     </div>;
   }
 
   const t = built.ok ? computeTotals(built.quote) : null;
-  return <div className="stack" style={{ marginTop: 8, borderTop: '1px solid #edf0f3', paddingTop: 12 }}>
+  return <div className="stack" style={{ marginTop: 8, borderTop: '1px solid var(--color-border)', paddingTop: 12 }}>
     <strong>Orçamento por link</strong>
     <div className="form-grid">
       <Field label="Válido até"><input type="date" value={validUntil} min={localToday()} onChange={e => setValidUntil(e.target.value)} /></Field>
       <Field label="Taxa de entrega (R$)"><input type="number" min="0" step="0.01" value={fee} onChange={e => setFee(e.target.value)} placeholder="0,00" /></Field>
       <Field label="Desconto (R$)"><input type="number" min="0" step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} placeholder="0,00" /></Field>
     </div>
-    <Field label="Observações (aparecem no orçamento)"><textarea value={notes} maxLength={1000} rows={3} onChange={e => setNotes(e.target.value)} placeholder="Ex.: Reserva sujeita à confirmação" style={{ width: '100%', border: '1px solid #d9dee5', borderRadius: 10, padding: 10, font: 'inherit' }} /></Field>
+    <Field label="Observações (aparecem no orçamento)"><textarea value={notes} maxLength={1000} rows={3} onChange={e => setNotes(e.target.value)} placeholder="Ex.: Reserva sujeita à confirmação" style={{ width: '100%', border: '1px solid var(--color-border)', borderRadius: 10, padding: 10, font: 'inherit' }} /></Field>
 
     {built.ok && t ? <div className="formula" aria-label="Prévia do orçamento">
       <strong>{built.quote.businessName}</strong>

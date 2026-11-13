@@ -97,7 +97,7 @@ describe('Publicar contra o Worker real', () => {
     expect(pub.value.url).toMatch(/^https:\/\/api\.exemplo\.test\/o\/[A-Za-z0-9_-]{22}$/);
     const page = await (await s.request('GET', `/o/${pub.value.id}`)).text();
     for (const text of ['Doces da Bia', '2 × Bolo de chocolate', 'R$ 145,00', 'Reserva sujeita à confirmação']) expect(page).toContain(text);
-    for (const secret of ['Maria', 'Secreta', 'Margem', 'desiredMargin', 'Custo', 'custo', '31,5', 'costSnapshot']) expect(page).not.toContain(secret); // ('margin' existe no CSS, por isso não é testado)
+    for (const secret of ['Maria', 'Secreta', 'Margem', 'desiredMargin', 'Custo', '31,5', 'costSnapshot']) expect(page).not.toContain(secret); // ('margin' existe no CSS e a marca Custô integra a página
     expect(await client.list()).toMatchObject({ ok: true, value: [{ id: pub.value.id, status: 'active', quoteNumber: 'ORC-K7M42P', totalCents: 14500 }] });
     expect((await client.revoke(pub.value.id)).ok).toBe(true);
     expect((await s.request('GET', `/o/${pub.value.id}`)).status).toBe(410);

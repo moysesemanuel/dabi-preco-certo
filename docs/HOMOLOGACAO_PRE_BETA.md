@@ -1,5 +1,7 @@
 # Homologação pré-beta (Etapa 4.1)
 
+> **Atualização em 13/11/2026:** o conteúdo abaixo é o registro histórico dos testes locais da Etapa 4.1. O staging está publicado no Pages (deployment `a9efb520-07e2-428e-ac77-54d196a0ea01`) e o proprietário relatou oito testes manuais aprovados: login real pelo Resend, sessão persistente, painel administrativo, cadastro de cliente, suspensão/reativação, sincronização entre dispositivos, links públicos e celular físico. A data exata de execução desses testes não foi informada. Nesta Etapa 7, o Codex executou 942 testes automatizados (2 ignorados), typecheck, build local de produção, npm audit e checagem heurística de segredos; não repetiu os oito testes manuais. Evidências e pendências em [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md).
+
 Data: 2026-11-12. Branch `feat/etapa-1-beta`. **Teste automatizado não é homologação**: a tabela separa o que foi feito num navegador real do que foi só automatizado.
 
 ## Estado do código e do staging

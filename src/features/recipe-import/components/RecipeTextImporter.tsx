@@ -24,7 +24,7 @@ export function RecipeTextImporter({ ingredients, cupSizeMl, onConfirm, onCancel
 
   return <div className="stack">
     <div><h2 className="section-title">Colar lista de ingredientes</h2><p className="muted">Cole os ingredientes de uma receita, um por linha. Nada é salvo até você confirmar.</p></div>
-    <textarea aria-label="Lista de ingredientes" value={text} onChange={e => setText(e.target.value)} rows={6} placeholder={EXAMPLE} style={{ width: '100%', border: '1px solid #d9dee5', borderRadius: 10, padding: 12, font: 'inherit', resize: 'vertical' }} />
+    <textarea aria-label="Lista de ingredientes" value={text} onChange={e => setText(e.target.value)} rows={6} placeholder={EXAMPLE} style={{ width: '100%', border: '1px solid var(--color-border)', borderRadius: 10, padding: 12, font: 'inherit', resize: 'vertical' }} />
     <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
       <button type="button" className="primary" disabled={!text.trim()} onClick={interpret}><ClipboardPaste size={17} /> Interpretar lista</button>
       <button type="button" className="secondary" onClick={onCancel}><X size={16} /> Fechar</button>
@@ -49,7 +49,7 @@ export function RecipeTextImporter({ ingredients, cupSizeMl, onConfirm, onCancel
               </>}
             </td>
             <td style={{ fontSize: 12, minWidth: 220 }}>
-              {a.issues.map(m => <div key={m} style={{ color: '#9a5a0d' }}>{m}</div>)}
+              {a.issues.map(m => <div key={m} style={{ color: 'var(--color-warning)' }}>{m}</div>)}
               {row.parsed.notes.filter(n => !a.issues.includes(n) && !n.startsWith('Quantidade indefinida') && !n.startsWith('Linha sem quantidade')).map(n => <div key={n} className="muted">{n}</div>)}
               {a.references.map(m => <div key={m} className="muted">{m}</div>)}
               {a.warnings.map(m => <div key={m} className="muted">{m}</div>)}

@@ -115,7 +115,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
             <button type="button" className="secondary" disabled={!data.ingredients.length} onClick={() => setShowImport(v => !v)}><ClipboardPaste size={16} /> Colar lista</button>
             <button type="button" className="secondary" onClick={() => setShowConverter(v => !v)}><Ruler size={16} /> {showConverter ? 'Fechar conversor' : 'Conversor de medidas'}</button>
             </div>
-            {showConverter && <div className="card" style={{ marginTop: 12, background: '#fbfaf7' }}><MeasurementConverter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onCupSizeChange={n => update(d => withSettings(d, { cupSizeMl: n }))} onUse={useConversion} /></div>}
+            {showConverter && <div className="card" style={{ marginTop: 12, background: 'var(--color-surface-muted)' }}><MeasurementConverter ingredients={data.ingredients} cupSizeMl={cupSizeMl} onCupSizeChange={n => update(d => withSettings(d, { cupSizeMl: n }))} onUse={useConversion} /></div>}
           </div>
           <div className="form-grid">
             <Field label="Embalagem por unidade (R$)"><input type="number" min="0" step="0.01" value={packaging} onChange={e => setPackaging(e.target.value)} /></Field>
@@ -133,20 +133,20 @@ export function RecipesPage({ data, update, inform }: PageProps) {
           {selected && priced && !priced.ok ? <div className="notice warn"><strong>Custo indisponível.</strong> {priced.message}</div> : null}
           {selected && selectedCost ? <div className="formula">
             {selectedCost.lines.map(l => <div key={l.ingredientId} className="formula-row" style={{ fontSize: 13 }}><span>{formatQuantity(l.quantity, l.unit)} {unitText(l.unit, l.quantity)} de {l.name}{l.unit !== l.convertedUnit ? <span className="muted"> {l.approximate ? '≈' : '='} {(() => { const f = friendlyAmount(l.convertedQuantity, l.convertedUnit); return `${formatQuantity(f.value, f.unit)} ${unitText(f.unit, f.value)}`; })()}</span> : null}</span><strong>{money(l.cost)}</strong></div>)}
-            <hr style={{ border: 'none', borderTop: '1px solid #dce4eb', width: '100%' }} />
+            <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', width: '100%' }} />
             <div className="formula-row"><span>Ingredientes</span><strong>{money(selectedCost.materials)}</strong></div>
             <div className="formula-row"><span>Embalagens</span><strong>{money(selectedCost.packaging)}</strong></div>
             <div className="formula-row"><span>Mão de obra</span><strong>{money(selectedCost.labor)}</strong></div>
             <div className="formula-row"><span>Outros custos</span><strong>{money(selectedCost.extras)}</strong></div>
-            <hr style={{ border: 'none', borderTop: '1px solid #dce4eb', width: '100%' }} />
+            <hr style={{ border: 'none', borderTop: '1px solid var(--color-border)', width: '100%' }} />
             <div className="formula-row"><span>Custo por unidade</span><strong>{money(selectedCost.costPerUnit)}</strong></div>
-            <div className="formula-row" style={{ alignItems: 'center' }}><strong>Preço sugerido</strong><strong style={{ fontSize: 24, color: '#16794a' }}>{money(selectedCost.suggestedPrice)}</strong></div>
+            <div className="formula-row" style={{ alignItems: 'center' }}><strong>Preço sugerido</strong><strong style={{ fontSize: 24, color: 'var(--color-success)' }}>{money(selectedCost.suggestedPrice)}</strong></div>
             <span className="footnote" style={{ margin: 0 }}>Margem sobre preço de venda: {selected.desiredMargin}%.</span>
           </div> : !priced ? <div className="empty"><BookOpen size={30} />Cadastre uma receita para visualizar os cálculos.</div> : null}
         </div>
         <div className="card"><h2 className="section-title">Minhas receitas ({data.recipes.length})</h2>
-          {data.recipes.length ? <div className="stack">{data.recipes.map(r => <div key={r.id} style={{ borderBottom: '1px solid #edf0f3', paddingBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 9, alignItems: 'center' }}>
-            <div><strong style={{ fontSize: 13 }}>{r.name}</strong><div className="muted">{r.yield} unidade(s) · {(() => { const pr = priceRecipe(r, data); return pr.ok ? `${money(pr.cost.suggestedPrice)} sugerido` : <span style={{ color: '#9a5a0d' }} title={pr.message}>custo indisponível: falta uma equivalência</span>; })()}</div></div>
+          {data.recipes.length ? <div className="stack">{data.recipes.map(r => <div key={r.id} style={{ borderBottom: '1px solid var(--color-border)', paddingBottom: 12, display: 'flex', justifyContent: 'space-between', gap: 9, alignItems: 'center' }}>
+            <div><strong style={{ fontSize: 13 }}>{r.name}</strong><div className="muted">{r.yield} unidade(s) · {(() => { const pr = priceRecipe(r, data); return pr.ok ? `${money(pr.cost.suggestedPrice)} sugerido` : <span style={{ color: 'var(--color-warning)' }} title={pr.message}>custo indisponível: falta uma equivalência</span>; })()}</div></div>
             <div style={{ display: 'flex', gap: 5 }}><button className="secondary" onClick={() => setSelectedId(r.id)} aria-label={`Analisar ${r.name}`}><ArrowRight size={14} /></button><button className="inline-icon" onClick={() => startEdit(r.id)} aria-label={`Editar ${r.name}`} title="Editar"><Pencil size={14} /></button><button className="inline-icon" onClick={() => removeRecipe(r.id)} aria-label={`Excluir ${r.name}`}><Trash2 size={14} /></button></div>
           </div>)}</div> : <div className="empty">Ainda não há receitas.</div>}
         </div>

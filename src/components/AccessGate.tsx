@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { Download, LogOut, WifiOff } from 'lucide-react';
 import { useAccount } from '../account/AccountContext';
 import { AccountPanel } from '../features/account/AccountPanel';
+import { BrandPanel } from './BrandPanel';
 import type { DataSet } from '../domain/types';
 import { downloadBackup } from '../utils';
 
@@ -21,22 +22,20 @@ export function AccessGate({ data, children }: { data: DataSet; children: ReactN
 
   const hasLocal = data.ingredients.length + data.recipes.length + data.orders.length > 0;
   const exportNow = () => { downloadBackup(data); setNote('Backup exportado. Guarde o arquivo em local seguro.'); };
-  return <main className="gate" style={{ maxWidth: 520, margin: '0 auto', padding: '32px 16px' }}>
-    <h1 style={{ marginBottom: 4 }}>PedidoCerto</h1>
-    {acc.access === 'checking' && <p className="muted" role="status">Verificando seu acesso…</p>}
+  return <div className="auth-page"><div className="auth-shell"><BrandPanel /><main className="auth-content"><div className="auth-content-inner">
+    {acc.access === 'checking' && <div role="status"><h1 className="auth-title">Acesse sua conta</h1><p className="muted">Verificando seu acesso…</p></div>}
     {acc.access === 'login' && <>
-      <p className="muted">Entre com o e-mail da sua compra para usar o aplicativo.</p>
-      <AccountPanel inform={setNote} />
+      <AccountPanel inform={setNote} variant="gate" />
     </>}
     {acc.access === 'inactive' && <section className="card stack">
       <div className="notice warn" role="alert"><strong>Acesso indisponível.</strong> {acc.session?.license ? 'A licença desta conta foi revogada.' : 'Esta conta não tem licença ativa.'} Entre em contato com o suporte.</div>
       <button className="secondary" onClick={() => void acc.signOut().then(r => { if (!r.ok) setNote(r.message); })}><LogOut size={16} /> Sair desta conta</button>
     </section>}
-    {acc.access !== 'checking' && <section className="card stack" style={{ marginTop: 16 }}>
+    {acc.access !== 'checking' && <section className="auth-backup stack">
       <h2 className="section-title">Seus dados atuais</h2>
       <p className="muted">{hasLocal ? 'Este dispositivo já guarda ingredientes, receitas ou encomendas seus. Eles não foram apagados e continuam aqui. Depois de entrar, você escolhe como combiná-los com a conta.' : 'Nenhum dado seu foi apagado.'} Se preferir, baixe uma cópia agora.</p>
       <div><button className="secondary" onClick={exportNow}><Download size={16} /> Baixar backup dos dados deste dispositivo</button></div>
     </section>}
     {note && <div className="notice" role="status" style={{ marginTop: 12 }}>{note}</div>}
-  </main>;
+  </div></main></div></div>;
 }

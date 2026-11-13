@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { Activity, History, LayoutDashboard, LogOut, UserPlus, Users } from 'lucide-react';
+import { ArrowLeft, History, KeyRound, LayoutDashboard, LogOut, Mail, ShieldCheck, UserPlus, Users } from 'lucide-react';
 import { API_URL, safeApiBase } from '../account/http';
 import { AUTH_MESSAGES, createAuthClient, type DeviceInfo, type SessionInfo } from '../account/authClient';
 import { Field } from '../components/Field';
 import { Modal } from '../components/Modal';
+import { BrandPanel } from '../components/BrandPanel';
 import { ADMIN_MESSAGES, createAdminClient, type AdminClient, type AdminFailure, type AuditEvent, type CustomerDetail, type CustomerRow, type Overview } from './adminClient';
 import './admin.css';
 
@@ -29,7 +30,7 @@ export default function AdminApp({ apiBase }: { apiBase?: string }) {
     if (r.ok) { setSession(r.value); setPhase('in'); } else if (r.reason === 'network') setPhase('network'); else { setSession(undefined); setPhase('out'); }
   }, [auth]);
   useEffect(() => { void check(); }, [check]);
-  useEffect(() => { document.title = 'Administração — PedidoCerto'; const m = document.createElement('meta'); m.name = 'robots'; m.content = 'noindex, nofollow'; document.head.appendChild(m); return () => m.remove(); }, []);
+  useEffect(() => { document.title = 'Administração — Custô'; const m = document.createElement('meta'); m.name = 'robots'; m.content = 'noindex, nofollow'; document.head.appendChild(m); return () => m.remove(); }, []);
 
   // Estável: se mudasse a cada renderização, as telas refariam as consultas (requisições desnecessárias ao D1).
   const onExpired = useCallback(() => { setSession(undefined); setPhase('out'); setNotice('Sua sessão expirou. Entre novamente.'); }, []);
@@ -49,26 +50,27 @@ export default function AdminApp({ apiBase }: { apiBase?: string }) {
 }
 
 function Shell({ children }: { children: React.ReactNode }) {
-  return <main style={{ maxWidth: 520, margin: '0 auto', padding: '40px 16px' }}><h1 style={{ marginBottom: 4 }}>PedidoCerto · Administração</h1><p className="muted">Área restrita ao proprietário.</p>{children}</main>;
+  return <div className="auth-page"><div className="auth-shell"><BrandPanel /><main className="auth-content"><div className="auth-content-inner"><h1 className="auth-title">Custô · Administração</h1><p className="muted">Área restrita ao proprietário.</p>{children}</div></main></div></div>;
 }
 
 function AdminLogin({ auth, onSession }: { auth: NonNullable<ReturnType<typeof createAuthClient>>; onSession: (s: SessionInfo) => void }) {
   const [email, setEmail] = useState(''); const [code, setCode] = useState(''); const [step, setStep] = useState<'email' | 'code' | 'devices'>('email');
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [devices, setDevices] = useState<DeviceInfo[]>([]);
-  async function ask(e: FormEvent) { e.preventDefault(); setBusy(true); setError(''); const r = await auth.requestCode(email.trim()); setBusy(false); if (r.ok) setStep('code'); else setError(AUTH_MESSAGES[r.reason]); }
-  async function enter(e: FormEvent, replaceSessionId?: string) {
-    e.preventDefault(); setBusy(true); setError('');
+  async function ask() { setBusy(true); setError(''); const r = await auth.requestCode(email.trim()); setBusy(false); if (r.ok) setStep('code'); else setError(AUTH_MESSAGES[r.reason]); }
+  async function enter(replaceSessionId?: string) {
+    setBusy(true); setError('');
     const r = await auth.verifyCode({ email: email.trim(), code: code.trim(), deviceLabel: 'Administração (navegador)', ...(replaceSessionId ? { replaceSessionId } : {}) });
     if (r.ok) { const c = await auth.currentSession(); setBusy(false); if (c.ok) onSession(c.value); else setError(c.reason === 'network' ? AUTH_MESSAGES.network : AUTH_MESSAGES['session-not-kept']); return; }
     setBusy(false);
     if (r.reason === 'device-limit') { setDevices(r.sessions); setStep('devices'); return; }
     setError(AUTH_MESSAGES[r.reason]);
   }
-  return <section className="card stack"><h2 className="section-title">Entrar</h2>
-    {step === 'email' && <form className="stack" onSubmit={ask}><Field label="E-mail do administrador"><input type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required /></Field><button className="primary" disabled={busy || !email.trim()}>{busy ? 'Enviando…' : 'Enviar código de acesso'}</button></form>}
-    {step === 'code' && <form className="stack" onSubmit={e => void enter(e)}><p className="muted" style={{ margin: 0 }}>Se houver licença para <strong>{email}</strong>, enviamos um código de 8 dígitos.</p><Field label="Código de 8 dígitos"><input inputMode="numeric" autoComplete="one-time-code" maxLength={8} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} required /></Field><div className="admin-actions"><button className="primary" disabled={busy || code.length !== 8}>{busy ? 'Entrando…' : 'Entrar'}</button><button type="button" className="secondary" onClick={() => { setStep('email'); setError(''); }}>Voltar</button></div></form>}
-    {step === 'devices' && <div className="stack"><div className="notice warn">Esta conta já está em 2 dispositivos. Escolha um para desconectar.</div>{devices.map(d => <button key={d.id} type="button" className="secondary" disabled={busy} onClick={e => void enter(e as unknown as FormEvent, d.id)}>Desconectar "{d.deviceLabel ?? 'dispositivo'}" (último uso {when(d.lastSeenAt)})</button>)}<button type="button" className="secondary" onClick={() => setStep('email')}>Cancelar</button></div>}
-    {error && <div className="notice error" role="alert">{error}</div>}
+  return <section className="auth-form-panel admin-login"><div className="auth-heading"><h2 className="section-title">{step === 'email' ? 'Entrar' : 'Confirme seu código'}</h2><p>{step === 'email' ? 'Receba um código para acessar o painel do Custô.' : `Confira o e-mail ${email} e digite o código de 8 dígitos.`}</p></div>
+    {step === 'email' && <form className="auth-form" onSubmit={e => { e.preventDefault(); void ask(); }}><div className="auth-field"><label htmlFor="admin-email">E-mail do administrador</label><div className="auth-input-wrap"><Mail size={19} aria-hidden="true" /><input id="admin-email" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} required placeholder="Digite seu e-mail" aria-describedby={error ? 'admin-login-error' : undefined} /></div></div><button className="primary auth-submit" disabled={busy || !email.trim()} aria-busy={busy}>{busy ? 'Enviando…' : 'Enviar código de acesso'}</button></form>}
+    {step === 'code' && <form className="auth-form" onSubmit={e => { e.preventDefault(); void enter(); }}><div className="auth-field"><label htmlFor="admin-code">Código de 8 dígitos</label><div className="auth-input-wrap"><KeyRound size={19} aria-hidden="true" /><input id="admin-code" inputMode="numeric" autoComplete="one-time-code" pattern="\d{8}" maxLength={8} value={code} onChange={e => setCode(e.target.value.replace(/\D/g, ''))} required placeholder="00000000" aria-describedby={error ? 'admin-login-error' : undefined} /></div></div><button className="primary auth-submit" disabled={busy || code.length !== 8} aria-busy={busy}>{busy ? 'Confirmando…' : 'Confirmar código'}</button><div className="auth-form-links"><button type="button" className="auth-text-action" disabled={busy} onClick={() => void ask()}>Reenviar código</button><button type="button" className="auth-text-action" disabled={busy} onClick={() => { setStep('email'); setError(''); }}><ArrowLeft size={16} aria-hidden="true" /> Corrigir e-mail</button></div></form>}
+    {step === 'devices' && <div className="stack"><div className="notice warn">Esta conta já está em 2 dispositivos. Escolha um para desconectar.</div>{devices.map(d => <button key={d.id} type="button" className="secondary" disabled={busy} onClick={() => void enter(d.id)}>Desconectar "{d.deviceLabel ?? 'dispositivo'}" (último uso {when(d.lastSeenAt)})</button>)}<button type="button" className="secondary" onClick={() => setStep('email')}>Cancelar</button></div>}
+    {error && <div id="admin-login-error" className="notice error" role="alert">{error}</div>}
+    <div className="auth-security"><span className="auth-divider" /><p><ShieldCheck size={16} aria-hidden="true" /> Login seguro, rápido e sem senha.</p></div>
   </section>;
 }
 
@@ -84,9 +86,9 @@ function Console({ api, email, onSignOut, notice, setNotice, onExpired }: { api:
   const nav: { id: View['name']; label: string; icon: typeof Users }[] = [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'customers', label: 'Clientes', icon: Users }, { id: 'audit', label: 'Histórico', icon: History }];
   const go = (v: View) => { setNotice(''); setView(v); };
   return <div className="app"><a className="skip-link" href="#admin-main">Pular para o conteúdo</a>
-    <aside className="sidebar"><div className="brand"><span className="brand-mark"><Activity size={19} /></span>Administração</div>
+    <aside className="sidebar"><div className="brand"><img className="brand-logo" src="/brand/custo-color.svg" alt="Custô" /></div>
       <nav className="nav" aria-label="Navegação administrativa">{nav.map(n => <button key={n.id} className={(view.name === n.id || (n.id === 'customers' && view.name === 'customer')) ? 'active' : ''} aria-current={view.name === n.id ? 'page' : undefined} onClick={() => go({ name: n.id } as View)}><n.icon size={18} />{n.label}</button>)}<button onClick={onSignOut}><LogOut size={18} />Sair</button></nav>
-      <div className="sidebar-foot"><span className="admin-nav-note">Conectado como<br /><strong style={{ color: '#fff', overflowWrap: 'anywhere' }}>{email}</strong></span></div></aside>
+      <div className="sidebar-foot"><span className="admin-nav-note">Conectado como<br /><strong style={{ color: 'var(--color-surface)', overflowWrap: 'anywhere' }}>{email}</strong></span></div></aside>
     <div className="workspace"><div className="topbar"><span>Área administrativa · não exibe dados comerciais dos clientes</span></div>
       <main id="admin-main" className="content" tabIndex={-1}>
         {notice && <div className="notice warn" role="status" style={{ marginBottom: 16 }}>{notice}</div>}

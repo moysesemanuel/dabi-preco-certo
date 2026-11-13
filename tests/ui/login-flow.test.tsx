@@ -34,10 +34,10 @@ async function boot(api: string) {
 }
 const hasApp = () => screen.queryByRole('navigation', { name: 'Navegação principal' }) !== null;
 async function login(u: ReturnType<typeof userEvent.setup>) {
-  await u.type(await screen.findByLabelText('E-mail da compra'), 'bia@exemplo.com');
-  await u.click(screen.getByRole('button', { name: 'Enviar código de acesso' }));
+  await u.type(await screen.findByLabelText('Seu e-mail'), 'bia@exemplo.com');
+  await u.click(screen.getByRole('button', { name: 'Enviar código' }));
   await u.type(await screen.findByLabelText('Código de 8 dígitos'), '12345678');
-  await u.click(screen.getByRole('button', { name: 'Entrar' }));
+  await u.click(screen.getByRole('button', { name: 'Confirmar código' }));
 }
 beforeEach(async () => {
   memory.clear();
@@ -52,7 +52,7 @@ describe('Login com sessão por cookie', () => {
     const first = await boot(API);
     await login(u);
     await waitFor(() => expect(hasApp()).toBe(true));
-    expect(screen.queryByRole('heading', { name: 'Entrar na conta' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Acesse sua conta' })).toBeNull();
     // a sessão foi confirmada (GET /api/auth/session) DEPOIS de validar o código e ANTES de abrir o app
     const i = api.calls.indexOf(`POST ${API}/api/auth/verify-code`);
     expect(api.calls.slice(i + 1)).toContain(`GET ${API}/api/auth/session`);
@@ -62,7 +62,7 @@ describe('Login com sessão por cookie', () => {
     first.unmount();
     await boot(API);
     await waitFor(() => expect(hasApp()).toBe(true));
-    expect(screen.queryByRole('heading', { name: 'Entrar na conta' })).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Acesse sua conta' })).toBeNull();
   });
 
   it('navegador NÃO guarda o cookie (cookie entre sites bloqueado): não anuncia sucesso, explica o motivo e não tenta sincronizar', async () => {
@@ -72,7 +72,7 @@ describe('Login com sessão por cookie', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('não guardou a sessão');
     expect(screen.queryByText('Você entrou na sua conta.')).toBeNull(); // nenhum toast de sucesso falso
     expect(hasApp()).toBe(false);
-    expect(screen.getByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'Confirme seu código' })).toBeTruthy();
     expect(api.calls.some(c => c.includes('/api/sync'))).toBe(false);
   });
 

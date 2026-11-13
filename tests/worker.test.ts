@@ -30,7 +30,8 @@ describe('Leitura pública', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/html');
     const page = await res.text();
-    for (const text of ['Doces da Bia', 'ORÇAMENTO Nº 001', 'Emitido em: 11/11/2026', 'Válido até: 15/11/2026', '2 × Bolo de chocolate', 'Valor unitário: R$ 65,00', 'Subtotal: R$ 130,00', 'Entrega', 'R$ 15,00', 'TOTAL', 'R$ 145,00', 'Reserva sujeita à confirmação', 'Falar pelo WhatsApp']) expect(page, text).toContain(text);
+    for (const text of ['Doces da Bia', 'ORÇAMENTO Nº 001', 'Emitido em: 11/11/2026', 'Válido até: 15/11/2026', '2 × Bolo de chocolate', 'Valor unitário: R$ 65,00', 'Subtotal: R$ 130,00', 'Entrega', 'R$ 15,00', 'TOTAL', 'R$ 145,00', 'Reserva sujeita à confirmação', 'Falar pelo WhatsApp', 'src="/brand/custo-color.svg"', 'Orçamento criado com Custô']) expect(page, text).toContain(text);
+    expect(res.headers.get('content-security-policy')).toContain("img-src 'self'");
     expect(page).toContain('https://wa.me/5541999990000?text=');
     expect(page).not.toContain('Validade encerrada');
   });
@@ -43,7 +44,7 @@ describe('Leitura pública', () => {
     const evil = '<script>alert(1)</script><img src=x onerror=alert(2)>';
     await seed(ID_A, quote({ businessName: evil, notes: `${evil}\n"aspas" & 'apóstrofo'`, items: [{ description: evil, quantity: 1, unitPriceCents: 100 }] }));
     const page = await (await readOnly(req('GET', `/o/${ID_A}`), env)).text();
-    expect(page).not.toContain('<script'); expect(page).not.toContain('<img'); expect(page).not.toContain('onerror=alert(2)>');
+    expect(page).not.toContain('<script'); expect(page).not.toContain('<img src=x'); expect(page).not.toContain('onerror=alert(2)>');
     expect(page).toContain('&lt;script&gt;alert(1)&lt;/script&gt;');
     expect(page).toContain('&quot;aspas&quot; &amp; &#39;apóstrofo&#39;');
   });
@@ -85,7 +86,7 @@ describe('Leitura pública', () => {
     expect((await readOnly(req('GET', `/api/quotes/${ID_A}`), env)).status).toBe(410);
     await insertQuote(db.d1, { id: ID_B, payload: '{"version":1,"custo":10}', now: NOW.toISOString(), ownerId: 'x' });
     const res = await readOnly(req('GET', `/o/${ID_B}`), env);
-    expect(res.status).toBe(500); expect(await res.text()).not.toContain('custo');
+    expect(res.status).toBe(500); expect(await res.text()).not.toContain('&quot;custo&quot;:10');
   });
   it('API JSON devolve só o orçamento público e os totais calculados, sem dados internos', async () => {
     await seed(ID_A, quote());

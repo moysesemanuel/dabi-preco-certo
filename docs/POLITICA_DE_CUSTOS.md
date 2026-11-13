@@ -1,5 +1,7 @@
 # Política de infraestrutura de custo zero
 
+> **Atualização da Etapa 7 (13/11/2026):** o Pages de staging usa `usage_model=standard`. A documentação atual da Cloudflare diz que Service Bindings no modelo Standard não geram requisição faturável adicional; a antiga hipótese de dobrar o consumo não deve ser usada como fato. Métricas de staging e lacunas de medição: [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md).
+
 **Diretriz:** manter o DaBi Preço Certo dentro dos limites **gratuitos** dos serviços, enquanto o volume de clientes permitir, **sem** limitar funcionalidades importantes nem comprometer a integridade dos dados. Vale para toda nova implementação (veja a lista de verificação no fim).
 
 > Estimativas deste documento são **projeções com hipóteses explícitas**, nunca capacidade garantida. Os números oficiais vêm dos painéis dos provedores.
@@ -20,7 +22,7 @@ Verificado nas documentações oficiais em **12/11/2026** (a data de última atu
 Pontos de atenção que vêm da documentação:
 - **Escrita no D1 é o limite mais apertado** (100 mil/dia contra 5 milhões de leituras): ~50x menor.
 - O erro 1027 e o comportamento "fail open/closed" da rota: com domínio próprio, escolha **fail closed** para a rota da API (Workers → Routes), para que estouro de cota não contorne o Worker.
-- Pages Functions contam nas requisições do Worker: **não usar Functions** (o app é 100% estático).
+- Pages Functions contam nas requisições do Worker: mantê-las apenas em `/api/*` e `/o/*`; o app estático não as invoca.
 - Consultas manuais (dashboard, `wrangler`, exportações) também consomem leituras do D1.
 
 ## 2. Metas internas (conservadoras)
@@ -197,7 +199,7 @@ npx vitest run tests/costs   # orçamentos de regressão (rodam também em `npm 
 Rotas `/api/admin/*`: autorização no servidor, 120 leituras e 30 escritas por minuto por administrador, paginação por cursor (25 por página), uma consulta agregada para os indicadores, auditoria com retenção de 365 dias. Sem polling e sem serviço novo; uso esperado de dezenas de ações por dia (desprezível frente aos limites). Detalhes em `PAINEL_ADMINISTRATIVO.md` §9.
 
 ### Publicação no Pages (Etapa 6)
-Cada chamada `/api/*` e `/o/*` passa por uma Pages Function e pelo Worker (Service Binding). Premissa a confirmar: contar como 2 requisições. Nesse caso a capacidade por requisições cai pela metade (≈132 → ≈66 contas a 50%). Arquivos estáticos não consomem cota. Detalhes em `PUBLICACAO_CLOUDFLARE.md` §9.
+Cada chamada `/api/*` e `/o/*` passa por uma Pages Function e pelo Worker via Service Binding. O Pages usa o modelo Standard: a [documentação de preços dos Workers](https://developers.cloudflare.com/workers/platform/pricing/) diz que a chamada ao serviço vinculado não acrescenta requisição faturável nesse modelo; modelos legados Bundled/Unbound diferem. A Function conta na cota Workers Free, e arquivos estáticos não contam. A projeção antiga de 2 requisições por ação (≈132 → ≈66 contas a 50%) era uma hipótese conservadora, não um limite confirmado. Validar o uso faturável real no painel.
 
 ## 12. Critérios para considerar upgrade
 

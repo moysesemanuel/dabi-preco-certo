@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArchiveRestore, CalendarDays, ChefHat, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
+import { UserRound } from 'lucide-react';
 import type { DataSet } from './domain/types';
 import { emptyData, loadDataVersioned, readDataVersion, saveDataCas, StaleWriteError } from './storage/db';
 import { createCoordinator, type Role } from './storage/coordination';
@@ -20,12 +20,7 @@ import { AgendaPage } from './pages/AgendaPage';
 import { ConverterPage } from './pages/ConverterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BackupPage } from './pages/BackupPage';
-
-const pages: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
-  { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard }, { id: 'ingredients', label: 'Ingredientes', icon: ShoppingBasket },
-  { id: 'recipes', label: 'Receitas e preços', icon: ChefHat }, { id: 'orders', label: 'Encomendas', icon: ClipboardCheck }, { id: 'agenda', label: 'Agenda', icon: CalendarDays },
-  { id: 'converter', label: 'Conversor', icon: Ruler }, { id: 'backup', label: 'Backup', icon: ArchiveRestore }, { id: 'settings', label: 'Configurações', icon: Settings },
-];
+import { Sidebar } from './components/Sidebar';
 
 /** Aviso quando a sincronização precisa de uma decisão sua (por exemplo, dados dos dois lados na primeira entrada). */
 function SyncBanner({ focus }: { focus: (p: Page) => void }) {
@@ -141,8 +136,8 @@ export default function App() {
   const viewer = eff === 'viewer';
 
   return <AccountProvider data={data} setData={setData} ready={ready && eff === 'editor'} epoch={epoch} metaVersion={metaVersion}><AccessGate data={data}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
-    <aside className="sidebar"><div className="brand"><div className="brand-mark"><ClipboardCheck size={22} /></div><span>Pedido<span style={{ color: '#ff982b' }}>Certo</span></span></div><nav className="nav" aria-label="Navegação principal">{pages.map(p => { const Icon = p.icon; return <button key={p.id} className={page === p.id ? 'active' : ''} aria-current={page === p.id ? 'page' : undefined} onClick={() => focus(p.id)}><Icon size={18} />{p.label}</button>; })}</nav><div className="sidebar-foot"><strong style={{ color: 'white' }}>Versão beta</strong><br />Seus dados ficam neste navegador e, se você entrar numa conta (opcional), também no servidor. Exporte backups regularmente.</div></aside>
-    <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><ChefHat size={16} /></div></header><div className="content" id="conteudo">
+    <Sidebar activePage={page} onNavigate={focus} />
+    <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><UserRound size={16} aria-hidden="true" /></div></header><div className="content" id="conteudo">
       {blocked ? <LostWorkBanner onDownload={() => downloadBackup(blocked)} onReload={() => { void reload.current('reset'); }} /> : viewer && <ViewerBanner canTakeOver={coordinator.supported} onTakeOver={() => coordinator.takeOver()} />}
       {!viewer && <SyncBanner focus={focus} />}
       {!viewer && <ConflictBanner />}

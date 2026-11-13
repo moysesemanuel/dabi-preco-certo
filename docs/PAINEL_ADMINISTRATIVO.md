@@ -1,6 +1,6 @@
 # Painel administrativo do proprietário (Etapa 5)
 
-Rota do app: `/admin`. API: `/api/admin/*`. **Nada disto foi publicado nem aplicado remotamente**: a migração `0009_admin.sql` existe só no repositório e no D1 local; o staging continua em 0001–0008.
+Rota do app: `/admin`. API: `/api/admin/*`. **Estado em 13/11/2026:** o staging publicado tem a migração `0009_admin.sql` no D1 remoto (consulta de leitura a `d1_migrations`) e o proprietário relatou acesso real ao painel, cadastro de cliente e suspensão/reativação aprovados. A data exata desses testes não foi informada. Este documento conserva a descrição de implementação; o plano de produção está em [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md).
 
 ## 1. Diagnóstico da arquitetura existente (o que foi reaproveitado)
 
@@ -28,7 +28,7 @@ sessão válida (cookie HttpOnly) → conta não desativada → licença da cont
 
 ## 3. Migração preparada: `worker/migrations/0009_admin.sql`
 
-Aditiva (só `CREATE`): tabelas `admins` e `admin_audit` e o índice `idx_licenses_created` (paginação). Não altera nem lê dados existentes. Ensaio em `tests/ops/migration-rehearsal.test.ts` (estágios 0001–0006/0007/0008 → 0009). Aplicação remota: **decisão sua**, na ordem **banco → Worker → app** (veja `ATUALIZACAO_STAGING.md`). Worker antigo com banco novo continua funcionando; Worker novo **sem** a 0009 responde 500 nas rotas `/api/admin` (as demais não são afetadas).
+Aditiva (só `CREATE`): tabelas `admins` e `admin_audit` e o índice `idx_licenses_created` (paginação). Não altera nem lê dados existentes. Ensaio em `tests/ops/migration-rehearsal.test.ts` (estágios 0001–0006/0007/0008 → 0009). **Já aplicada no staging; ainda não existe D1 de produção.** Para produção, ordem **banco → Worker → app**. Worker antigo com banco novo continua funcionando; Worker novo **sem** a 0009 responde 500 nas rotas `/api/admin` (as demais não são afetadas).
 
 ## 4. Criar o primeiro administrador (bootstrap)
 
@@ -84,21 +84,20 @@ Autorização no servidor (usuário comum e sessão revogada/desativada/licença
 
 ## 11. Checklist manual de homologação (antes de usar em produção)
 
-1. Aplicar a 0009 no staging (backup antes) e publicar Worker e app, na ordem do plano.
+1. **Histórico concluído no staging:** a 0009 está aplicada; não repetir a migração. Para produção, seguir o plano da Etapa 7 com D1 próprio.
 2. Conceder administrador (§4) e entrar em `/admin` com o código real por e-mail.
 3. Com uma conta comum (outro e-mail), abrir `/admin`: deve ver "Acesso negado".
 4. Cadastrar cliente de teste (sem e-mail enviado); fazer o primeiro login dele; conferir "Aguardando 1º login" → conectado.
 5. Suspender (digitando o e-mail): o cliente vê a mensagem de licença revogada, não sincroniza, consegue exportar backup; reativar.
 6. Revogar uma sessão e todas; conferir que o dispositivo pede novo código.
 7. Conferir o histórico (quem, ação, conta, hora).
-8. Celular (320/375/390 px) e Safari/Firefox: login, lista, detalhe, modais, rolagem, botões de 44 px. **Não verificado em celular real nesta etapa** (apenas Chrome desktop contra Worker local).
+8. Celular (320/375/390 px) e Safari/Firefox: login, lista, detalhe, modais, rolagem, botões de 44 px. O proprietário informou teste em celular físico no staging; matriz completa de navegadores não foi informada.
 9. Desligar a rede e tentar suspender: a tela deve avisar que não foi confirmado.
 
 ## 12. Publicação futura em `https://precocerto.dabitech.com.br/admin`
 
 - **Mesma origem, cookie de primeira parte.** Servir o app e a API no mesmo host elimina cookies entre sites: o cookie `__Host-dabi_session` (Secure, sem Domain, `Path=/`) já é compatível. Pré-requisitos: `ALLOWED_ORIGINS` com `https://precocerto.dabitech.com.br` (o `Origin` das requisições `POST` precisa estar na lista) e o app com `VITE_API_URL=same-origin`.
-- **Opção A (recomendada para um único serviço): Cloudflare Workers com Static Assets.** O Worker atual passa a servir `dist/` (`assets.directory`) com `not_found_handling = "single-page-application"` (para `/admin` cair no `index.html`) e `run_worker_first = ["/api/*", "/o/*", "/healthz"]`, de modo que a API fica em rotas protegidas sob `/api`. Um deploy só, sem outro serviço. Exige editar `wrangler.toml` (não feito aqui).
-- **Opção B: manter Pages para o app e rotear `/api/*` (e `/o/*`) para o Worker** por *route* no mesmo domínio. Dois serviços, mesmo host.
+- **Arquitetura escolhida para produção:** Cloudflare Pages para o app; Pages Functions em `/api/*` e `/o/*` encaminham ao Worker por Service Binding `API`. O plano de configuração e isolamento do Preview está em `ETAPA_7_PREPARACAO_PRODUCAO.md`.
 - O build já gera `_headers` com CSP (`connect-src 'self'`, ou a API) e cabeçalhos `noindex`/`no-store` para `/admin`; com Workers Static Assets, o arquivo `_headers` também é respeitado.
 - O painel é um *chunk* separado (≈25 KB, 8 KB comprimido): clientes comuns nunca o baixam.
 - Alternativa de defesa em profundidade (futura, gratuita): regra de acesso (Cloudflare Access gratuito para poucos usuários) na rota `/admin` **e** `/api/admin/*`, além da autorização do servidor.

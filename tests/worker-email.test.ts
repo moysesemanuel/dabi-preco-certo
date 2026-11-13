@@ -65,6 +65,9 @@ describe('Adaptador Resend', () => {
 describe('Modelo do e-mail de login', () => {
   const m = loginCodeEmail('01234567', 10);
   it('traz texto simples e HTML responsivo com o mesmo código', () => {
+    expect(m.subject).toBe('Seu código de acesso ao Custô');
+    expect(m.text).toContain('Seu código de acesso ao Custô');
+    expect(m.html).toContain('>Custô</td>');
     expect(m.text).toContain('01234567'); expect(m.text).toContain('10 minutos');
     expect(m.html).toContain('0123 4567'); expect(m.html).toContain('name="viewport"'); expect(m.html).toContain('max-width:480px');
     expect(m.html).not.toMatch(/<script|<img|<a |https?:\/\//i); // sem rastreamento, scripts nem links

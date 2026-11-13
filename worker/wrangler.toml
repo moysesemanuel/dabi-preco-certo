@@ -31,11 +31,12 @@ migrations_dir = "migrations"
 # ---------------------------------------------------------------------------------------------------------------------
 [env.staging]
 name = "dabi-orcamentos-staging"
-workers_dev = false
+workers_dev = true
 
 [env.staging.vars]
-PUBLIC_BASE_URL = "https://orcamento-hml.exemplo.com.br"
-ALLOWED_ORIGINS = "https://app-hml.exemplo.com.br"
+PUBLIC_BASE_URL = "https://dabi-preco-certo-staging.pages.dev"
+ALLOWED_ORIGINS = "https://dabi-preco-certo-staging.pages.dev,http://localhost:5174,http://127.0.0.1:5174"
+APP_ENV = "staging"
 LEGACY_KEY_AUTH = "off"
 # E-mail pelo Resend. Sem o segredo RESEND_API_KEY o login responde 503 (nada finge ser enviado).
 # Segredo: `wrangler secret put RESEND_API_KEY --env staging`. EMAIL_FROM precisa ser um remetente de domínio verificado no Resend.
@@ -45,7 +46,7 @@ EMAIL_FROM = "DaBi Preço Certo <acesso@mail.dabitech.com.br>"
 [[env.staging.d1_databases]]
 binding = "DB"
 database_name = "dabi-orcamentos-staging"
-database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-HOMOLOGACAO"
+database_id = "6d6b478a-efe5-4ab1-a99e-07b6c5c1dc64"
 migrations_dir = "migrations"
 
 [env.production]
@@ -76,3 +77,4 @@ binding = "DB"
 database_name = "dabi-orcamentos-restauracao"
 database_id = "SUBSTITUIR-PELO-ID-DO-D1-DE-RESTAURACAO"
 migrations_dir = "migrations"
+
