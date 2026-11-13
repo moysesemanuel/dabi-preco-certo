@@ -46,7 +46,7 @@ Rotas: `POST /api/auth/request-code`, `POST /api/auth/verify-code`, `GET /api/au
 
 Segredos: `AUTH_SECRET` em `wrangler secret put AUTH_SECRET` (produção) ou `worker/.dev.vars` (desenvolvimento; veja `.dev.vars.example`).
 
-Emissão: `npm run licenses -- issue --env <ambiente> --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`. O ambiente é sempre explícito (veja "Fluxo de emissão manual").
+Emissão: `npm run licenses -- issue --env <ambiente> --email comprador@exemplo.com` (licença de conta; a chave gerada é descartada), `bind <lic_id> --email ...` (vincula uma licença antiga), `revoke-sessions <lic_id>`, `grant-admin --email e [--additional]`, `revoke-admin --email e`, `list-admins` (acesso ao painel `/admin`; veja `docs/PAINEL_ADMINISTRATIVO.md`). O ambiente é sempre explícito (veja "Fluxo de emissão manual").
 
 ## Dados online e sincronização (Etapa 1, Fase 3)
 
@@ -115,7 +115,7 @@ npm run licenses -- revoke   <lic_id> --env staging [--revoke-quotes]
 npm run licenses -- revoke-sessions <lic_id> --env staging
 ```
 
-**Produção, operações destrutivas** (`revoke`, `revoke-sessions`): exigem confirmação adicional, específica da licença. Interativo: o CLI pede para digitar o `lic_…`. Automação autorizada (sem terminal): `--confirm-production <lic_id>` com o **mesmo** id do comando; sem isso, nada é executado. Fora de produção a confirmação não existe e `--confirm-production` é erro.
+**Produção, operações destrutivas** (`revoke`, `revoke-sessions`, `grant-admin`, `revoke-admin`): exigem confirmação adicional, específica do alvo. Interativo: o CLI pede para digitar o `lic_…` (ou o e-mail, nos comandos de administrador). Automação autorizada (sem terminal): `--confirm-production <lic_id ou e-mail>` com o **mesmo** valor do comando; sem isso, nada é executado. Fora de produção a confirmação não existe e `--confirm-production` é erro.
 
 **Migrações, backup e restauração** usam o mesmo controle (`npm run d1 -- <comando> --env <ambiente>`): `migrate`, `export --output arquivo.sql`, `restore-file --file arquivo.sql` (nunca em produção; use `time-travel-restore`), `time-travel-info`, `time-travel-restore --timestamp`. Em produção, `migrate`, `restore-file` e `time-travel-restore` pedem confirmação com o **nome do banco** (`--confirm-production dabi-orcamentos-producao`). Veja `docs/BACKUP_E_RECUPERACAO.md`.
 

@@ -193,6 +193,9 @@ npx vitest run tests/costs   # orçamentos de regressão (rodam também em `npm 
 | **R5** | Teto diário de sincronização por conta (ex.: 5.000 requisições) | Limita o dano de um cliente defeituoso | +1 escrita por requisição se feito em D1 → só junto com R1 |
 | **R6** | Cache curto (60 s) nas páginas públicas de orçamento na borda (domínio na zona) | Corta requisições de links muito acessados | A revogação demora até o TTL: decisão de produto |
 
+### Painel administrativo (Etapa 5)
+Rotas `/api/admin/*`: autorização no servidor, 120 leituras e 30 escritas por minuto por administrador, paginação por cursor (25 por página), uma consulta agregada para os indicadores, auditoria com retenção de 365 dias. Sem polling e sem serviço novo; uso esperado de dezenas de ações por dia (desprezível frente aos limites). Detalhes em `PAINEL_ADMINISTRATIVO.md` §9.
+
 ## 12. Critérios para considerar upgrade
 
 Considerar quando **qualquer** um ocorrer (Workers Paid: assinatura mínima de US$ 5/mês por conta, mais uso acima do incluído):
