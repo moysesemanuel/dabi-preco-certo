@@ -44,6 +44,10 @@ export function verifyRelease(cwd, env, approvedCommit) {
 }
 export const verifyStagingRelease = (cwd, approvedCommit) => verifyRelease(cwd, 'staging', approvedCommit);
 export const verifyProductionRelease = (cwd, approvedCommit) => verifyRelease(cwd, 'production', approvedCommit);
+export const pagesDeployArgs = (config, approvedCommit, env = 'staging') => [
+  'pages', 'deploy', 'dist', '--project-name', config.project, '--branch', config.branch,
+  '--commit-hash', approvedCommit, '--commit-message', `Custô ${env} release ${approvedCommit}`,
+];
 
 const walk = dir => readdirSync(dir).flatMap(n => { const p = join(dir, n); return statSync(p).isDirectory() ? walk(p) : [p]; });
 
@@ -94,7 +98,9 @@ function main(argv) {
   if (problems.length) { console.error(`Validação FALHOU:\n${problems.map(p => `  - ${p}`).join('\n')}`); return 1; }
   console.error('Validação ok (dist, _routes.json, _headers, Functions).');
   if (command === 'deploy' && publish) {
-    run('npx', ['wrangler', 'pages', 'deploy', 'dist', '--project-name', config.project, '--branch', config.branch]);
+    const afterBuild = verifyRelease(process.cwd(), env, approvedCommit);
+    if (afterBuild.length) { console.error(`Publicação de ${env} recusada após o build:\n${afterBuild.map(p => `  - ${p}`).join('\n')}`); return 1; }
+    run('npx', ['wrangler', ...pagesDeployArgs(config, approvedCommit, env)]);
   } else if (command === 'deploy') console.error('Nada foi publicado. Para publicar, repita com --publish.');
   return 0;
 }

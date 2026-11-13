@@ -12,7 +12,7 @@
     "worker:migrate": "node worker/scripts/d1.ts migrate --env local",
     "d1": "node worker/scripts/d1.ts",
     "worker:dry-run:staging": "wrangler deploy --dry-run --env staging --config worker/wrangler.toml --outdir .wrangler/dry-run",
-    "worker:deploy:staging": "wrangler deploy --env staging --config worker/wrangler.toml",
+    "worker:deploy:staging": "node scripts/worker.mjs deploy staging --publish",
     "worker:dev": "wrangler dev --local --config worker/wrangler.toml",
     "licenses": "node worker/scripts/licenses.ts",
     "typecheck": "tsc -b",

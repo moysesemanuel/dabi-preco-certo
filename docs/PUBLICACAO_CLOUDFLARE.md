@@ -2,7 +2,7 @@
 
 > **Estado em 13/11/2026:** staging está publicado. A API Cloudflare confirmou deployment canônico `a9efb520-07e2-428e-ac77-54d196a0ea01`, `APP_ENV=staging` e `API` → `dabi-orcamentos-staging` em Production e Preview. O texto abaixo é o roteiro histórico da Etapa 6; estado atual e plano de produção: [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md).
 
-> **Nada aqui foi executado contra a Cloudflare, a Vercel ou o DNS.** Esta etapa só preparou arquivos, scripts e testes locais. Quem executa os comandos remotos (e decide quando) é você. As regras de segurança continuam: nenhum segredo em arquivo versionado, `worker/wrangler.toml` e `backups/` não são alterados pelo repositório.
+> **O roteiro histórico abaixo não foi executado contra a Cloudflare, a Vercel ou o DNS.** A preparação atual ajusta somente o nome de exibição de `EMAIL_FROM` em `[env.staging.vars]`; não muda o endereço, segredos, banco, DNS nem `backups/`. O procedimento reproduzível e o estado atual estão nas seções de release ao fim deste documento.
 
 ## 1. Arquitetura final
 
@@ -46,7 +46,7 @@ Veja o diff pronto em **`docs/PROPOSTA_WRANGLER_TOML.diff`** (gerado contra a su
 - production: `ALLOWED_ORIGINS = "https://precocerto.dabitech.com.br"`, `PUBLIC_BASE_URL = "https://precocerto.dabitech.com.br"` (links `/o/…` pelo mesmo host), `APP_ENV = "production"`, `workers_dev = false` (a produção só é alcançada pelo Pages).
 - Não crie `wrangler.toml` na **raiz** do repositório: com `pages_build_output_dir` ele passaria a ser a fonte da verdade do projeto Pages e sobrescreveria os bindings do painel.
 
-Depois de editar, o Worker precisa ser publicado de novo (`npm run worker:deploy:staging`) para valer, e **antes** do Pages (o Worker novo já traz a guarda `APP_ENV` e as rotas `/api/admin`).
+Depois de editar, publique o Worker de staging **antes** do Pages usando o mesmo SHA aprovado; o wrapper exige SHA completo e checkout limpo, registra o SHA na versão e ativa o modo `--strict` do Wrangler.
 
 ## 4. Teste local da cadeia completa (sem Cloudflare)
 
@@ -66,15 +66,17 @@ Pré-requisito: `npx wrangler whoami` mostra a sua conta. Ordem importante: **Wo
 ```bash
 # 0. Worker de staging com a guarda e a origem do Pages (depois de aplicar a proposta do §3 ao seu wrangler.toml)
 npm run worker:dry-run:staging
-npm run worker:deploy:staging
+npm run worker:deploy:staging -- --approved-commit <SHA40-aprovado>
 
 # 1. Criar o projeto Pages de staging (upload direto; nada é publicado ainda)
 npx wrangler pages project create dabi-preco-certo-staging --production-branch staging
 
 # 2. Configurar bindings e variável NO PAINEL (veja §6) e só então publicar:
 npm run pages:deploy:staging:dry      # build + validação, sem enviar
-npm run pages:deploy:staging -- --approved-commit <SHA40-aprovado>  # publica só o commit aprovado, com checkout limpo
+npm run pages:deploy:staging -- --approved-commit <SHA40-aprovado>  # mesmo SHA; anexa o hash ao deployment
 ```
+
+O SHA deve ser o mesmo nos dois comandos. Antes de iniciar, confira `git status --porcelain` vazio e `git rev-parse HEAD` idêntico ao SHA aprovado. Registre o ID da nova versão do Worker e o ID do novo deployment Pages para rollback.
 
 Conferência (substitua pelo endereço que a Cloudflare mostrar):
 ```bash
@@ -111,9 +113,9 @@ Qual projeto recebe o domínio: para a fase de beta com dados de homologação, 
 
 ## 8. Rollback
 
-- **Front-end:** painel → projeto → *Deployments* → deployment anterior → *Rollback to this deployment* (instantâneo, sem rebuild). Ou publique de novo o commit anterior.
+- **Front-end:** painel → projeto staging → *Deployments* → deployment anterior → *Rollback to this deployment* (instantâneo, sem rebuild). Alternativamente, faça checkout limpo do commit anterior aprovado e publique com `npm run pages:deploy:staging -- --approved-commit <SHA40-anterior>`.
 - **Proxy fora do ar:** apague o binding `API` no painel (as rotas `/api` passam a responder 503 `PROXY_NOT_CONFIGURED`; o app continua abrindo e usa os dados locais) e refaça o deploy.
-- **Worker:** `npx wrangler rollback --env staging` (versão anterior; o banco não volta, mas as migrações são aditivas e o Worker antigo as tolera).
+- **Worker:** `npx wrangler rollback <VERSION_ID_ANTERIOR> --name dabi-orcamentos-staging --env staging --config worker/wrangler.toml --message "Rollback Custô staging"`. Use o ID anotado antes da publicação; o comando seleciona explicitamente a versão anterior. O banco não volta.
 - **Banco:** Time Travel / backups (`docs/BACKUP_E_RECUPERACAO.md`).
 - **DNS:** veja o aviso do §7 antes de remover o CNAME.
 
@@ -137,6 +139,31 @@ Arquivos estáticos do Pages não têm cota de requisições. Cada chamada `/api
     e compare com `printf 'ip:SEU_IP_PUBLICO' | shasum -a 256` (precedido por `i_`). Se aparecer o hash de `ip:unknown`, o `cf-connecting-ip` não chegou ao Worker: todos os clientes dividiriam o limite de 30/h por IP (o limite por e-mail continua); nesse caso avise antes de ir a produção (a correção é encaminhar o IP em um cabeçalho próprio, aceito só vindo do binding).
 11. Consumo: acompanhe requisições de Functions e do Worker no painel por alguns dias (§9).
 12. Cabeçalhos: `curl -sI` em `/admin`, `/` e `/api/auth/session` (CSP, HSTS, `no-store`, sem `Set-Cookie` fora do login).
+
+### Checklist manual do release Custô
+
+Use somente contas e dados de teste já autorizados no staging; faça uma solicitação de código por vez.
+
+1. **Login:** solicitar um código, confirmar o código de 8 dígitos, recarregar a página, confirmar persistência da sessão e encerrar sessão. Conferir cookie `__Host-dabi_session` com `Secure`, `HttpOnly`, `SameSite=Lax`, `Path=/` e sem `Domain`.
+2. **Cálculo financeiro:** cadastrar dados sintéticos de ingrediente/receita com valores conhecidos e comparar custo unitário e preço sugerido com os valores esperados; conferir que a exibição arredonda a centavos.
+3. **Recebimentos:** registrar um valor parcial e outro que complete o saldo; confirmar saldo zero, rejeição de valor acima do saldo e normalização de frações para centavos.
+4. **Sincronização:** com a mesma conta de teste em dois navegadores, editar um registro em um lado e verificar chegada no outro; causar edição simultânea de um mesmo registro e confirmar que o app preserva o conflito, sem duplicar encomenda/recebimento nem repetir pushes em loop.
+5. **Painel administrativo:** abrir `/admin` diretamente e atualizar; confirmar que não autenticado recebe 401, usuário comum recebe acesso negado e administrador autorizado acessa. Não suspender ou alterar clientes reais durante a homologação.
+6. **Orçamentos públicos:** criar orçamento de teste, abrir `/o/*` em janela anônima, confirmar identidade Custô e links de compartilhamento, revogar e confirmar que o link deixa de exibir os dados.
+7. **Celular físico:** repetir login, navegar pelas telas principais e abrir um orçamento em 320–390 px; confirmar teclado não oculta ação primária, sem rolagem horizontal e botões utilizáveis por toque.
+8. **Fechamento:** registrar IDs dos deployments, hora UTC, SHA exibido em Pages e SHA anotado na versão do Worker; comparar ambos com o SHA aprovado e monitorar erros 4xx/5xx, CPU, linhas lidas/escritas e invocações.
+
+### Ponto de rollback antes deste release
+
+Leitura remota de 13/11/2026: Pages deployment anterior `a9efb520-07e2-428e-ac77-54d196a0ea01`; Worker staging version anterior `86fc9203-63f3-4b4a-8354-d4a12218352c`. Antes de cada publicação, atualize e anote novamente os IDs atuais.
+
+Se a homologação falhar, reverta primeiro o Pages ao deployment anterior pelo dashboard (ou publique o commit anterior limpo, anexando seu SHA); depois reverta o Worker para o version ID anotado:
+
+```bash
+npx wrangler rollback <VERSION_ID_ANTERIOR> --name dabi-orcamentos-staging --env staging --config worker/wrangler.toml --message "Rollback Custô staging"
+```
+
+Este release não inclui migração D1. Não faça rollback/restauração de banco; a reversão de código não deve tocar nos dados. Confirme health, sessão não autenticada (401), `/admin` (200) e acesso administrativo negado (401/403) após reverter.
 
 ## 11. Riscos e pendências de segurança
 

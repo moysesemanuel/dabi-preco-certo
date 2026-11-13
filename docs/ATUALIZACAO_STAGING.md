@@ -105,7 +105,7 @@ npm run d1 -- query --env staging --command "SELECT COUNT(*) AS sem_codigo FROM 
 ```bash
 npm run worker:dry-run:staging                 # local: confirma banco dabi-orcamentos-staging e variáveis; nada é publicado
 npx wrangler secret list --env staging --config worker/wrangler.toml     # só NOMES: esperado AUTH_SECRET e RESEND_API_KEY (nunca exiba valores)
-npm run worker:deploy:staging                  # PUBLICA o Worker de staging (--env staging explícito)
+npm run worker:deploy:staging -- --approved-commit <SHA40-aprovado> # publica Worker staging só com SHA aprovado e checkout limpo
 curl -s https://dabi-orcamentos-staging.moyses-adm.workers.dev/healthz   # {"ok":true}
 npx wrangler tail --env staging --config worker/wrangler.toml            # deixe aberto durante a Fase D; procure respostas 5xx/erros (Ctrl+C para sair)
 ```
@@ -166,9 +166,9 @@ Entre com o seu e-mail (um código chega por e-mail; vale 10 min). **Cada aparel
 ### 5.2 O Worker novo apresenta erros (Fase C/D)
 ```bash
 npx wrangler deployments list --env staging --config worker/wrangler.toml   # versões publicadas
-npx wrangler rollback --env staging --config worker/wrangler.toml           # volta à versão anterior do Worker (o banco novo continua compatível)
+npx wrangler rollback <VERSION_ID_ANTERIOR> --name dabi-orcamentos-staging --env staging --config worker/wrangler.toml --message "Rollback Custô staging" # restaura a versão anterior anotada
 ```
-Alternativa: publicar de novo o código do último deploy bom (o commit `845cc67`, anterior ao catálogo, foi testado contra o esquema 0001–0008) com `wrangler deploy --env staging`. Depois do rollback o app novo volta ao descompasso do §0 (conflitos "falsos"; nada se perde).
+Não publique um `HEAD` arbitrário com `wrangler deploy` como atalho de rollback. Se a versão anterior não estiver disponível para rollback, pare e prepare um release anterior com SHA e checkout limpo antes de qualquer publicação. Depois do rollback do Worker, o app novo volta ao descompasso do §0 (conflitos "falsos"; nada se perde).
 
 ### 5.3 Dados corrompidos ou perdidos (último recurso)
 1. **Time Travel** (7 dias): `npm run d1 -- time-travel-restore --env staging --timestamp <ISO-UTC do ponto anotado em A5>` — **substitui o estado atual do banco**; avise quem usa e anote o horário.

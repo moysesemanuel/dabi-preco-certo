@@ -60,6 +60,14 @@ Referências oficiais consultadas em 13/11/2026:
 
 Na revisão inicial, a publicação de staging não exigia SHA aprovado nem checkout limpo. Corrigi o script para exigir ambos antes de publicar em staging ou produção; produção continua exigindo também branch `main` e confirmação pelo nome do projeto. O staging publicado está atrasado em relação ao HEAD local. Antes de beta: publicar staging sob autorização com SHA explícito, repetir homologação funcional na revisão nova, acompanhar picos de Rows Written e Worker invocations no dashboard, confirmar política de backup/restauração e conferir contabilização Pages/Service Binding no plano efetivo.
 
+### Preparação do release de staging (13/11/2026)
+
+- A versão remota ativa do Worker staging ainda tinha `EMAIL_FROM` com o nome de exibição antigo. A leitura filtrada confirmou que o endereço completo coincide com a configuração local; nenhum token ou secret foi lido ou impresso.
+- A configuração local de staging foi alterada somente no nome de exibição para `Custô`; o endereço verificado permanece idêntico. A seção local de produção não foi alterada.
+- O deploy do Worker staging agora passa por `scripts/worker.mjs`, exige SHA completo e checkout limpo, registra o SHA na mensagem e tag da versão, e usa Wrangler `--strict`.
+- O deploy de Pages agora envia `--commit-hash` e `--commit-message` com o mesmo SHA e confere novamente o checkout após o build.
+- O release candidato precisa ser um único commit aprovado contendo estas mudanças. Execute ambos os comandos de publicação com esse mesmo SHA, Worker primeiro e Pages depois. Nenhum dos dois foi executado nesta preparação.
+
 ## Veredito desta revisão
 
 **NÃO APTO para produção ainda.** Os testes locais estão verdes após a correção, mas o staging não está na revisão local, as correções não foram publicadas, não houve homologação manual da revisão atual e a semântica de cota do Service Binding no Free ainda precisa ser confirmada no plano ativo. O código pode avançar para uma rodada controlada de beta fechado somente depois da revisão e publicação autorizada dessas mudanças no staging e nova homologação.

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { emptyPush } from '../shared/sync';
 import { proxy, type ProxyEnv } from '../functions/_shared/proxy';
 import { makeServer, type Server } from './helpers/server';
-import { ENVIRONMENTS, parseArgs, validateDist, verifyProductionRelease, verifyStagingRelease } from '../scripts/pages.mjs';
+import { ENVIRONMENTS, pagesDeployArgs, parseArgs, validateDist, verifyProductionRelease, verifyStagingRelease } from '../scripts/pages.mjs';
 
 const HOST = 'https://precocerto.dabitech.com.br';
 const req = (path: string, init: RequestInit & { host?: string } = {}) => new Request(`${init.host ?? HOST}${path}`, init);
@@ -185,5 +185,12 @@ describe('Ambientes separados (script de publicação)', () => {
       git('checkout', '--', 'release.txt'); git('switch', '-c', 'feature');
       expect(verifyProductionRelease(dir, sha).join()).toContain('main');
     } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+  it('anexa o SHA completo aprovado aos metadados do deployment Pages', () => {
+    const sha = 'b'.repeat(40);
+    expect(pagesDeployArgs(ENVIRONMENTS.staging, sha)).toEqual([
+      'pages', 'deploy', 'dist', '--project-name', 'dabi-preco-certo-staging', '--branch', 'staging',
+      '--commit-hash', sha, '--commit-message', `Custô staging release ${sha}`,
+    ]);
   });
 });

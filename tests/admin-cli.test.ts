@@ -235,11 +235,15 @@ describe('CLI do D1: verificação somente leitura (migrations-list e query)', (
 
 describe('Publicação do Worker: sempre com ambiente explícito', () => {
   const scripts = (JSON.parse(readFileSync('package.json', 'utf8')) as { scripts: Record<string, string> }).scripts;
-  it('todo script que publica ou simula publicação informa --env e a configuração; nenhum aponta para produção', () => {
+  it('o dry-run usa Wrangler explicitamente e o deploy passa pelo guardrail de SHA para staging', () => {
     const deploys = Object.entries(scripts).filter(([, v]) => /wrangler\s+deploy/.test(v));
-    expect(deploys.map(([k]) => k).sort()).toEqual(['worker:deploy:staging', 'worker:dry-run:staging']);
+    expect(deploys.map(([k]) => k)).toEqual(['worker:dry-run:staging']);
     for (const [k, v] of deploys) { expect(v, k).toMatch(/--env staging/); expect(v, k).toContain('--config worker/wrangler.toml'); expect(v, k).not.toMatch(/production|producao/i); }
     expect(scripts['worker:dry-run:staging']).toContain('--dry-run');
+    expect(scripts['worker:deploy:staging']).toBe('node scripts/worker.mjs deploy staging --publish');
+    const wrapper = readFileSync('scripts/worker.mjs', 'utf8');
+    expect(wrapper).toContain("'--env', 'staging', '--config', 'worker/wrangler.toml'");
+    expect(wrapper).toContain("'--tag', approvedCommit, '--strict'");
   });
   it('a configuração de homologação não usa curingas nem a origem de produção e tem banco próprio', () => {
     const toml = readFileSync('worker/wrangler.toml', 'utf8');

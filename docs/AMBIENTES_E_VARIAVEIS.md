@@ -27,7 +27,7 @@ Definidas em `worker/wrangler.toml` (não secretas) ou como segredos.
 | `ALLOWED_ORIGINS` | variável | Origens do app autorizadas (CORS e CSRF), separadas por vírgula. **Em produção, só a origem real do app.** |
 | `LEGACY_KEY_AUTH` | variável | `off` (padrão): a autenticação antiga por chave de licença está desligada. |
 | `EMAIL_ADAPTER` | variável | `resend` em homologação/produção. Vazio = sem envio (login responde 503). `dev` só para desenvolvimento: imprime o código no terminal, **não entrega** e só é aceito quando todas as `ALLOWED_ORIGINS` são locais. |
-| `EMAIL_FROM` | variável | Remetente de domínio verificado no Resend: `DaBi Preço Certo <acesso@mail.dabitech.com.br>`. Inválido/ausente = envio desativado (503). |
+| `EMAIL_FROM` | variável | Staging usa o nome `Custô` com o endereço já verificado no Resend. A seção local de produção não foi alterada nesta preparação. Inválido/ausente = envio desativado (503). |
 | `EMAIL_DAILY_LIMIT` | variável (opcional) | Orçamento diário de e-mails de código de acesso (dia UTC). Padrão **80**, abaixo dos 100/dia do plano gratuito do Resend; ajuste ao mudar de plano. Valor inválido volta ao padrão. Veja `POLITICA_DE_CUSTOS.md`. |
 | `RESEND_API_KEY` | **segredo** | Chave do Resend (`re_...`), só de envio. `wrangler secret put RESEND_API_KEY --env <ambiente>`. Nunca no repositório, no app nem em `VITE_*`; não é registrada em log nem aparece em erros. |
 | `AUTH_SECRET` | **segredo** | Protege os códigos de login (HMAC). Aleatório, longo, exclusivo de cada ambiente. `wrangler secret put AUTH_SECRET --env <ambiente>`. Trocá-lo invalida os códigos pendentes (sessões abertas continuam). |
