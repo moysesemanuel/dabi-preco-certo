@@ -46,6 +46,14 @@ const headers = `# Gerado por scripts/generate-headers.mjs (não edite o arquivo
   Cache-Control: no-cache
 /index.html
   Cache-Control: no-cache
+
+# Painel do proprietário: fora de buscadores e sem cache compartilhado (a permissão é sempre decidida pelo servidor).
+/admin
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
+/admin/*
+  X-Robots-Tag: noindex, nofollow
+  Cache-Control: no-store
 `;
 writeFileSync('dist/_headers', headers);
 console.log(`dist/_headers gerado (connect-src: ${apiOrigin || "somente 'self'"}).`);

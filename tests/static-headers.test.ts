@@ -25,6 +25,10 @@ describe('Cabeçalhos de segurança da hospedagem estática (Cloudflare Pages)',
   it('com VITE_API_URL libera exatamente a origem da API em connect-src (sem caminho)', () => {
     expect(csp(generate('https://api-hml.exemplo.com.br/qualquer/caminho'))).toContain("connect-src 'self' https://api-hml.exemplo.com.br;");
   });
+  it('/admin não é indexado nem guardado em cache', () => {
+    const h = generate();
+    expect(h).toMatch(/\/admin\n  X-Robots-Tag: noindex, nofollow\n  Cache-Control: no-store/);
+  });
   it('recusa API em http fora de localhost e URL inválida (o build falha em vez de publicar política errada)', () => {
     expect(() => generate('http://api.exemplo.com')).toThrow();
     expect(() => generate('isto não é url')).toThrow();
