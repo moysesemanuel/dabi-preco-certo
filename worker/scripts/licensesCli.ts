@@ -1,6 +1,7 @@
 /** Lógica do CLI de licenças, separada da entrada (`licenses.ts`) para ser testável sem tocar em banco algum. Veja `worker/README.md`. */
 import { generateLicenseId, generateLicenseKey, hashLicenseKey, LICENSE_ID_PATTERN } from '../src/licenses.ts';
 import { bindLicenseEmailSql, issueLicenseSql, licenseStatusSql, listLicensesSql, revokeLicenseQuotesSql, revokeLicenseSessionsSql, setLicenseStatusSql } from '../src/licenseAdmin.ts';
+import { activeAdminCountSql, adminAuditSql, adminByEmailSql, grantAdminSql, listAdminsSql, revokeAdminSql } from '../src/adminGrant.ts';
 import { banner, confirmProduction, selectTarget, wranglerScope, type ConfirmDeps, type Target } from './targets.ts';
 
 export type CliDeps = ConfirmDeps & {
@@ -19,12 +20,15 @@ const COMMANDS = {
   revoke: { positional: 1, options: [], flags: ['--revoke-quotes'] },
   'revoke-sessions': { positional: 1, options: [], flags: [] },
   activate: { positional: 1, options: [], flags: [] },
+  'grant-admin': { positional: 0, options: ['--email'], flags: ['--additional'] },
+  'revoke-admin': { positional: 0, options: ['--email'], flags: [] },
+  'list-admins': { positional: 0, options: [], flags: [] },
 } as const;
 type Command = keyof typeof COMMANDS;
-const DESTRUCTIVE = new Set<Command>(['revoke', 'revoke-sessions']);
+const DESTRUCTIVE = new Set<Command>(['revoke', 'revoke-sessions', 'grant-admin', 'revoke-admin']);
 const GLOBAL_OPTIONS = ['--env', '--confirm-production'];
 const GLOBAL_FLAGS = ['--local'];
-const USAGE = 'Uso: npm run licenses -- <comando> --env local|staging|production\n  issue [--email e] [--label l] [--quota-active n] [--quota-daily n] | bind <lic_id> --email e | status <lic_id> | list\n  revoke <lic_id> [--revoke-quotes] | revoke-sessions <lic_id> | activate <lic_id>\n  Em produção, revoke e revoke-sessions exigem confirmação (digitada ou --confirm-production <lic_id>).';
+const USAGE = 'Uso: npm run licenses -- <comando> --env local|staging|production\n  grant-admin --email e [--additional] | revoke-admin --email e | list-admins\n  issue [--email e] [--label l] [--quota-active n] [--quota-daily n] | bind <lic_id> --email e | status <lic_id> | list\n  revoke <lic_id> [--revoke-quotes] | revoke-sessions <lic_id> | activate <lic_id>\n  Em produção, revoke e revoke-sessions exigem confirmação (digitada ou --confirm-production <lic_id>).';
 
 export type Plan = { command: Command; licenseId?: string; options: Record<string, string>; flags: Set<string>; target: Target; confirm?: string };
 
@@ -55,13 +59,14 @@ export function parseCli(argv: readonly string[]): { ok: true; plan: Plan } | { 
   if (positional.length !== spec.positional) return { ok: false, error: spec.positional ? `"${command}" exige exatamente um <lic_id>.` : `"${command}" não aceita argumentos soltos (recebeu: ${positional.join(' ')}).` };
   const licenseId = positional[0];
   if (licenseId !== undefined && !LICENSE_ID_PATTERN.test(licenseId)) return { ok: false, error: 'identificador de licença inválido (esperado lic_ + 16 hexadecimais).' };
+  if ((command === 'grant-admin' || command === 'revoke-admin') && !options['--email']) return { ok: false, error: `"${command}" exige --email.` };
   if (command === 'bind' && !options['--email']) return { ok: false, error: '"bind" exige --email.' };
   for (const q of ['--quota-active', '--quota-daily']) if (q in options && !/^\d{1,7}$/.test(options[q])) return { ok: false, error: `${q} deve ser um inteiro entre 0 e 1.000.000.` };
   // Ambiente: reconstrói só os argumentos que dizem respeito a ele.
   const envArgs = [...(options['--env'] ? ['--env', options['--env']] : []), ...(flags.has('--local') ? ['--local'] : []), ...(flags.has('--remote') ? ['--remote'] : [])];
   const sel = selectTarget(envArgs);
   if (!sel.ok) return { ok: false, error: sel.error };
-  if ('--confirm-production' in options && !DESTRUCTIVE.has(command)) return { ok: false, error: '--confirm-production só se aplica a operações destrutivas (revoke, revoke-sessions).' };
+  if ('--confirm-production' in options && !DESTRUCTIVE.has(command)) return { ok: false, error: '--confirm-production só se aplica a operações destrutivas (revoke, revoke-sessions, grant-admin, revoke-admin).' };
   if ('--confirm-production' in options && sel.target.name !== 'production') return { ok: false, error: '--confirm-production só se aplica a --env production.' };
   return { ok: true, plan: { command, licenseId, options, flags, target: sel.target, confirm: options['--confirm-production'] } };
 }
@@ -88,7 +93,7 @@ export async function runLicensesCli(argv: readonly string[], deps: CliDeps): Pr
     deps.err(banner(target, `licenses ${command}${licenseId ? ` ${licenseId}` : ''}`));
     // 2) Confirmação adicional para o que é destrutivo em produção (antes de tocar no banco).
     if (DESTRUCTIVE.has(command)) {
-      const c = await confirmProduction(target, licenseId as string, confirm, deps);
+      const c = await confirmProduction(target, (licenseId ?? options['--email']) as string, confirm, deps);
       if (!c.ok) { deps.err(`Erro: ${c.error}`); return 1; }
     }
     if (command === 'issue') {
@@ -113,6 +118,21 @@ export async function runLicensesCli(argv: readonly string[], deps: CliDeps): Pr
     } else if (command === 'revoke-sessions') {
       d1(revokeLicenseSessionsSql(licenseId as string, iso()));
       deps.out(`Dispositivos da conta da licença ${licenseId} desconectados em ${target.name}.`);
+    } else if (command === 'grant-admin') {
+      const e = options['--email'];
+      // Bootstrap único: com um administrador ativo já existente, só com --additional (decisão consciente).
+      const n = Number(d1(activeAdminCountSql())[0]?.n ?? 0);
+      if (n > 0 && !flags.has('--additional')) { deps.err('Erro: já existe um administrador ativo. Para conceder a outro, repita com --additional.'); return 1; }
+      d1(grantAdminSql(e, iso()));
+      if (!d1(adminByEmailSql(e)).length) { deps.err('Erro: nenhum usuário ativo com este e-mail. A pessoa precisa ter feito o primeiro login (e a conta não pode estar desativada).'); return 1; }
+      d1(adminAuditSql('admin.grant', e, iso()));
+      deps.out(`Acesso administrativo concedido a ${e} em ${target.name}. O painel exige, além disso, licença ativa e sessão válida.`);
+    } else if (command === 'revoke-admin') {
+      const e = options['--email'];
+      d1(revokeAdminSql(e, iso())); d1(adminAuditSql('admin.revoke', e, iso()));
+      deps.out(`Acesso administrativo de ${e} revogado em ${target.name} (se existia).`);
+    } else if (command === 'list-admins') {
+      deps.out(d1(listAdminsSql()).map(r => `${r.email}  ${r.role}  concedido=${r.granted_at} por ${r.granted_by}${r.revoked_at ? `  REVOGADO=${r.revoked_at}` : ''}`).join('\n') || '(nenhum administrador)');
     } else if (command === 'activate') {
       d1(setLicenseStatusSql(licenseId as string, 'active', iso()));
       deps.out(`Licença ${licenseId} reativada em ${target.name}.`);

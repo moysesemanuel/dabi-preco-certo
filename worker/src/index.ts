@@ -5,6 +5,7 @@ import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authoriz
 import { currentSession, logout, requestCode, sessionRevoke, sessionsList, verifyCode, type AuthEnv } from './authRoutes';
 import { createEmailSender, type EmailSender } from './email';
 import { createCompositeAuthorizer } from './session';
+import { adminRoute } from './adminRoutes';
 import { syncPull, syncPush } from './syncRoutes';
 import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, listQuotesByOwner, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
@@ -171,6 +172,7 @@ export function createHandler(options: Options) {
         if (del && method === 'DELETE') return await sessionRevoke(request, env, authDeps, del[1]);
         return apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
       }
+      if (pathname === '/api/admin' || pathname.startsWith('/api/admin/')) return (await adminRoute(request, env, { now }, pathname)) ?? apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
       if (pathname === '/api/sync' || pathname === '/api/sync/push') {
         if (pathname === '/api/sync' && method === 'GET') return await syncPull(request, env, authDeps);
         if (pathname === '/api/sync/push' && method === 'POST') return await syncPush(request, env, authDeps);
