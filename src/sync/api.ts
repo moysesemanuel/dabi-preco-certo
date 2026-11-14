@@ -32,7 +32,7 @@ export function createHttpSyncApi({ baseUrl, getCsrfToken, fetchImpl = fetch, ti
     if (res.status === 404 || res.status === 426) throw new SyncError('outdated', OUTDATED_MESSAGE);
     if (res.status === 429) throw new SyncError('rate-limited', 'Muitas requisições. Tente novamente em instantes.');
     if (res.status === 400 || res.status === 413 || res.status === 422) throw new SyncError('rejected', await messageOf(res, 'O servidor recusou os dados.'));
-    throw new SyncError('server', 'O servidor não respondeu como esperado.');
+    throw new SyncError('server', `O servidor não respondeu como esperado (HTTP ${res.status}). Seus dados continuam neste dispositivo.`);
   };
 
   return {
@@ -48,7 +48,13 @@ export function createHttpSyncApi({ baseUrl, getCsrfToken, fetchImpl = fetch, ti
     async push(request: PushRequest): Promise<PushResponse> {
       const csrf = getCsrfToken();
       const res = await call(SYNC_PATHS.push, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(csrf ? { 'X-CSRF-Token': csrf } : {}) }, body: JSON.stringify(request) });
-      if (res.status === 200) { const b = await res.json() as { revision: number; changed: boolean }; return { ok: true, revision: b.revision, changed: b.changed }; }
+      if (res.status === 200) {
+        // Confirmação ilegível: não dá para saber a revisão gravada. É erro do servidor (nada local muda; a próxima tentativa reconcilia).
+        let b: { revision?: unknown; changed?: unknown };
+        try { b = await res.json() as typeof b; } catch { throw new SyncError('server', 'Resposta inválida do servidor.'); }
+        if (!Number.isSafeInteger(b?.revision) || typeof b.changed !== 'boolean') throw new SyncError('server', 'Resposta inválida do servidor.');
+        return { ok: true, revision: b.revision as number, changed: b.changed };
+      }
       if (res.status === 409) {
         const b = await res.json().catch(() => ({})) as { error?: string; orderIds?: unknown };
         if (b.error === 'CODE_TAKEN') return { ok: false, kind: 'code', orderIds: Array.isArray(b.orderIds) ? b.orderIds.filter((x): x is string => typeof x === 'string') : [] };

@@ -41,7 +41,8 @@ export function deriveIndicator({ sync, hasPending, conflicts, entitled, browser
     const serverDown = browserOnline && sync.phase === 'offline';
     return { level: 'wait', label: serverDown ? 'Servidor inacessível' : 'Sem conexão', detail: `${serverDown ? 'Não foi possível falar com o servidor; novas tentativas são automáticas.' : 'Sem conexão: a sincronização é retomada sozinha quando a internet voltar.'}${saved}${lastText}`, failing: serverDown };
   }
-  if (sync.phase === 'error') return { level: 'wait', label: 'Falha ao sincronizar', detail: `Não foi possível sincronizar; novas tentativas são automáticas.${saved}${lastText}`, failing: true };
+  // Causa conhecida (ex.: HTTP 500, resposta inválida, armazenamento local) aparece no detalhe; a falha nunca é escondida.
+  if (sync.phase === 'error') return { level: 'wait', label: 'Falha ao sincronizar', detail: `Não foi possível sincronizar${sync.message ? `: ${sync.message.replace(/\.$/, '')}` : ''}. Novas tentativas são automáticas.${saved}${lastText}`, failing: true };
   if (!sync.lastSyncedAt) return { level: 'wait', label: 'Aguardando confirmação', detail: 'Ainda não houve confirmação do servidor nesta sessão. Suas alterações ficam salvas neste dispositivo.', failing: false };
   if (sync.failingSince) return { level: 'wait', label: 'Reconfirmando', detail: `Confirmando de novo com o servidor depois de uma falha.${saved}${lastText}`, failing: true };
   if (hasPending) return { level: 'wait', label: 'Alterações a enviar', detail: `Há alterações neste dispositivo ainda sem confirmação do servidor.${lastText}`, failing: false };

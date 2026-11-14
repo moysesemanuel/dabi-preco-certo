@@ -88,7 +88,8 @@ export function createOrder(data: DataSet, draft: NewOrderDraft, opts: { id: str
   return {
     id: opts.id, quoteCode: opts.quoteCode, customer: draft.customer.trim(), items, deliveryDate: draft.deliveryDate,
     status: statusAfterReceipt(draft.status ?? 'Orçamento', deposit), deposit, createdAt: now.toISOString(),
-    packagingItems, packagingCharge,
+    // Sem embalagens adicionais o campo fica ausente: é a forma que o servidor devolve (evita diferença artificial no eco).
+    ...(packagingItems.length ? { packagingItems } : {}), packagingCharge,
   };
 }
 
@@ -115,5 +116,6 @@ export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: D
   const status = deposit > existing.deposit ? statusAfterReceipt(existing.status, toCents2(deposit - existing.deposit)) : existing.status;
   const next: Order = { ...existing, customer: patch.customer.trim(), items, deliveryDate: patch.deliveryDate, deposit, status, packagingCharge,
     ...(patch.packagingItems ? { packagingItems: patch.packagingItems } : {}) };
+  if (next.packagingItems && !next.packagingItems.length) delete next.packagingItems; // lista vazia = ausente (forma do servidor)
   return { ...data, orders: data.orders.map(o => (o.id === id ? next : o)) };
 }

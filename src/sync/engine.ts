@@ -245,14 +245,23 @@ const pulledCount = (p: PullResponse) => p.ingredients.length + p.recipes.length
  * Falhas de rede/autorização interrompem sem perder nada: o estado devolvido é o último consistente.
  * Reexecutar após uma falha é seguro (o servidor trata reenvios idênticos como "sem alteração").
  */
-export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opts: { allowInitialMerge?: boolean; now?: Date } = {}): Promise<SyncResult> {
+/** Evento de diagnóstico da sincronização. Sem conteúdo de registros nem dados pessoais: só fase, contagens, revisões e códigos. */
+export type SyncTrace = { run: string; phase: 'pull' | 'merge' | 'push' | 'done'; attempt: number; protocol?: number; revisionBefore?: number; revisionAfter?: number; entities?: number; result?: string; status?: SyncStatus };
+/** Mensagem quando o servidor aceita um envio mas devolve uma versão que não confirma o que foi enviado (envio repetido seria inútil). */
+export const NON_CONVERGENT_MESSAGE = 'O servidor aceitou as alterações, mas devolveu uma versão diferente da enviada. Para não repetir envios, a sincronização foi pausada; seus dados continuam neste dispositivo. Recarregue a página; se persistir, informe o suporte.';
+export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opts: { allowInitialMerge?: boolean; now?: Date; trace?: (e: SyncTrace) => void } = {}): Promise<SyncResult> {
   let L = local, M = healConflicts(local, meta, opts.now), pulled = 0, pushed = 0;
+  const runId = Math.random().toString(36).slice(2, 8);
+  const trace = (e: Omit<SyncTrace, 'run'>) => { try { opts.trace?.({ run: runId, ...e }); } catch { /* diagnóstico nunca interrompe a sincronização */ } };
+  /** Entidades que o servidor JÁ aceitou neste ciclo, como foram enviadas. Reenviar a mesma versão não muda nada: é sinal de laço. */
+  const acked = new Map<string, unknown>();
   const newConflicts: ConflictRecord[] = [];
   const acknowledgedRecipes = new Map<string, { recipe: Recipe; revision: number }>();
-  const result = (status: SyncStatus, message?: string): SyncResult => ({ status, message, local: L, meta: M, pulled, pushed, newConflicts });
+  const result = (status: SyncStatus, message?: string): SyncResult => { trace({ phase: 'done', attempt: -1, status, revisionAfter: M.revision }); return { status, message, local: L, meta: M, pulled, pushed, newConflicts }; };
   try {
     for (let attempt = 0; attempt < 4; attempt++) {
       const pull = await api.pull(M.revision);
+      trace({ phase: 'pull', attempt, protocol: pull.protocol, revisionBefore: M.revision, revisionAfter: pull.revision, entities: pulledCount(pull) });
       // Primeira sincronização com dados dos dois lados: só pede decisão se o servidor tiver algo diferente do local
       // (um reenvio depois de uma resposta perdida encontra tudo idêntico e segue sozinho).
       if (attempt === 0 && M.revision === 0 && isEmpty(M.baseline) && !isEmpty(L) && pulledCount(pull) > 0 && !opts.allowInitialMerge && hasForeignData(L, pull)) return result('needs-decision', 'Há dados neste dispositivo e na conta. Escolha como combinar.');
@@ -283,11 +292,17 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
       const dangling = findDanglingRefs(L);
       if (dangling.length) return result('needs-attention', dangling[0]);
       const pushes = buildPushes(L, M);
+      trace({ phase: 'merge', attempt, entities: pushes.reduce((n, p) => n + countOf(p), 0), result: `${merged.conflicts.length} conflito(s)` });
       if (!pushes.length) return result('synced');
+      // A mesma versão de uma entidade, já aceita pelo servidor neste ciclo, voltaria a ser enviada: o eco do servidor não a confirmou.
+      // Reenviar só gravaria de novo (laço de escritas). Para com uma causa clara; os dados locais e a base ficam intactos.
+      const repeated = pushes.some(p => KINDS.some(k => (p.upserts[k] as Entity[]).some(e => { const prev = acked.get(`${k}:${e.id}`); return prev !== undefined && sameEntity(prev, e); })));
+      if (repeated) { trace({ phase: 'push', attempt, result: 'non-convergent' }); return result('needs-attention', NON_CONVERGENT_MESSAGE); }
       let again = false;
       let revision = M.revision;
       for (const req of pushes) {
         const resp = await api.push({ ...req, baseRevision: revision });
+        trace({ phase: 'push', attempt, revisionBefore: revision, revisionAfter: resp.ok ? resp.revision : undefined, entities: countOf(req), result: resp.ok ? (resp.changed ? 'accepted' : 'unchanged') : resp.kind });
         if (!resp.ok && resp.kind === 'code') { // colisão rara de código gerado offline: troca o código das encomendas ainda não confirmadas e tenta de novo
           const taken = new Set(resp.orderIds), used = new Set(L.orders.map(o => o.quoteCode).filter((c): c is string => !!c));
           const orders = L.orders.map(o => (taken.has(o.id) ? { ...o, quoteCode: uniqueQuoteCode(used) } : o));
@@ -295,6 +310,7 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
         }
         if (!resp.ok) { again = true; break; } // mudou no servidor: puxa de novo, mescla e tenta outra vez
         revision = resp.revision; pushed += countOf(req);
+        for (const k of KINDS) for (const e of req.upserts[k] as Entity[]) acked.set(`${k}:${e.id}`, e);
         for (const recipe of req.upserts.recipes) if (recipe.packagingItems?.length) acknowledgedRecipes.set(recipe.id, { recipe, revision: resp.revision });
       }
       if (!again && attempt === 3) return result('error', 'Não foi possível concluir a sincronização. Tente novamente.');

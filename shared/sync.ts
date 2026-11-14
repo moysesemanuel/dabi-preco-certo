@@ -64,6 +64,20 @@ function canonicalEntityValue(value: unknown): unknown {
     else if (Array.isArray(record.packagingItems)) record.packagingItems = [...record.packagingItems].sort((a, b) => { const left = canonicalJson(a), right = canonicalJson(b); return left < right ? -1 : left > right ? 1 : 0; });
   }
   if (record.packagingCharge === 0) delete record.packagingCharge;
+  // Encomenda: o servidor grava a lista de embalagens adicionais como '[]' e a devolve OMITIDA quando vazia; o mesmo vale para as
+  // embalagens congeladas no custo de cada item. Lista vazia, nula ou ausente = nenhuma embalagem. Sem isto, o eco do próprio envio
+  // parecia diferente: conflito falso e reenvio em laço ("Falha ao sincronizar"). Listas com itens continuam comparadas por conteúdo.
+  if ('customer' in record && 'deliveryDate' in record) {
+    if (record.packagingItems == null || (Array.isArray(record.packagingItems) && record.packagingItems.length === 0)) delete record.packagingItems;
+    const noEmptyPackaging = (snap: unknown) => {
+      if (typeof snap !== 'object' || snap === null) return snap;
+      const c = { ...(snap as Record<string, unknown>) };
+      if (c.packagingItems == null || (Array.isArray(c.packagingItems) && c.packagingItems.length === 0)) delete c.packagingItems;
+      return c;
+    };
+    if (Array.isArray(record.items)) record.items = record.items.map(item => (typeof item === 'object' && item !== null && 'costSnapshot' in item ? { ...(item as Record<string, unknown>), costSnapshot: noEmptyPackaging((item as Record<string, unknown>).costSnapshot) } : item));
+    if ('costSnapshot' in record) record.costSnapshot = noEmptyPackaging(record.costSnapshot);
+  }
   return record;
 }
 export const sameEntity = (a: unknown, b: unknown): boolean => canonicalJson(canonicalEntityValue(a)) === canonicalJson(canonicalEntityValue(b));

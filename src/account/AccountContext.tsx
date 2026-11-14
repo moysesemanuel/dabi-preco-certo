@@ -3,7 +3,7 @@ import type { DataSet } from '../domain/types';
 import { createQuotesClient, type QuotesClient } from '../features/sharing/quotes';
 import { loadSyncMeta, saveSyncMeta } from '../storage/db';
 import { createHttpSyncApi } from '../sync/api';
-import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, isPendingConflict, isUnresolved, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta } from '../sync/engine';
+import { buildPushes, emptyDataSet, emptyMeta, isOpenFinancial, isPendingConflict, isUnresolved, rebaseLocal, syncOnce, type ConflictRecord, type SyncMeta, type SyncTrace } from '../sync/engine';
 import { DEBOUNCE_MS, retryDelayMs, WAKE_MIN_INTERVAL_MS, WAKE_MIN_INTERVAL_FAILING_MS } from '../sync/retry';
 import { resolveConflict as resolveConflictPure, type ConflictAction } from '../sync/resolve';
 import { reconcileFinancial, type ReconcileAction } from '../sync/reconcile';
@@ -61,6 +61,15 @@ type Ctx = {
 const AccountCtx = createContext<Ctx | null>(null);
 export const useAccount = (): Ctx => { const c = useContext(AccountCtx); if (!c) throw new Error('useAccount fora do AccountProvider'); return c; };
 
+/**
+ * Diagnóstico da sincronização (fase, revisões, contagens e códigos; nunca conteúdo, tokens ou dados pessoais).
+ * Ativo em desenvolvimento ou quando `localStorage['custo:debug-sync'] === '1'`; em produção fica desligado.
+ */
+const syncTrace = (e: SyncTrace) => {
+  let on = import.meta.env.DEV;
+  try { on ||= localStorage.getItem('custo:debug-sync') === '1'; } catch { /* armazenamento indisponível */ }
+  if (on && import.meta.env.MODE !== 'test') console.info('[sync]', e);
+};
 type Props = { data: DataSet; setData: (fn: (d: DataSet) => DataSet) => void; ready: boolean; /** Muda quando esta aba assume a edição: a sessão é verificada de novo antes de qualquer sincronização. */ epoch?: number; /** Muda quando outra aba gravou: o estado de sincronização é relido do disco. */ metaVersion?: number; children: ReactNode; /** Padrão: VITE_REQUIRE_LOGIN. Existe para testes. */ requireLogin?: boolean };
 
 /**
@@ -157,13 +166,15 @@ export function AccountProvider({ data, setData, ready: readyProp, epoch = 0, me
       if (meta.userId && meta.userId !== sess.user.id) { block('account-mismatch', 'Este dispositivo tem dados de outra conta.'); return; }
       const started = dataRef.current;
       const api = createHttpSyncApi({ baseUrl: base, getCsrfToken: () => csrfRef.current });
-      const r = await syncOnce(api, started, meta, opts);
+      const r = await syncOnce(api, started, meta, { ...opts, trace: syncTrace });
       if (r.status === 'needs-decision') { block('needs-decision', r.message); return; }
       if (r.status !== 'unauthorized' && r.status !== 'forbidden') {
         meta = { ...r.meta, userId: sess.user.id };
         metaRef.current = meta; setConflicts(meta.conflicts);
         setData(cur => { const next = rebaseLocal(cur, started, r.local); appProduced.current.add(next); return next; });
-        await saveSyncMeta(meta).catch(() => undefined);
+        // Sem gravar o estado da sincronização, um recarregamento voltaria à revisão anterior: não esconder essa falha.
+        const saved = await saveSyncMeta(meta).then(() => true, () => false);
+        if (!saved) { failures.current += 1; setSync(s => ({ ...s, phase: 'error', message: 'Não foi possível gravar o estado da sincronização neste dispositivo (armazenamento do navegador). Seus dados continuam aqui; uma nova tentativa é automática.', failingSince: s.failingSince ?? new Date().toISOString(), blocked: null })); return; }
       }
       if (r.status === 'unauthorized') { setSession(undefined); setAuthNotice('Sua sessão não foi reconhecida pelo servidor (expirou, foi encerrada ou o navegador não enviou o cookie). Entre novamente.'); setSync({ phase: 'idle', blocked: null }); return; }
       if (r.status === 'forbidden') {
