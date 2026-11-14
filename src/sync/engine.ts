@@ -75,7 +75,7 @@ export interface SyncApi {
 }
 /** Erros de rede/autorização/servidor que interrompem a sincronização sem alterar nenhum dado local. */
 export class SyncError extends Error {
-  constructor(readonly kind: 'offline' | 'unauthorized' | 'forbidden' | 'rate-limited' | 'rejected' | 'server', message: string) { super(message); }
+  constructor(readonly kind: 'offline' | 'unauthorized' | 'forbidden' | 'rate-limited' | 'rejected' | 'outdated' | 'server', message: string) { super(message); }
 }
 
 const toMaps = (d: DataSet): KindMaps => ({ ingredients: new Map(d.ingredients.map(x => [x.id, x])), recipes: new Map(d.recipes.map(x => [x.id, x])), orders: new Map(d.orders.map(x => [x.id, x])), packagings: new Map((d.packagings ?? []).map(x => [x.id, x])) });
@@ -94,7 +94,7 @@ export function findDanglingRefs(d: DataSet): string[] {
   const ing = new Set(d.ingredients.map(i => i.id)), rec = new Set(d.recipes.map(r => r.id));
   const out: string[] = [];
   for (const r of d.recipes) if (r.items.some(i => !ing.has(i.ingredientId))) out.push(`A receita "${r.name}" usa um ingrediente que não existe mais.`);
-  for (const o of d.orders) if (!rec.has(o.recipeId)) out.push(`A encomenda de "${o.customer}" usa uma receita que não existe mais.`);
+  for (const o of d.orders) if (o.items.some(item => !rec.has(item.recipeId))) out.push(`A encomenda de "${o.customer}" usa uma receita que não existe mais.`);
   return out;
 }
 
@@ -153,7 +153,7 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
   // Algo novo aqui ainda depende de um item que o servidor excluiu? Restaura o item (será reenviado) em vez de quebrar a referência.
   for (let round = 0; round < 4; round++) {
     let changed = false;
-    for (const o of L.orders.values()) if (!L.recipes.has(o.recipeId) && removed.recipes.has(o.recipeId)) { const r = removed.recipes.get(o.recipeId) as Recipe; L.recipes.set(r.id, r); conflicts.push({ id: `recipes:${r.id}:restored`, kind: 'recipes', entityId: r.id, at, reason: 'restored', local: r, server: null }); changed = true; }
+    for (const o of L.orders.values()) for (const item of o.items) if (!L.recipes.has(item.recipeId) && removed.recipes.has(item.recipeId)) { const r = removed.recipes.get(item.recipeId) as Recipe; L.recipes.set(r.id, r); conflicts.push({ id: `recipes:${r.id}:restored`, kind: 'recipes', entityId: r.id, at, reason: 'restored', local: r, server: null }); changed = true; }
     for (const r of L.recipes.values()) for (const it of r.items) if (!L.ingredients.has(it.ingredientId) && removed.ingredients.has(it.ingredientId)) { const i = removed.ingredients.get(it.ingredientId) as Ingredient; L.ingredients.set(i.id, i); conflicts.push({ id: `ingredients:${i.id}:restored`, kind: 'ingredients', entityId: i.id, at, reason: 'restored', local: i, server: null }); changed = true; }
     for (const r of L.recipes.values()) for (const it of r.packagingItems ?? []) if (!L.packagings.has(it.packagingId) && removed.packagings.has(it.packagingId)) { const p = removed.packagings.get(it.packagingId) as Packaging; L.packagings.set(p.id, p); conflicts.push({ id: `packagings:${p.id}:restored`, kind: 'packagings', entityId: p.id, at, reason: 'restored', local: p, server: null }); changed = true; }
     if (!changed) break;
@@ -209,7 +209,7 @@ export function buildPushes(local: DataSet, meta: SyncMeta): PushRequest[] {
   const goneInCloud = (kind: Kind, id: string) => pend.some(c => c.kind === kind && c.entityId === id && c.server === null);
   const blocked = (kind: Kind, e: Entity) => held(kind, e.id)
     || (kind === 'recipes' && ((e as Recipe).items.some(it => goneInCloud('ingredients', it.ingredientId)) || ((e as Recipe).packagingItems ?? []).some(it => goneInCloud('packagings', it.packagingId))))
-    || (kind === 'orders' && goneInCloud('recipes', (e as Order).recipeId));
+    || (kind === 'orders' && (e as Order).items.some(item => goneInCloud('recipes', item.recipeId)));
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
     for (const [id, e] of Lk) if (!blocked(kind, e) && !sameOpt(e, Bk.get(id))) upserts.push({ kind, id, apply: p => { (p.upserts[kind] as Entity[]).push(e); if (revOf(meta, kind, id) !== undefined) p.baseRevs[kind][id] = revOf(meta, kind, id) as number; } });
@@ -301,7 +301,7 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
     }
     return result('error', 'Não foi possível concluir a sincronização. Tente novamente.');
   } catch (e) {
-    if (e instanceof SyncError) return result(e.kind === 'offline' ? 'offline' : e.kind === 'unauthorized' ? 'unauthorized' : e.kind === 'forbidden' ? 'forbidden' : e.kind === 'rejected' ? 'needs-attention' : 'error', e.message);
+    if (e instanceof SyncError) return result(e.kind === 'offline' ? 'offline' : e.kind === 'unauthorized' ? 'unauthorized' : e.kind === 'forbidden' ? 'forbidden' : e.kind === 'rejected' || e.kind === 'outdated' ? 'needs-attention' : 'error', e.message);
     throw e;
   }
 }

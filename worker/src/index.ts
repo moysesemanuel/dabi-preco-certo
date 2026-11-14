@@ -7,6 +7,7 @@ import { createEmailSender, type EmailSender } from './email';
 import { createCompositeAuthorizer } from './session';
 import { adminRoute } from './adminRoutes';
 import { syncPull, syncPush } from './syncRoutes';
+import { LEGACY_SYNC_PATHS, SYNC_PATHS } from '../../shared/sync';
 import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, listQuotesByOwner, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
@@ -175,11 +176,14 @@ export function createHandler(options: Options) {
         return apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
       }
       if (pathname === '/api/admin' || pathname.startsWith('/api/admin/')) return (await adminRoute(request, env, { now }, pathname)) ?? apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
-      if (pathname === '/api/sync' || pathname === '/api/sync/push') {
-        if (pathname === '/api/sync' && method === 'GET') return await syncPull(request, env, authDeps);
-        if (pathname === '/api/sync/push' && method === 'POST') return await syncPush(request, env, authDeps);
+      if (pathname === SYNC_PATHS.pull || pathname === SYNC_PATHS.push) {
+        if (pathname === SYNC_PATHS.pull && method === 'GET') return await syncPull(request, env, authDeps);
+        if (pathname === SYNC_PATHS.push && method === 'POST') return await syncPush(request, env, authDeps);
         return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }
+      // Protocolo antigo (encomendas de uma receita só): recusado sem ler nem gravar nada. Um app antigo não conhece `items`
+      // e regravaria encomendas com vários produtos perdendo itens; ele mantém os dados no aparelho até ser recarregado.
+      if ((LEGACY_SYNC_PATHS as readonly string[]).includes(pathname)) return apiError(426, 'CLIENT_OUTDATED', 'Atualize o aplicativo: recarregue a página para continuar sincronizando. Seus dados continuam neste dispositivo.');
       if (/^\/api\/license\/?$/.test(pathname)) {
         return method === 'GET' ? await verifyLicense(request, env) : apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }

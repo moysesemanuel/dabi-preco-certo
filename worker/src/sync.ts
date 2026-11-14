@@ -1,6 +1,6 @@
-import { parseCatalogRef, parseIngredient, parseOrder, parsePackaging, parseRecipe, parseSettings } from '../../shared/dataset';
-import { countChanges, KINDS, sameEntity, SYNC_LIMITS, type Conflict, type Kind, type PullEntity, type PullResponse, type PushOk, type PushRequest } from '../../shared/sync';
-import type { Ingredient, Order, Packaging, Payment, Recipe, Settings } from '../../src/domain/types';
+import { LEGACY_ITEM_ID, parseCatalogRef, parseIngredient, parseOrder, parsePackaging, parseRecipe, parseSettings, upgradeOrderShape } from '../../shared/dataset';
+import { countChanges, KINDS, SYNC_PROTOCOL, sameEntity, SYNC_LIMITS, type Conflict, type Kind, type PullEntity, type PullResponse, type PushOk, type PushRequest } from '../../shared/sync';
+import type { CostSnapshot, Ingredient, Order, OrderItem, Packaging, Payment, Recipe, Settings } from '../../src/domain/types';
 import type { BoundStatement, D1Like } from './store';
 
 /** Aplica/lê dados de UM usuário. Toda consulta filtra por user_id e usa parâmetros; nada é concatenado no SQL. */
@@ -16,7 +16,17 @@ const catalogRefOf = (json: string): Pick<Ingredient, 'catalogRef'> => { try { r
 const recipeOf = (r: Row, items: Row[], packs: Row[] = []): Recipe => ({ id: r.id as string, name: r.name as string, yield: num(r.yield), packagingPerUnit: num(r.packaging_per_unit), laborTotal: num(r.labor_total), extraTotal: num(r.extra_total), desiredMargin: num(r.desired_margin), ...(r.prep_minutes !== null ? { prepMinutes: num(r.prep_minutes) } : {}), items: items.map(i => ({ ingredientId: i.ingredient_id as string, quantity: num(i.quantity), ...(i.unit !== null ? { unit: i.unit as NonNullable<Recipe['items'][number]['unit']> } : {}) })), ...(packs.length ? { packagingItems: packs.map(p => ({ packagingId: p.packaging_id as string, quantityPerUnit: num(p.quantity_per_unit) })) } : {}) });
 const paymentOf = (p: Row): Payment => ({ id: p.id as string, amount: num(p.amount), receivedAt: p.received_at as string, ...(p.method !== null ? { method: p.method as NonNullable<Payment['method']> } : {}), ...(p.note !== null ? { note: p.note as string } : {}) });
 const jsonArray = <T,>(value: unknown): T[] => { try { const parsed = JSON.parse(String(value ?? '[]')); return Array.isArray(parsed) ? parsed as T[] : []; } catch { return []; } };
-const orderOf = (r: Row, pays: Row[] = []): Order => { const packagings = jsonArray<NonNullable<Order['packagingItems']>[number]>(r.packaging_items_json); const costPackagings = jsonArray<NonNullable<NonNullable<Order['costSnapshot']>['packagingItems']>[number]>(r.cost_snapshot_packaging_json); const packagingCharge = num(r.packaging_charge); return { id: r.id as string, customer: r.customer as string, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(packagingCharge > 0 ? { packagingCharge } : {}), ...(packagings.length ? { packagingItems: packagings } : {}), ...(r.cost_per_unit !== null ? { costSnapshot: { costPerUnit: num(r.cost_per_unit), capturedAt: r.cost_captured_at as string, ...(costPackagings.length ? { packagingItems: costPackagings } : {}) } } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}), ...(typeof r.quote_code === 'string' ? { quoteCode: r.quote_code } : {}) }; };
+type PackSnap = NonNullable<CostSnapshot['packagingItems']>[number];
+const costOf = (costPerUnit: unknown, capturedAt: unknown, packagingJson: unknown): Pick<OrderItem, 'costSnapshot'> => {
+  if (costPerUnit === null || costPerUnit === undefined) return {};
+  const packs = jsonArray<PackSnap>(packagingJson);
+  return { costSnapshot: { costPerUnit: num(costPerUnit), capturedAt: capturedAt as string, ...(packs.length ? { packagingItems: packs } : {}) } };
+};
+/** Itens da encomenda: as linhas de `order_items`; sem linhas (encomenda antiga), UM item lido das colunas antigas de `orders`. */
+const itemsOfOrder = (r: Row, rows: Row[]): OrderItem[] => rows.length
+  ? rows.map(i => ({ id: i.id as string, recipeId: i.recipe_id as string, ...(i.recipe_name !== null ? { recipeName: i.recipe_name as string } : {}), quantity: num(i.quantity), unitPrice: num(i.unit_price), ...costOf(i.cost_per_unit, i.cost_captured_at, i.cost_packaging_json) }))
+  : [{ id: LEGACY_ITEM_ID, recipeId: r.recipe_id as string, quantity: num(r.quantity), unitPrice: num(r.unit_price), ...costOf(r.cost_per_unit, r.cost_captured_at, r.cost_snapshot_packaging_json) }];
+const orderOf = (r: Row, pays: Row[] = [], itemRows: Row[] = []): Order => { const packagings = jsonArray<NonNullable<Order['packagingItems']>[number]>(r.packaging_items_json); const packagingCharge = num(r.packaging_charge); return { id: r.id as string, customer: r.customer as string, items: itemsOfOrder(r, itemRows), deposit: num(r.deposit), deliveryDate: r.delivery_date as string, status: r.status as Order['status'], createdAt: r.created_at as string, ...(packagingCharge > 0 ? { packagingCharge } : {}), ...(packagings.length ? { packagingItems: packagings } : {}), ...(pays.length ? { payments: pays.map(paymentOf) } : {}), ...(typeof r.quote_code === 'string' ? { quoteCode: r.quote_code } : {}) }; };
 
 const same = sameEntity;
 
@@ -51,6 +61,14 @@ const paymentsFor = async (db: D1Like, userId: string, orderIds: string[]): Prom
   return map;
 };
 
+const orderItemsFor = async (db: D1Like, userId: string, orderIds: string[]): Promise<Map<string, Row[]>> => {
+  const map = new Map<string, Row[]>();
+  if (!orderIds.length) return map;
+  const r = await db.prepare('SELECT order_id, position, id, recipe_id, recipe_name, quantity, unit_price, cost_per_unit, cost_captured_at, cost_packaging_json FROM order_items WHERE user_id = ?1 AND order_id IN (SELECT value FROM json_each(?2)) ORDER BY order_id, position').bind(userId, JSON.stringify(orderIds)).all<Row>();
+  for (const row of r.results) { const k = row.order_id as string; map.set(k, [...(map.get(k) ?? []), row]); }
+  return map;
+};
+
 /** Alterações com revisão > `since` (inclui exclusões lógicas). `since = 0` devolve tudo. */
 export async function pull(db: D1Like, userId: string, since: number, now: string): Promise<PullResponse> {
   const state = await getState(db, userId, now);
@@ -58,13 +76,16 @@ export async function pull(db: D1Like, userId: string, since: number, now: strin
   const [ing, rec, ord, packs] = await Promise.all([q('ingredients'), q('recipes'), q('orders'), q('packagings')]);
   const items = await itemsOf(db, userId, rec.results.filter(r => r.deleted_at === null).map(r => r.id as string));
   const recipePacks = await recipePackagingsOf(db, userId, rec.results.filter(r => r.deleted_at === null).map(r => r.id as string));
-  const pays = await paymentsFor(db, userId, ord.results.filter(r => r.deleted_at === null).map(r => r.id as string));
+  const liveOrders = ord.results.filter(r => r.deleted_at === null).map(r => r.id as string);
+  const pays = await paymentsFor(db, userId, liveOrders);
+  const orderItems = await orderItemsFor(db, userId, liveOrders);
   const entity = <T,>(r: Row, data: () => T): PullEntity<T> => (r.deleted_at !== null ? { id: r.id as string, rev: num(r.rev), deleted: true } : { id: r.id as string, rev: num(r.rev), deleted: false, data: data() });
   return {
+    protocol: SYNC_PROTOCOL,
     revision: state.revision,
     ingredients: ing.results.map(r => entity(r, () => ingredientOf(r))),
     recipes: rec.results.map(r => entity(r, () => recipeOf(r, items.get(r.id as string) ?? [], recipePacks.get(r.id as string) ?? []))),
-    orders: ord.results.map(r => entity(r, () => orderOf(r, pays.get(r.id as string) ?? []))),
+    orders: ord.results.map(r => entity(r, () => orderOf(r, pays.get(r.id as string) ?? [], orderItems.get(r.id as string) ?? []))),
     packagings: packs.results.map(r => entity(r, () => packagingOf(r))),
     ...(state.settings && state.settingsRev > since ? { settings: { rev: state.settingsRev, data: state.settings } } : {}),
   };
@@ -121,8 +142,10 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
 
   // ---- valida o conteúdo das entidades (mesmas regras do backup) ----
   const activeIng = await activeIds(db, userId, 'ingredients', referenced(req.upserts.recipes as unknown[], r => (Array.isArray(r.items) ? r.items.map(i => (typeof i === 'object' && i !== null ? (i as Record<string, unknown>).ingredientId : undefined)) : [])));
-  const activeRec = await activeIds(db, userId, 'recipes', referenced(req.upserts.orders as unknown[], o => [o.recipeId]));
-  const activePacks = await activeIds(db, userId, 'packagings', referenced(req.upserts.recipes as unknown[], r => Array.isArray(r.packagingItems) ? r.packagingItems.map(x => typeof x === 'object' && x !== null ? (x as Record<string, unknown>).packagingId : undefined) : []).concat(referenced(req.upserts.orders as unknown[], o => Array.isArray(o.packagingItems) ? o.packagingItems.map(x => typeof x === 'object' && x !== null ? (x as Record<string, unknown>).packagingId : undefined) : [])));
+  const activeRec = await activeIds(db, userId, 'recipes', referenced((req.upserts.orders as unknown[]).map(upgradeOrderShape), o => (Array.isArray(o.items) ? o.items.map(i => (typeof i === 'object' && i !== null ? (i as Record<string, unknown>).recipeId : undefined)) : [])));
+  const activePacks = await activeIds(db, userId, 'packagings', referenced(req.upserts.recipes as unknown[], r => Array.isArray(r.packagingItems) ? r.packagingItems.map(x => typeof x === 'object' && x !== null ? (x as Record<string, unknown>).packagingId : undefined) : []).concat(referenced(req.upserts.orders as unknown[], o => Array.isArray(o.packagingItems) ? o.packagingItems.map(x => typeof x === 'object' && x !== null ? (x as Record<string, unknown>).packagingId : undefined) : []))
+    // Embalagens citadas no custo congelado de cada item (snapshot histórico da receita): também precisam ser conhecidas na validação.
+    .concat(referenced((req.upserts.orders as unknown[]).map(upgradeOrderShape), o => (Array.isArray(o.items) ? o.items.flatMap(i => { const c = typeof i === 'object' && i !== null ? (i as Record<string, unknown>).costSnapshot : undefined; const list = typeof c === 'object' && c !== null ? (c as Record<string, unknown>).packagingItems : undefined; return Array.isArray(list) ? list.map(x => (typeof x === 'object' && x !== null ? (x as Record<string, unknown>).packagingId : undefined)) : []; }) : []))));
   const delIng = new Set(req.deletes.ingredients), delRec = new Set(req.deletes.recipes), delPacks = new Set(req.deletes.packagings);
   let ingredients: Ingredient[], recipes: Recipe[], orders: Order[], packagings: Packaging[], settings: Settings | undefined;
   try {
@@ -155,7 +178,8 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   const recPacks = await recipePackagingsOf(db, userId, [...exRec.keys()]);
   for (const [id, e] of exRec) e.entity = recipeOf(e.entity as unknown as Row, recItems.get(id) ?? [], recPacks.get(id) ?? []);
   const ordPays = await paymentsFor(db, userId, [...exOrd.keys()]);
-  for (const [id, e] of exOrd) e.entity = orderOf(e.entity as unknown as Row, ordPays.get(id) ?? []);
+  const ordItems = await orderItemsFor(db, userId, [...exOrd.keys()]);
+  for (const [id, e] of exOrd) e.entity = orderOf(e.entity as unknown as Row, ordPays.get(id) ?? [], ordItems.get(id) ?? []);
   // O código de atendimento é permanente: se a encomenda já tem um no servidor, ele prevalece (um envio sem código ou com outro valor não o altera).
   orders = orders.map(o => { const kept = exOrd.get(o.id)?.entity.quoteCode; return kept && o.quoteCode !== kept ? { ...o, quoteCode: kept } : o; });
 
@@ -206,7 +230,9 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   }
   if (toDelete.recipes.length) {
     const inPush = [...ids(orders), ...req.deletes.orders];
-    const used = await db.prepare(`SELECT DISTINCT recipe_id AS id FROM orders WHERE user_id = ?1 AND deleted_at IS NULL AND recipe_id IN (SELECT value FROM json_each(?2)) AND id NOT IN (SELECT value FROM json_each(?3))`).bind(userId, JSON.stringify(toDelete.recipes), JSON.stringify(inPush)).all<{ id: string }>();
+    // Uma encomenda usa a receita pela coluna antiga (encomendas sem itens gravados) ou por qualquer um dos seus itens.
+    const used = await db.prepare(`SELECT o.id FROM orders o WHERE o.user_id = ?1 AND o.deleted_at IS NULL AND o.id NOT IN (SELECT value FROM json_each(?3))
+      AND (o.recipe_id IN (SELECT value FROM json_each(?2)) OR EXISTS (SELECT 1 FROM order_items oi WHERE oi.user_id = o.user_id AND oi.order_id = o.id AND oi.recipe_id IN (SELECT value FROM json_each(?2)))) LIMIT 1`).bind(userId, JSON.stringify(toDelete.recipes), JSON.stringify(inPush)).all<{ id: string }>();
     if (used.results.length) return bad(422, { error: 'REFERENCE_ERROR', message: 'Há encomendas que usam uma receita que seria excluída.' });
   }
   if (toDelete.packagings.length) {
@@ -245,11 +271,17 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
     }
   }
   for (const o of toUpsert.orders) {
+    // As colunas antigas repetem o PRIMEIRO item (são NOT NULL); a lista completa fica em order_items, sempre regravada inteira.
+    const first = o.items[0];
     batch.push(p(`INSERT INTO orders (user_id, id, customer, recipe_id, quantity, unit_price, deposit, delivery_date, status, created_at, cost_per_unit, cost_captured_at, quote_code, rev, deleted_at, packaging_items_json, cost_snapshot_packaging_json, packaging_charge)
       SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?15, ?13, NULL, ?16, ?17, COALESCE(?18, 0) WHERE ${g('?1', '?14')}
       ON CONFLICT (user_id, id) DO UPDATE SET customer = excluded.customer, recipe_id = excluded.recipe_id, quantity = excluded.quantity, unit_price = excluded.unit_price, deposit = excluded.deposit,
         delivery_date = excluded.delivery_date, status = excluded.status, created_at = excluded.created_at, cost_per_unit = excluded.cost_per_unit, cost_captured_at = excluded.cost_captured_at, quote_code = COALESCE(orders.quote_code, excluded.quote_code), rev = excluded.rev, deleted_at = NULL, packaging_items_json=excluded.packaging_items_json, cost_snapshot_packaging_json=excluded.cost_snapshot_packaging_json, packaging_charge=CASE WHEN ?18 IS NULL THEN orders.packaging_charge ELSE excluded.packaging_charge END`,
-      userId, o.id, o.customer, o.recipeId, o.quantity, o.unitPrice, o.deposit, o.deliveryDate, o.status, o.createdAt, o.costSnapshot?.costPerUnit ?? null, o.costSnapshot?.capturedAt ?? null, rev, newPushId, o.quoteCode ?? null, JSON.stringify(o.packagingItems ?? []), JSON.stringify(o.costSnapshot?.packagingItems ?? []), o.packagingCharge ?? null));
+      userId, o.id, o.customer, first.recipeId, first.quantity, first.unitPrice, o.deposit, o.deliveryDate, o.status, o.createdAt, first.costSnapshot?.costPerUnit ?? null, first.costSnapshot?.capturedAt ?? null, rev, newPushId, o.quoteCode ?? null, JSON.stringify(o.packagingItems ?? []), JSON.stringify(first.costSnapshot?.packagingItems ?? []), o.packagingCharge ?? null));
+    batch.push(p(`DELETE FROM order_items WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, o.id, newPushId));
+    batch.push(p(`INSERT INTO order_items (user_id, order_id, position, id, recipe_id, recipe_name, quantity, unit_price, cost_per_unit, cost_captured_at, cost_packaging_json)
+      SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.id'), json_extract(j.value, '$.recipeId'), json_extract(j.value, '$.recipeName'), json_extract(j.value, '$.quantity'), json_extract(j.value, '$.unitPrice'),
+        json_extract(j.value, '$.costSnapshot.costPerUnit'), json_extract(j.value, '$.costSnapshot.capturedAt'), COALESCE(json_extract(j.value, '$.costSnapshot.packagingItems'), '[]') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, o.id, JSON.stringify(o.items), newPushId));
     batch.push(p(`DELETE FROM order_payments WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, o.id, newPushId));
     if (o.payments?.length) batch.push(p(`INSERT INTO order_payments (user_id, order_id, position, id, amount, received_at, method, note)
       SELECT ?1, ?2, CAST(j.key AS INTEGER), json_extract(j.value, '$.id'), json_extract(j.value, '$.amount'), json_extract(j.value, '$.receivedAt'), json_extract(j.value, '$.method'), json_extract(j.value, '$.note') FROM json_each(?3) AS j WHERE ${g('?1', '?4')}`, userId, o.id, JSON.stringify(o.payments), newPushId));
@@ -262,6 +294,7 @@ export async function push(db: D1Like, userId: string, req: PushRequest, now: st
   for (const id of toDelete.orders) {
     batch.push(p(`UPDATE orders SET deleted_at = ?3, rev = ?4 WHERE user_id = ?1 AND id = ?2 AND deleted_at IS NULL AND ${g('?1', '?5')}`, userId, id, now, rev, newPushId));
     batch.push(p(`DELETE FROM order_payments WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, id, newPushId));
+    batch.push(p(`DELETE FROM order_items WHERE user_id = ?1 AND order_id = ?2 AND ${g('?1', '?3')}`, userId, id, newPushId));
   }
   for (const id of toDelete.packagings) batch.push(p(`UPDATE packagings SET deleted_at=?3, rev=?4 WHERE user_id=?1 AND id=?2 AND deleted_at IS NULL AND ${g('?1','?5')}`,userId,id,now,rev,newPushId));
   if (settingsChanged && settings) batch.push(p('UPDATE sync_state SET settings_json = ?2, settings_rev = ?3 WHERE user_id = ?1 AND last_push_id = ?4', userId, JSON.stringify(settings), rev, newPushId));

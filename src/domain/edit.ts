@@ -1,7 +1,4 @@
-import { captureCostSnapshot } from './orderCost';
-import { isMoney, isPositiveQuantity, toCents2 } from './money';
-import { orderTotal, totalReceived } from './payments';
-import type { CatalogRef, DataSet, Ingredient, Order, Recipe } from './types';
+import type { CatalogRef, DataSet, Ingredient, Recipe } from './types';
 
 export type IngredientPatch = Omit<Ingredient, 'id'>;
 export type RecipePatch = Omit<Recipe, 'id'>;
@@ -18,41 +15,7 @@ export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): Dat
   return { ...data, recipes: data.recipes.map(r => (r.id === id ? { ...patch, id } : r)) };
 }
 
-export type OrderPatch = Pick<Order, 'customer' | 'recipeId' | 'quantity' | 'unitPrice' | 'deliveryDate' | 'deposit'> & Partial<Pick<Order, 'packagingItems' | 'packagingCharge'>>;
-
-/**
- * Atualiza os dados de uma encomenda. Status, data de criação e id são preservados.
- * O custo registrado (`costSnapshot`) é mantido; só é refeito se a RECEITA da encomenda mudar, porque aí o
- * pedido passa a ser de outro produto (se o custo não puder ser calculado, o registro é removido: nunca se inventa custo).
- */
-export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: Date = new Date()): DataSet {
-  if (!data.orders.some(o => o.id === id)) throw new Error('Encomenda não encontrada.');
-  if (!data.recipes.some(r => r.id === patch.recipeId)) throw new Error('Receita não encontrada.');
-  if (!patch.customer.trim() || !patch.deliveryDate) throw new Error('Informe cliente e data de entrega.');
-  if (!isPositiveQuantity(patch.quantity) || !isMoney(patch.unitPrice) || !isMoney(patch.deposit) || (patch.packagingCharge !== undefined && !isMoney(patch.packagingCharge))) throw new Error('Quantidade, preço, sinal ou cobrança de embalagens inválida.');
-  const existing = data.orders.find(o => o.id === id)!;
-  const unitPrice = toCents2(patch.unitPrice), deposit = toCents2(patch.deposit);
-  const packagingCharge = toCents2(patch.packagingCharge ?? existing.packagingCharge ?? 0);
-  const normalizedPatch = { ...patch, unitPrice, deposit, packagingCharge };
-  const total = orderTotal(normalizedPatch);
-  if (deposit > total) throw new Error('O sinal não pode ser maior que o total.');
-  // Sem crédito nem reembolso: o novo total não pode ficar abaixo do que já foi recebido.
-  const received = totalReceived({ deposit, payments: existing.payments });
-  if (received > total) throw new Error('O total não pode ficar abaixo do que já foi recebido.');
-  const current = data.orders.find(o => o.id === id)!;
-  const recipeChanged = current.recipeId !== patch.recipeId;
-  return {
-    ...data,
-    orders: data.orders.map(o => {
-      if (o.id !== id) return o;
-      const { costSnapshot, ...rest } = o;
-      const next = { ...rest, ...normalizedPatch, ...(patch.packagingItems ? { packagingItems: patch.packagingItems } : {}), customer: patch.customer.trim() };
-      if (!recipeChanged) return costSnapshot ? { ...next, costSnapshot } : next;
-      const snap = captureCostSnapshot(data.recipes.find(r => r.id === patch.recipeId)!, data, now);
-      return snap ? { ...next, costSnapshot: snap } : next;
-    }),
-  };
-}
+export { updateOrder, type OrderPatch } from './orders';
 
 /** Remove uma encomenda. Receitas e ingredientes não são alterados (a receita volta a poder ser excluída se não tiver outras encomendas). */
 export function removeOrder(data: DataSet, id: string): DataSet {

@@ -8,6 +8,7 @@
  */
 import { uniqueQuoteCode } from '../../shared/quoteCode';
 import { orderTotal, totalReceived } from '../domain/payments';
+import { statusAfterReceipt } from '../domain/orderStatus';
 import { toCents2 } from '../domain/money';
 import type { DataSet, Order } from '../domain/types';
 import type { ConflictRecord } from './engine';
@@ -26,7 +27,7 @@ export function reconcileFinancial(data: DataSet, conflict: ConflictRecord, acti
     // Encomenda excluída no outro dispositivo: recria uma cópia com os recebimentos daqui.
     const local = conflict.local as Order | null;
     if (!local) throw new Error('Não há mais dados locais para recuperar.');
-    if (!data.recipes.some(r => r.id === local.recipeId)) throw new Error('A receita desta encomenda não existe mais. Recrie a receita antes de recuperar a encomenda.');
+    if (local.items.some(item => !data.recipes.some(r => r.id === item.recipeId))) throw new Error('A receita desta encomenda não existe mais. Recrie a receita antes de recuperar a encomenda.');
     // A cópia é uma encomenda nova: recebe o seu próprio código de atendimento (o do original continua reservado).
     const used = new Set(data.orders.map(o => o.quoteCode).filter((c): c is string => !!c));
     const copy: Order = { ...local, id: newId(), quoteCode: uniqueQuoteCode(used) };
@@ -38,6 +39,9 @@ export function reconcileFinancial(data: DataSet, conflict: ConflictRecord, acti
   const missing = f.addedPayments.filter(p => !have.has(p.id));
   let next: Order = { ...existing, ...(missing.length ? { payments: [...(existing.payments ?? []), ...missing] } : {}) };
   if (f.deposit && existing.deposit !== f.deposit.local) next = { ...next, deposit: f.deposit.local };
+  // Somar recebimentos é um recebimento novo para esta versão do pedido: um orçamento passa a confirmado (nunca o contrário).
+  const added = toCents2(totalReceived(next) - totalReceived(existing));
+  if (added > 0) next = { ...next, status: statusAfterReceipt(existing.status, added) };
   if (toCents2(totalReceived(next)) > orderTotal(next) + 0.005) throw new Error('Somar estes recebimentos passaria do total da encomenda. Ajuste os recebimentos manualmente e use "Manter a versão do servidor".');
   return { data: { ...data, orders: data.orders.map(o => (o.id === next.id ? next : o)) }, conflict: resolved };
 }

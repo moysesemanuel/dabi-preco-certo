@@ -21,8 +21,8 @@ function fakeServer() {
     if (s.offline) throw new TypeError('Failed to fetch');
     const path = url.replace(BASE, '');
     if (path === '/api/auth/session') return json(200, SESSION);
-    if (path.startsWith('/api/sync?')) { const since = Number(new URL(url).searchParams.get('since')); return json(200, { revision: s.revision, ingredients: [...s.store].filter(([, v]) => v.rev > since).map(([id, v]) => ({ id, rev: v.rev, deleted: false, data: v.data })), recipes: [], orders: [] }); }
-    if (path === '/api/sync/push') {
+    if (path.startsWith('/api/sync/v2?')) { const since = Number(new URL(url).searchParams.get('since')); return json(200, { protocol: 2, revision: s.revision, ingredients: [...s.store].filter(([, v]) => v.rev > since).map(([id, v]) => ({ id, rev: v.rev, deleted: false, data: v.data })), recipes: [], orders: [] }); }
+    if (path === '/api/sync/v2/push') {
       const body = JSON.parse(String(init.body)) as { upserts: { ingredients: Ing[] }; baseRevs: { ingredients: Record<string, number> } };
       for (const i of body.upserts.ingredients) { const cur = s.store.get(i.id); if (cur && body.baseRevs.ingredients[i.id] !== cur.rev) return json(409, { error: 'CONFLICT', conflicts: [] }); }
       s.pushes.push(body.upserts.ingredients); s.revision++;

@@ -76,8 +76,9 @@ function load(data: DataSet, date: string, extra?: { recipeId: string; quantity:
   const ignored: string[] = [];
   for (const o of data.orders) {
     if (!isPending(o) || o.deliveryDate > date) continue;
-    const m = orderMinutes(recipes.get(o.recipeId), o.quantity);
-    if (m === undefined) ignored.push(o.id); else required += m;
+    // Encomenda com vários produtos: soma o tempo de cada item; se algum não tem tempo de preparo, a encomenda fica de fora (e é sinalizada).
+    const minutes = o.items.map(item => orderMinutes(recipes.get(item.recipeId), item.quantity));
+    if (minutes.some(m => m === undefined)) ignored.push(o.id); else required += minutes.reduce<number>((sum, m) => sum + (m ?? 0), 0);
   }
   if (extra) { const m = orderMinutes(recipes.get(extra.recipeId), extra.quantity); if (m !== undefined) required += m; }
   return { required, ignored };

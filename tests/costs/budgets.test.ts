@@ -24,7 +24,8 @@ describe('Orçamentos por ação', () => {
   });
   it('abrir um link público: 1 consulta e nenhuma escrita', () => { const r = row('Cliente abre'); expect(r.queries).toBe(1); expect(r.rowsWritten).toBe(0); expect(r.requests).toBe(1); });
   it('login: poucas consultas (acontece raramente graças às sessões de 30 dias)', () => { const r = row('Login'); expect(r.queries).toBeLessThanOrEqual(30); expect(r.rowsWritten).toBeLessThanOrEqual(22); });
-  it('baixar a conta inteira (60 registros) cabe em ≤ 12 consultas', () => { expect(row('Outro aparelho baixa').queries).toBeLessThanOrEqual(12); });
+  // 13 (era 12): +1 consulta para os itens das encomendas (order_items, Etapa 11). Lê só as linhas das encomendas devolvidas; nenhuma requisição a mais.
+  it('baixar a conta inteira (60 registros) cabe em ≤ 13 consultas', () => { expect(row('Outro aparelho baixa').queries).toBeLessThanOrEqual(13); });
 });
 
 describe('Projeção (hipóteses explícitas; NÃO é capacidade garantida)', () => {

@@ -16,7 +16,7 @@ function fakeServer(): Server {
     const path = url.replace(BASE, ''); const method = init.method ?? 'GET';
     const body = init.body ? JSON.parse(String(init.body)) : undefined;
     s.calls.push({ method, path, body });
-    if (s.otherUser && path === '/api/sync/push') return json(403, { error: 'CSRF' }); // outra aba entrou com OUTRA conta: o token desta aba não vale
+    if (s.otherUser && path === '/api/sync/v2/push') return json(403, { error: 'CSRF' }); // outra aba entrou com OUTRA conta: o token desta aba não vale
     if (s.otherUser && path === '/api/auth/session') return json(200, { ...SESSION, user: { id: 'usr_2', email: 'caio@exemplo.com' }, csrfToken: 'csrf-do-caio' });
     if (path === '/api/auth/session') return s.signedIn ? json(200, SESSION) : json(401, { error: 'UNAUTHORIZED' });
     if (path === '/api/auth/request-code') return json(202, { ok: true, expiresInMinutes: 10 });
@@ -31,8 +31,8 @@ function fakeServer(): Server {
       s.signedIn = false; return s.logout === 'expired' ? json(401, { error: 'UNAUTHORIZED' }) : json(200, { ok: true });
     }
     if (path === '/api/sessions') return json(200, { maxSessions: 2, sessions: [{ id: SESSION.sessionId, deviceLabel: 'Mac (navegador)', createdAt: '2026-11-11T10:00:00Z', lastSeenAt: '2026-11-11T10:00:00Z', current: true }] });
-    if (path.startsWith('/api/sync?')) return json(200, { revision: 0, ingredients: [], recipes: [], orders: [] });
-    if (path === '/api/sync/push') return json(200, { revision: 1, changed: true });
+    if (path.startsWith('/api/sync/v2?')) return json(200, { protocol: 2, revision: 0, ingredients: [], recipes: [], orders: [] });
+    if (path === '/api/sync/v2/push') return json(200, { revision: 1, changed: true });
     if (path === '/api/quotes') return json(200, { quotes: [] });
     return json(404, {});
   }));
@@ -84,7 +84,7 @@ describe('Entrar na conta', () => {
     expect(screen.getByText('Mac (navegador)')).toBeTruthy();
     await waitFor(() => expect(screen.getAllByText(/Sincronizado/).length).toBeGreaterThan(0));
     expect(server.calls.some(c => c.path === '/api/auth/request-code' && (c.body as { email: string }).email === 'bia@exemplo.com')).toBe(true);
-    expect(server.calls.some(c => c.path.startsWith('/api/sync?since=0'))).toBe(true);
+    expect(server.calls.some(c => c.path.startsWith('/api/sync/v2?since=0'))).toBe(true);
   });
 
   it('com 2 dispositivos já ativos, mostra a escolha e troca um deles usando o mesmo código', async () => {
@@ -159,7 +159,7 @@ describe('Troca de conta em outra aba', () => {
     await u.type(screen.getByLabelText('Nome do ingrediente'), 'Farinha');
     fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: '6' } });
     await u.click(screen.getByRole('button', { name: /Adicionar ingrediente/ }));
-    await waitFor(() => expect(server.calls.some(c => c.path === '/api/sync/push')).toBe(true), { timeout: 8000 });
+    await waitFor(() => expect(server.calls.some(c => c.path === '/api/sync/v2/push')).toBe(true), { timeout: 8000 });
     await nav(u, 'Configurações');
     expect(await screen.findByRole('heading', { name: 'Entrar na conta' })).toBeTruthy();
     expect(screen.queryByText(/caio@exemplo.com/)).toBeNull();
@@ -177,8 +177,8 @@ describe('Sincronização na interface', () => {
     fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: '6' } });
     await u.click(screen.getByRole('button', { name: /Adicionar ingrediente/ }));
     await signIn(u);
-    await waitFor(() => expect(server.calls.some(c => c.path === '/api/sync/push')).toBe(true));
-    const push = server.calls.find(c => c.path === '/api/sync/push')!.body as { upserts: { ingredients: { name: string; purchasePrice: number }[] } };
+    await waitFor(() => expect(server.calls.some(c => c.path === '/api/sync/v2/push')).toBe(true));
+    const push = server.calls.find(c => c.path === '/api/sync/v2/push')!.body as { upserts: { ingredients: { name: string; purchasePrice: number }[] } };
     expect(push.upserts.ingredients).toMatchObject([{ name: 'Farinha', purchasePrice: 6 }]);
   });
 

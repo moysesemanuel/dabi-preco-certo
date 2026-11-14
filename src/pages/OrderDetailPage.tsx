@@ -1,8 +1,10 @@
 import { useState, type FormEvent } from 'react';
 import { ArrowLeft, FileText, Link2, Pencil, Save, Trash2, Wallet } from 'lucide-react';
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../domain/payments';
-import { orderPackagingTotal, orderTotalCost, orderUnitCost } from '../domain/orderCost';
+import { financialItems, itemUnitCost, orderCostBasis, orderPackagingTotal, orderTotalCost } from '../domain/orderCost';
 import { calculateOrderFinancials } from '../domain/orderFinancials';
+import { itemName, itemsSummary } from '../domain/orders';
+import { buildQuoteText } from '../features/sharing/quotes';
 import { parseMoneyInput, toCents2 } from '../domain/money';
 import { money } from '../domain/pricing';
 import type { Order, PaymentMethod } from '../domain/types';
@@ -38,20 +40,15 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
   if (!order) return <section className="card order-not-found"><h1>Pedido não encontrado</h1><p className="muted">Ele pode ter sido removido ou ainda não estar sincronizado neste dispositivo.</p><button className="secondary" onClick={() => focus('orders')}><ArrowLeft size={16} /> Voltar para Pedidos</button></section>;
   const currentOrder = order;
 
-  const product = data.recipes.find(r => r.id === order.recipeId);
   const received = totalReceived(order);
   const due = balanceDue(order);
-  const cost = orderUnitCost(order, data);
+  const costBasis = orderCostBasis(order, data);
   const costTotal = orderTotalCost(order, data);
-  const financials = calculateOrderFinancials({
-    quantity: order.quantity, unitPrice: order.unitPrice, packagingCharge: order.packagingCharge ?? 0,
-    recipeCostPerUnit: cost.basis === 'unavailable' ? undefined : cost.costPerUnit,
-    additionalPackagingCost: orderPackagingTotal(order), received,
-  });
+  const financials = calculateOrderFinancials({ items: financialItems(order, data), packagingCharge: order.packagingCharge ?? 0, additionalPackagingCost: orderPackagingTotal(order), received });
   const quoteCodes = effectiveQuoteCodes(data.orders);
 
   function copyQuote() {
-    const text = `Olá, ${currentOrder.customer}! Segue seu orçamento ${code}:\nProduto: ${product?.name ?? 'Encomenda'}\nQuantidade: ${currentOrder.quantity}\nValor unitário: ${money(currentOrder.unitPrice)}\nTotal: ${money(orderTotal(currentOrder))}\nData solicitada: ${brDate(currentOrder.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
+    const text = buildQuoteText(currentOrder, data.recipes, code);
     void navigator.clipboard.writeText(text).then(() => inform('Orçamento copiado para enviar no WhatsApp.')).catch(() => inform('Não foi possível copiar automaticamente.'));
   }
 
@@ -66,7 +63,7 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
     const parsed = parseMoneyInput(payAmount), amount = parsed === undefined ? Number.NaN : toCents2(parsed);
     const failed = tryApply(data, update, d => addPayment(d, currentOrder.id, { id: newId(), amount, receivedAt: payDate, ...(payMethod ? { method: payMethod } : {}), ...(payNote.trim() ? { note: payNote.trim() } : {}) }));
     if (failed) return inform(failed);
-    setPaying(false); setPayAmount(''); inform('Recebimento registrado.');
+    setPaying(false); setPayAmount(''); inform(currentOrder.status === 'Orçamento' ? 'Recebimento registrado. A encomenda foi confirmada automaticamente.' : 'Recebimento registrado.');
   }
 
   function deletePayment(paymentId: string) {
@@ -77,7 +74,7 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
   }
 
   return <>
-    <div className="head order-detail-head"><div><button className="back-link" onClick={() => focus('orders')}><ArrowLeft size={16} /> Pedidos</button><div className="eyebrow">Detalhes do pedido</div><h1>{order.customer}</h1><div className="muted"><QuoteCode code={code} /> · {product?.name ?? 'Receita indisponível'}</div></div>
+    <div className="head order-detail-head"><div><button className="back-link" onClick={() => focus('orders')}><ArrowLeft size={16} /> Pedidos</button><div className="eyebrow">Detalhes do pedido</div><h1>{order.customer}</h1><div className="muted"><QuoteCode code={code} /> · {itemsSummary(order, data.recipes)}</div></div>
       <div className="order-detail-actions"><button className="secondary" onClick={() => setEditing(v => !v)}><Pencil size={16} /> {editing ? 'Fechar edição' : 'Editar'}</button><button className="secondary danger" onClick={deleteOrder}><Trash2 size={16} /> Excluir pedido</button></div>
     </div>
     <FinancialPendingNotice focus={focus} />
@@ -86,7 +83,7 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
         <div className="order-detail-card-head"><h2 id="order-overview-heading" className="section-title">Informações gerais</h2><span className="tag">{statusLabel(order.status)}</span></div>
         <dl className="order-detail-fields">
           <div><dt>Cliente</dt><dd>{order.customer}</dd></div><div><dt>Código ORC</dt><dd>{code}</dd></div>
-          <div><dt>Receita</dt><dd>{product?.name ?? 'Receita indisponível'}</dd></div><div><dt>Quantidade</dt><dd>{order.quantity}</dd></div>
+          <div><dt>Produtos</dt><dd>{order.items.length} {order.items.length === 1 ? 'item' : 'itens'}</dd></div>
           <div><dt>Data de entrega</dt><dd>{brDate(order.deliveryDate)}</dd></div><div><dt>Status operacional</dt><dd><label className="sr-only" htmlFor="order-status">Status do pedido</label><select id="order-status" aria-label="Status" value={order.status} onChange={e => update(d => ({ ...d, orders: d.orders.map(o => o.id === order.id ? { ...o, status: e.target.value as Order['status'] } : o) }))}>{statuses.map(s => <option key={s} value={s}>{statusLabel(s)}</option>)}</select></dd></div>
         </dl>
         {order.status === 'Entregue' && due > 0 && <div className="notice warn">Entregue com saldo pendente de {money(due)}. Status e situação financeira são independentes.</div>}
@@ -94,19 +91,25 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
 
       <section className="card order-detail-card" aria-labelledby="order-financial-heading">
         <h2 id="order-financial-heading" className="section-title">Composição financeira</h2>
+        <div className="table-wrap"><table className="order-items-table">
+          <thead><tr><th>Produto</th><th>Qtd.</th><th>Preço unit.</th><th>Subtotal</th><th>Custo unit.</th></tr></thead>
+          <tbody>{order.items.map((item, k) => { const c = itemUnitCost(item, data); return <tr key={item.id}>
+            <td>{itemName(item, data.recipes)}</td><td>{item.quantity.toLocaleString('pt-BR')}</td><td>{money(item.unitPrice)}</td><td>{money(financials.lines[k].subtotal)}</td>
+            <td>{c.basis === 'unavailable' ? 'Indisponível' : `${money(c.costPerUnit)}${c.basis === 'estimated' ? ' (estimado)' : ''}`}</td></tr>; })}</tbody>
+        </table></div>
         <div className="order-financial-summary">
-          <div><span>Produtos · {order.quantity} × {money(order.unitPrice)}</span><strong>{money(financials.productsTotal)}</strong></div>
+          <div><span>Produtos ({order.items.length} {order.items.length === 1 ? 'item' : 'itens'})</span><strong>{money(financials.productsTotal)}</strong></div>
           <div><span>Embalagens adicionais cobradas</span><strong>{money(financials.packagingCharge)}</strong></div>
           <div className="order-financial-total"><span>Total da encomenda</span><strong>{money(orderTotal(order))}</strong></div>
           <div><span>Custo estimado</span><strong>{costTotal === undefined ? 'Indisponível' : money(costTotal)}</strong></div>
           <div><span>Lucro estimado</span><strong>{financials.estimatedProfit === undefined ? 'Indisponível' : money(financials.estimatedProfit)}</strong></div>
         </div>
-        <h3>Embalagens incluídas pela receita</h3>
-        {order.costSnapshot?.packagingItems?.length ? order.costSnapshot.packagingItems.map(p => <p className="muted" key={p.packagingId}>{p.name} · {p.quantityPerUnit} por unidade × {order.quantity} · custo congelado</p>) : <p className="muted">Sem snapshot de embalagens incluídas.</p>}
+        <h3>Embalagens incluídas pelas receitas</h3>
+        {order.items.some(item => item.costSnapshot?.packagingItems?.length) ? order.items.flatMap(item => (item.costSnapshot?.packagingItems ?? []).map(p => <p className="muted" key={`${item.id}-${p.packagingId}`}>{itemName(item, data.recipes)}: {p.name} · {p.quantityPerUnit} por unidade × {item.quantity.toLocaleString('pt-BR')} · custo congelado</p>)) : <p className="muted">Sem snapshot de embalagens incluídas.</p>}
         <h3>Embalagens adicionais do pedido</h3>
         {order.packagingItems?.length ? order.packagingItems.map((p, index) => <p className="muted" key={`${p.packagingId}-${index}`}>{p.name} · {p.quantity} × {money(p.unitCost)} · custo congelado {money(toCents2(p.quantity * p.unitCost))}</p>) : <p className="muted">Nenhuma embalagem adicional registrada.</p>}
         {order.packagingItems?.length && !(order.packagingCharge ?? 0) ? <p className="form-subtitle">Este pedido é anterior à cobrança automática; as embalagens adicionais permanecem no custo, sem alterar o total histórico cobrado.</p> : null}
-        <p className="form-subtitle">{cost.basis === 'recorded' ? `Custo unitário congelado em ${brDate(order.costSnapshot!.capturedAt.slice(0, 10))}.` : cost.basis === 'estimated' ? 'Custo estimado com os preços atuais; não há snapshot histórico.' : 'Custo não disponível para este pedido.'}</p>
+        <p className="form-subtitle">{costBasis === 'recorded' ? 'Custos unitários congelados quando cada produto foi registrado.' : costBasis === 'estimated' ? 'Algum produto não tem custo registrado: ele entra com o custo atual da receita (estimativa).' : 'Custo não disponível: algum produto não tem custo calculável.'}</p>
       </section>
 
       <section className="card order-detail-card" aria-labelledby="order-payments-heading">
@@ -120,6 +123,7 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
           <button className="secondary" onClick={() => { setPaying(v => !v); setPayAmount(due > 0 ? String(due) : ''); setPayDate(today()); setPayMethod(''); setPayNote(''); }}><Wallet size={16} /> {paying ? 'Fechar recebimento' : 'Registrar recebimento'}</button>
           {paying && <form className="stack order-payment-form" onSubmit={savePayment}>
             <div className="form-grid"><Field label="Valor recebido (R$)"><MoneyInput value={payAmount} onValueChange={setPayAmount} required /></Field><Field label="Data do recebimento"><input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} required /></Field><Field label="Meio de pagamento (opcional)"><select value={payMethod} onChange={e => setPayMethod(e.target.value as PaymentMethod | '')}><option value="">Não informar</option>{PAYMENT_METHODS.map(m => <option key={m}>{m}</option>)}</select></Field><Field label="Observação (opcional)"><input value={payNote} maxLength={200} onChange={e => setPayNote(e.target.value)} placeholder="Ex.: 2ª parcela" /></Field></div>
+            {order.status === 'Orçamento' && <p className="notice info" role="status">Ao registrar este recebimento, a encomenda será confirmada automaticamente.</p>}
             <p className="form-subtitle">Saldo pendente: {money(due)}. Não é possível receber mais do que o saldo.</p><button className="primary" type="submit"><Save size={16} /> Registrar recebimento</button>
           </form>}
         </>}

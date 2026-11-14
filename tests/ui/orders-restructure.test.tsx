@@ -59,14 +59,15 @@ describe('Etapa 10 — navegação e pedido', () => {
     fireEvent.change(screen.getByLabelText('Sinal recebido (opcional)'), { target: { value: '20' } });
     expect(screen.getByText('Saldo restante').parentElement?.textContent).toMatch(/46,25/);
     expect((screen.getByLabelText('Sinal recebido (opcional)') as HTMLInputElement).value).toBe('20,00');
+    expect(screen.getByText('Ao registrar este sinal, a encomenda será confirmada automaticamente.')).toBeTruthy();
     await u.click(screen.getByRole('button', { name: /Registrar encomenda/ }));
-    await screen.findByText('Encomenda cadastrada.');
+    await screen.findByText('Encomenda cadastrada e confirmada pelo sinal recebido.');
     expect(screen.getByRole('heading', { name: 'Brigadeiros da Ana' })).toBeTruthy();
     const saved = (await loadData()).orders[0];
-    expect(saved).toMatchObject({ quantity: 25, unitPrice: 2.5, deposit: 20, packagingCharge: 3.75 });
+    expect(saved).toMatchObject({ items: [{ quantity: 25, unitPrice: 2.5 }], deposit: 20, packagingCharge: 3.75, status: 'Confirmado' });
     expect(orderTotal(saved)).toBe(66.25);
     expect(balanceDue(saved)).toBe(46.25);
-    expect((await loadData()).orders[0].costSnapshot?.packagingItems).toEqual([{ packagingId: 'forminha', name: 'Forminha', quantityPerUnit: 1, unitCost: 0.1 }]);
+    expect((await loadData()).orders[0].items[0].costSnapshot?.packagingItems).toEqual([{ packagingId: 'forminha', name: 'Forminha', quantityPerUnit: 1, unitCost: 0.1 }]);
   });
 
   it('mantém encomenda legada sem cobrança retroativa e preserva recebimentos ao editar outros dados', async () => {
@@ -80,7 +81,7 @@ describe('Etapa 10 — navegação e pedido', () => {
     fireEvent.change(screen.getByLabelText('Nome do cliente'), { target: { value: 'Cliente atualizada' } });
     await u.click(screen.getByRole('button', { name: 'Salvar alterações' }));
     const saved = (await loadData()).orders[0];
-    expect(saved).toMatchObject({ customer: 'Cliente atualizada', quantity: 25, unitPrice: 2.5, deposit: 10 });
+    expect(saved).toMatchObject({ customer: 'Cliente atualizada', items: [{ quantity: 25, unitPrice: 2.5 }], deposit: 10 });
     expect(saved.packagingCharge ?? 0).toBe(0);
     expect(saved.payments).toEqual([{ id: 'pay-old', amount: 5, receivedAt: '2026-11-12', method: 'Pix' }]);
     expect(orderTotal(saved)).toBe(62.5);

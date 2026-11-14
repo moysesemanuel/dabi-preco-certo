@@ -5,6 +5,14 @@
  */
 import type { Ingredient, Order, Packaging, Recipe, Settings } from '../src/domain/types';
 
+/**
+ * Versão do protocolo de sincronização. 2 = encomendas com `items` (várias receitas).
+ * O app só sincroniza com um servidor que declara esta versão no pull, pelas rotas /api/sync/v2: um Worker antigo
+ * responde 404 nessas rotas e nunca recebe (nem descarta) itens que não conhece.
+ */
+export const SYNC_PROTOCOL = 2;
+export const SYNC_PATHS = { pull: '/api/sync/v2', push: '/api/sync/v2/push' } as const;
+export const LEGACY_SYNC_PATHS = ['/api/sync', '/api/sync/push'] as const;
 export const SYNC_LIMITS = { maxChangesPerPush: 100, maxBodyBytes: 1_000_000 } as const;
 export const KINDS = ['ingredients', 'recipes', 'orders', 'packagings'] as const;
 export type Kind = (typeof KINDS)[number];
@@ -21,6 +29,8 @@ export type PushRequest = {
 };
 export type PullEntity<T> = { id: string; rev: number; deleted: boolean; data?: T };
 export type PullResponse = {
+  /** Versão do protocolo do servidor (ausente = servidor antigo, sem suporte a itens). */
+  protocol?: number;
   revision: number;
   ingredients: PullEntity<Ingredient>[];
   recipes: PullEntity<Recipe>[];

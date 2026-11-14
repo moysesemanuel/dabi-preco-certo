@@ -1,6 +1,7 @@
+import { asOrder, updateLegacyOrder } from './helpers/orders';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { effectiveQuoteCodes, isQuoteCode, legacyQuoteCode, uniqueQuoteCode, withQuoteCodes } from '../shared/quoteCode';
-import { updateOrder } from '../src/domain/edit';
+
 import { addPayment } from '../src/domain/payments';
 import type { DataSet, Order } from '../src/domain/types';
 import { buildPublicQuote, createQuotesClient, whatsappShareUrl } from '../src/features/sharing/quotes';
@@ -14,7 +15,7 @@ const device = async (label: string, email = 'bia@exemplo.com') => new Device(sr
 
 const base = (): DataSet => ({ ...emptyDataSet(), ingredients: [{ id: 'f', name: 'Farinha', purchaseQuantity: 1, unit: 'kg', purchasePrice: 6 }],
   recipes: [{ id: 'r', name: 'Bolo de cenoura', yield: 10, items: [{ ingredientId: 'f', quantity: 500, unit: 'g' }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 30 }] });
-const mk = (id: string, over: Partial<Order> = {}): Order => ({ id, customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 50, deposit: 10, deliveryDate: '2026-12-01', status: 'Orçamento', createdAt: '2026-11-11T10:00:00.000Z', ...over });
+const mk = (id: string, over: Partial<Order> = {}): Order => asOrder({ id, customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 50, deposit: 10, deliveryDate: '2026-12-01', status: 'Orçamento', createdAt: '2026-11-11T10:00:00.000Z', ...over });
 const newOrder = (d: DataSet, id: string, over: Partial<Order> = {}): Order => mk(id, { quoteCode: uniqueQuoteCode(new Set(d.orders.map(o => o.quoteCode!).filter(Boolean))), ...over });
 const serverCodes = () => Object.fromEntries(srv.table('orders').map(r => [r.id as string, r.quote_code as string | null]));
 const addOrder = (d: Device, id: string, over: Partial<Order> = {}) => d.edit(x => ({ ...x, orders: [...x.orders, newOrder(x, id, over)] }));
@@ -37,7 +38,7 @@ describe('Geração e unicidade', () => {
     const A = await device('A'), B = await device('B');
     A.edit(() => base()); addOrder(A, 'o1'); await A.sync(); await B.sync();
     const code = A.data.orders[0].quoteCode!;
-    A.edit(d => updateOrder(d, 'o1', { customer: 'Ana Paula', recipeId: 'r', quantity: 3, unitPrice: 55, deliveryDate: '2026-12-05', deposit: 10 })); await A.sync();
+    A.edit(d => updateLegacyOrder(d, 'o1', { customer: 'Ana Paula', recipeId: 'r', quantity: 3, unitPrice: 55, deliveryDate: '2026-12-05', deposit: 10 })); await A.sync();
     A.edit(d => ({ ...d, orders: d.orders.map(o => ({ ...o, status: 'Confirmado' as const })) })); await A.sync();
     A.edit(d => addPayment(d, 'o1', { id: 'p1', amount: 40, receivedAt: '2026-11-12' })); await A.sync();
     A.edit(d => ({ ...d, orders: d.orders.map(o => ({ ...o, status: 'Entregue' as const })) })); await A.sync();
@@ -123,7 +124,7 @@ describe('Orçamento público, WhatsApp, revogação e republicação', () => {
   it('o número do orçamento é o código permanente: aparece na página do cliente, na lista e no WhatsApp; republicar e revogar não o alteram', async () => {
     const { client } = await setup();
     const order = mk('o1', { quoteCode: 'ORC-K7M42P', customer: 'Maria Secreta' });
-    const built = buildPublicQuote(order, base().recipes[0], settings, issue);
+    const built = buildPublicQuote(order, base().recipes, settings, issue);
     if (!built.ok) throw new Error(built.error);
     expect(built.quote.quoteNumber).toBe('ORC-K7M42P');
     const first = await client.publish(built.quote); if (!first.ok) throw new Error('publish');
@@ -133,7 +134,7 @@ describe('Orçamento público, WhatsApp, revogação e republicação', () => {
     expect((await client.revoke(first.value.id)).ok).toBe(true);
     // republica o mesmo pedido, mesmo depois de editado e confirmado: o mesmo código, com outro token de link
     const edited = { ...order, status: 'Confirmado' as const, unitPrice: 60 };
-    const again = buildPublicQuote(edited, base().recipes[0], settings, issue); if (!again.ok) throw new Error(again.error);
+    const again = buildPublicQuote(edited, base().recipes, settings, issue); if (!again.ok) throw new Error(again.error);
     const second = await client.publish(again.quote); if (!second.ok) throw new Error('publish 2');
     expect(second.value.id).not.toBe(first.value.id); expect(again.quote.quoteNumber).toBe('ORC-K7M42P');
     const list = await client.list(); if (!list.ok) throw new Error('list');
@@ -142,9 +143,9 @@ describe('Orçamento público, WhatsApp, revogação e republicação', () => {
   });
   it('o código NÃO é credencial: não existe consulta por código e o token do link não contém o código', async () => {
     const { client } = await setup();
-    const built = buildPublicQuote(mk('o1', { quoteCode: 'ORC-K7M42P' }), base().recipes[0], settings, issue); if (!built.ok) throw new Error(built.error);
+    const built = buildPublicQuote(mk('o1', { quoteCode: 'ORC-K7M42P' }), base().recipes, settings, issue); if (!built.ok) throw new Error(built.error);
     const pub = await client.publish(built.quote); if (!pub.ok) throw new Error('publish');
-    for (const path of ['/o/ORC-K7M42P', '/o/K7M42P', '/api/quotes/ORC-K7M42P', '/api/orders/ORC-K7M42P', '/api/sync?code=ORC-K7M42P']) expect([401, 404, 400, 410]).toContain((await srv.request('GET', path)).status);
+    for (const path of ['/o/ORC-K7M42P', '/o/K7M42P', '/api/quotes/ORC-K7M42P', '/api/orders/ORC-K7M42P', '/api/sync/v2?code=ORC-K7M42P']) expect([401, 404, 400, 410]).toContain((await srv.request('GET', path)).status);
     expect(pub.value.id).not.toContain('K7M42P'); expect(pub.value.url).not.toContain('ORC');
   });
 });

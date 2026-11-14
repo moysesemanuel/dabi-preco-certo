@@ -18,7 +18,7 @@ describe('validateBackup', () => {
     expect(() => validateBackup('texto')).toThrow();
   });
   it('rejeita versão de esquema desconhecida', () => {
-    expect(() => validateBackup({ ...valid(), schemaVersion: 5 })).toThrow('incompatível');
+    expect(() => validateBackup({ ...valid(), schemaVersion: 6 })).toThrow('incompatível');
     expect(() => validateBackup({ ...valid(), schemaVersion: 0 })).toThrow('incompatível');
   });
   it('rejeita ingrediente com unidade ou quantidade inválida', () => {

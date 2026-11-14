@@ -1,10 +1,11 @@
 import { isIsoDate } from '../../shared/dataset';
 import { isMoney, toCents2 } from './money';
 import { calculateOrderFinancials } from './orderFinancials';
+import { statusAfterReceipt } from './orderStatus';
 import type { DataSet, Order, Payment } from './types';
 
-/** Total da encomenda, em centavos exatos. */
-export const orderTotal = (o: Pick<Order, 'quantity' | 'unitPrice' | 'packagingCharge'>): number => calculateOrderFinancials(o).totalCharged;
+/** Total da encomenda, em centavos exatos (soma dos itens + cobrança das embalagens adicionais). */
+export const orderTotal = (o: Pick<Order, 'items' | 'packagingCharge'>): number => calculateOrderFinancials(o).totalCharged;
 /** Sinal + recebimentos. */
 export const totalReceived = (o: Pick<Order, 'deposit' | 'payments'>): number => toCents2(o.deposit + (o.payments ?? []).reduce((s, p) => s + p.amount, 0));
 /** Saldo pendente (nunca negativo). */
@@ -13,6 +14,8 @@ export const balanceDue = (o: Order): number => Math.max(0, toCents2(orderTotal(
 /**
  * Registra um recebimento. Regra: o total recebido (sinal + recebimentos) nunca ultrapassa o total da encomenda.
  * Não há crédito nem reembolso nesta versão: o que passar do saldo é recusado.
+ * Um ORÇAMENTO que recebe um pagamento passa a CONFIRMADO no MESMO registro (pagamento e status são gravados juntos).
+ * Repetir o mesmo recebimento (mesmo id) é recusado: nunca duplica.
  */
 export function addPayment(data: DataSet, orderId: string, payment: Payment): DataSet {
   const order = data.orders.find(o => o.id === orderId);
@@ -25,10 +28,13 @@ export function addPayment(data: DataSet, orderId: string, payment: Payment): Da
   const due = balanceDue(order);
   if (amount > due) throw new Error(due > 0 ? 'O valor é maior que o saldo pendente.' : 'Esta encomenda já está totalmente paga.');
   const normalized = amount === payment.amount ? payment : { ...payment, amount };
-  return { ...data, orders: data.orders.map(o => (o.id === orderId ? { ...o, payments: [...(o.payments ?? []), normalized] } : o)) };
+  return { ...data, orders: data.orders.map(o => (o.id === orderId ? { ...o, status: statusAfterReceipt(o.status, amount), payments: [...(o.payments ?? []), normalized] } : o)) };
 }
 
-/** Remove um recebimento lançado por engano (a tela pede confirmação). Sem recebimentos, o campo some do pedido. */
+/**
+ * Remove um recebimento lançado por engano (a tela pede confirmação). Sem recebimentos, o campo some do pedido.
+ * O status NÃO volta para Orçamento: a confirmação pode representar um compromisso já assumido; voltar é uma escolha explícita.
+ */
 export function removePayment(data: DataSet, orderId: string, paymentId: string): DataSet {
   const order = data.orders.find(o => o.id === orderId);
   if (!order || !(order.payments ?? []).some(p => p.id === paymentId)) throw new Error('Recebimento não encontrado.');

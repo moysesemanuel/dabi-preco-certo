@@ -85,7 +85,7 @@ export function RecipesPage({ data, update, inform }: PageProps) {
     inform(`${incoming.length} ingrediente(s) adicionado(s) à receita. Revise e clique em "Salvar receita" para guardar.`);
   }
   function removeRecipe(recipeId: string) {
-    if (data.orders.some(o => o.recipeId === recipeId)) return inform('Esta receita possui encomendas. Exclua as encomendas antes.');
+    if (data.orders.some(o => o.items.some(item => item.recipeId === recipeId))) return inform('Esta receita possui encomendas. Exclua as encomendas antes.');
     if (!confirm('Excluir esta receita?')) return;
     update(d => ({ ...d, recipes: d.recipes.filter(r => r.id !== recipeId) }));
     if (selectedId === recipeId) setSelectedId('');

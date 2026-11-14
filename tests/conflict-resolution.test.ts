@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +16,7 @@ beforeEach(async () => { srv = makeServer(); await srv.issueFor('bia@exemplo.com
 
 const ing = (id: string, over: Partial<Ingredient> = {}): Ingredient => ({ id, name: id === 'farinha' ? 'Farinha de trigo' : `Ingrediente ${id}`, unit: 'kg', purchaseQuantity: 1, purchasePrice: 11, ...over });
 const rec = (id: string, ingredientId: string): Recipe => ({ id, name: `Receita ${id}`, yield: 10, items: [{ ingredientId, quantity: 500, unit: 'g' }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 20 });
-const ord = (id: string, over: Partial<Order> = {}): Order => ({ id, customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 100, deposit: 20, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
+const ord = (id: string, over: Partial<Order> = {}): Order => asOrder({ id, customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 100, deposit: 20, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
 const data = (p: Partial<DataSet> = {}): DataSet => ({ ...emptyDataSet(), ...p });
 const setPrice = (id: string, price: number) => (d: DataSet): DataSet => ({ ...d, ingredients: d.ingredients.map(i => (i.id === id ? { ...i, purchasePrice: price } : i)) });
 const price = (d: DataSet, id = 'farinha') => d.ingredients.find(i => i.id === id)?.purchasePrice;

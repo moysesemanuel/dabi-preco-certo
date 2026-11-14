@@ -57,7 +57,7 @@ describe('Painel /admin', () => {
     await u.click(screen.getByRole('button', { name: 'Suspender acesso' })); const go = screen.getByRole('button', { name: 'Suspender' }) as HTMLButtonElement; expect(go.disabled).toBe(true);
     await u.type(screen.getByLabelText(/digite o e-mail/), 'ana@exemplo.com'); expect(go.disabled).toBe(false); await u.click(go);
     expect(await screen.findByText('Acesso suspenso.')).toBeTruthy(); expect(lic('ana@exemplo.com').status).toBe('revoked'); expect(screen.getAllByText('Suspensa').length).toBeGreaterThan(0);
-    expect((await srv.request('GET', '/api/sync?since=0', { session: ana })).status).toBe(403); // efeito real no servidor
+    expect((await srv.request('GET', '/api/sync/v2?since=0', { session: ana })).status).toBe(403); // efeito real no servidor
     await u.click(screen.getByRole('button', { name: 'Reativar acesso' })); await u.click(screen.getByRole('button', { name: 'Reativar' })); expect(await screen.findByText('Acesso reativado.')).toBeTruthy(); expect(lic('ana@exemplo.com').status).toBe('active');
   });
   it('sem requisições redundantes: a permissão é consultada uma vez e nada é repetido por temporizador ou renderização', async () => {

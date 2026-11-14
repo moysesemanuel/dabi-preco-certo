@@ -1,3 +1,4 @@
+import { asOrder } from '../helpers/orders';
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -14,7 +15,7 @@ vi.mock('../../src/sync/retry', () => ({ retryDelayMs: (n: number) => 60 * 2 ** 
 const ing = (id: string, price = 6) => ({ id, name: `Ingrediente ${id}`, unit: 'g' as const, purchaseQuantity: 1000, purchasePrice: price });
 const base = (extra: Partial<DataSet> = {}): DataSet => ({ schemaVersion: 3, settings: { cupSizeMl: 240, businessName: 'Doces' }, ingredients: [ing('a'), ing('b')],
   recipes: [{ id: 'r', name: 'Bolo', yield: 10, items: [{ ingredientId: 'a', quantity: 100, unit: 'g' }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 30 }],
-  orders: [{ id: 'o1', quoteCode: 'ORC-K7M42P', customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 100, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z' }], ...extra });
+  orders: [asOrder({ id: 'o1', quoteCode: 'ORC-K7M42P', customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 100, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z' })], ...extra });
 
 let locks: ReturnType<typeof createFakeLocks>, BC: ReturnType<typeof createFakeBroadcast>, n = 0;
 type Tab = { id: string; c: HTMLElement; close(): void };
@@ -152,8 +153,8 @@ describe('Sincronização com a nuvem, contas e requisições', () => {
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
   let who = 'usr_1'; let calls: string[] = [];
   const stubApi = () => { calls = []; vi.stubGlobal('fetch', vi.fn(async (url: string, init: RequestInit = {}) => { const p = url.replace('https://api.exemplo.test', ''); calls.push(`${init.method ?? 'GET'} ${p.split('?')[0]}`);
-    if (p === '/api/auth/session') return json(200, SESSION(who)); if (p.startsWith('/api/sync?')) return json(200, { revision: 1, ingredients: [], recipes: [], orders: [] }); if (p === '/api/sync/push') return json(200, { revision: 2, changed: true }); return json(404, {}); })); };
-  const syncs = () => calls.filter(c => c.includes('/api/sync'));
+    if (p === '/api/auth/session') return json(200, SESSION(who)); if (p.startsWith('/api/sync/v2?')) return json(200, { protocol: 2, revision: 1, ingredients: [], recipes: [], orders: [] }); if (p === '/api/sync/v2/push') return json(200, { revision: 2, changed: true }); return json(404, {}); })); };
+  const syncs = () => calls.filter(c => c.includes('/api/sync/v2'));
 
   it('só a aba que edita sincroniza: a aba em consulta não faz nenhuma requisição de sincronização (nem ao ganhar o foco)', async () => {
     stubApi(); who = 'usr_1'; await saveData({ schemaVersion: 3, ingredients: [], recipes: [], orders: [] }); await saveSyncMeta({ ...emptyMeta(), userId: 'usr_1' });
@@ -170,7 +171,7 @@ describe('Sincronização com a nuvem, contas e requisições', () => {
     who = 'usr_2'; // o cookie (compartilhado) passou a ser de outra conta
     const mark = calls.length; A.close(); await settle(); await settle(); await act(async () => { await new Promise(r => setTimeout(r, 400)); });
     const after = calls.slice(mark); expect(after[0]).toBe('GET /api/auth/session'); // a sessão é verificada primeiro
-    expect(after.filter(c => c.includes('/api/sync'))).toEqual([]); // e, como o aparelho é da conta anterior, nada é baixado nem enviado
+    expect(after.filter(c => c.includes('/api/sync/v2'))).toEqual([]); // e, como o aparelho é da conta anterior, nada é baixado nem enviado
     expect(banner(B)).toBeNull(); expect((await disk()).ingredients).toHaveLength(0); // os dados locais continuam como estavam (nada da conta nova entrou)
   }, 40000);
 

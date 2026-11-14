@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPush, SYNC_LIMITS, type PullResponse, type PushRequest } from '../shared/sync';
 import type { Ingredient, Order, Packaging, Recipe } from '../src/domain/types';
@@ -9,35 +10,35 @@ beforeEach(async () => { s = makeServer(); await s.issueFor('bia@exemplo.com'); 
 
 const ing = (id: string, over: Partial<Ingredient> = {}): Ingredient => ({ id, name: `Ingrediente ${id}`, unit: 'g', purchaseQuantity: 1000, purchasePrice: 6, ...over });
 const rec = (id: string, ingredientId: string, over: Partial<Recipe> = {}): Recipe => ({ id, name: `Receita ${id}`, yield: 10, items: [{ ingredientId, quantity: 500, unit: 'g' }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 20, ...over });
-const ord = (id: string, recipeId: string, over: Partial<Order> = {}): Order => ({ id, customer: 'Ana', recipeId, quantity: 2, unitPrice: 5, deposit: 3, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
-const push = (session: Session | undefined, build: (p: PushRequest) => void, base = 0) => { const p = emptyPush(base); build(p); return s.request('POST', '/api/sync/push', { session, body: p }); };
-const pull = async (session: Session | undefined, since = 0) => { const r = await s.request('GET', `/api/sync?since=${since}`, { session }); return { status: r.status, body: await r.json() as PullResponse }; };
+const ord = (id: string, recipeId: string, over: Partial<Order> = {}): Order => asOrder({ id, customer: 'Ana', recipeId, quantity: 2, unitPrice: 5, deposit: 3, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
+const push = (session: Session | undefined, build: (p: PushRequest) => void, base = 0) => { const p = emptyPush(base); build(p); return s.request('POST', '/api/sync/v2/push', { session, body: p }); };
+const pull = async (session: Session | undefined, since = 0) => { const r = await s.request('GET', `/api/sync/v2?since=${since}`, { session }); return { status: r.status, body: await r.json() as PullResponse }; };
 const json = async (r: Response) => r.json() as Promise<Record<string, unknown>>;
 
 describe('Acesso', () => {
   it('sem sessão: 401; sem CSRF/origem no envio: 403; leitura não exige CSRF', async () => {
-    expect((await s.request('GET', '/api/sync')).status).toBe(401);
+    expect((await s.request('GET', '/api/sync/v2')).status).toBe(401);
     expect((await push(undefined, () => {})).status).toBe(401);
-    expect((await s.request('POST', '/api/sync/push', { session: { ...bia, csrf: 'errado' }, body: emptyPush(0) })).status).toBe(403);
-    expect((await s.request('POST', '/api/sync/push', { session: bia, body: emptyPush(0), origin: 'https://evil.example' })).status).toBe(403);
-    expect((await s.request('POST', '/api/sync/push', { session: bia, body: emptyPush(0), origin: null })).status).toBe(403);
-    expect((await s.request('GET', '/api/sync', { session: { ...bia, csrf: 'qualquer' } })).status).toBe(200);
+    expect((await s.request('POST', '/api/sync/v2/push', { session: { ...bia, csrf: 'errado' }, body: emptyPush(0) })).status).toBe(403);
+    expect((await s.request('POST', '/api/sync/v2/push', { session: bia, body: emptyPush(0), origin: 'https://evil.example' })).status).toBe(403);
+    expect((await s.request('POST', '/api/sync/v2/push', { session: bia, body: emptyPush(0), origin: null })).status).toBe(403);
+    expect((await s.request('GET', '/api/sync/v2', { session: { ...bia, csrf: 'qualquer' } })).status).toBe(200);
   });
   it('licença revogada → 403; sessão revogada → 401; método errado → 405', async () => {
-    expect((await s.request('PUT', '/api/sync', { session: bia })).status).toBe(405);
-    expect((await s.request('GET', '/api/sync/push', { session: bia })).status).toBe(405);
+    expect((await s.request('PUT', '/api/sync/v2', { session: bia })).status).toBe(405);
+    expect((await s.request('GET', '/api/sync/v2/push', { session: bia })).status).toBe(405);
     s.db.raw.exec("UPDATE licenses SET status = 'revoked'");
-    expect((await s.request('GET', '/api/sync', { session: bia })).status).toBe(403);
+    expect((await s.request('GET', '/api/sync/v2', { session: bia })).status).toBe(403);
     s.db.raw.exec('UPDATE sessions SET revoked_at = ?'.replace('?', "'2026-11-12T15:00:00.000Z'"));
-    expect((await s.request('GET', '/api/sync', { session: bia })).status).toBe(401);
+    expect((await s.request('GET', '/api/sync/v2', { session: bia })).status).toBe(401);
   });
   it('limite de taxa da sincronização por licença', async () => {
-    for (let i = 0; i < 60; i++) expect((await s.request('GET', '/api/sync', { session: bia })).status).toBe(200);
-    const limited = await s.request('GET', '/api/sync', { session: bia });
+    for (let i = 0; i < 60; i++) expect((await s.request('GET', '/api/sync/v2', { session: bia })).status).toBe(200);
+    const limited = await s.request('GET', '/api/sync/v2', { session: bia });
     expect(limited.status).toBe(429); expect(limited.headers.get('retry-after')).toBeTruthy();
   });
   it('parâmetro since inválido → 400', async () => {
-    for (const since of ['abc', '-1', '1.5', '99999999999999999']) expect((await s.request('GET', `/api/sync?since=${since}`, { session: bia })).status, since).toBe(400);
+    for (const since of ['abc', '-1', '1.5', '99999999999999999']) expect((await s.request('GET', `/api/sync/v2?since=${since}`, { session: bia })).status, since).toBe(400);
   });
 });
 
@@ -54,7 +55,7 @@ describe('Sincronização de embalagens', () => {
     expect(first.packagings?.[0].data).toEqual(pack);
     expect(first.recipes[0].data?.packagingItems).toEqual([{ packagingId: 'box', quantityPerUnit: 1 }]);
     expect(first.orders[0].data?.packagingItems?.[0].quantity).toBe(4);
-    expect(first.orders[0].data?.costSnapshot?.costPerUnit).toBe(1.25);
+    expect(first.orders[0].data?.items[0].costSnapshot?.costPerUnit).toBe(1.25);
     expect(first.orders[0].data?.packagingCharge).toBe(18);
 
     const legacy = emptyPush(1);
@@ -62,7 +63,7 @@ describe('Sincronização de embalagens', () => {
     legacy.upserts.recipes = [rec('r', 'f', { desiredMargin: 25 })];
     const oldShape = structuredClone(legacy) as unknown as Record<string, any>;
     delete oldShape.baseRevs.packagings; delete oldShape.upserts.packagings; delete oldShape.deletes.packagings;
-    const response = await s.request('POST', '/api/sync/push', { session: bia, body: oldShape });
+    const response = await s.request('POST', '/api/sync/v2/push', { session: bia, body: oldShape });
     expect(response.status).toBe(200);
     const later = (await pull(bia)).body;
     expect(later.recipes[0].data?.packagingItems).toEqual([{ packagingId: 'box', quantityPerUnit: 1 }]);
@@ -72,7 +73,7 @@ describe('Sincronização de embalagens', () => {
     const oldOrderPush = emptyPush(later.revision);
     oldOrderPush.baseRevs.orders = { o: later.orders.find(x => x.id === 'o')!.rev };
     oldOrderPush.upserts.orders = [olderOrder];
-    const oldOrderResult = await s.request('POST', '/api/sync/push', { session: bia, body: oldOrderPush });
+    const oldOrderResult = await s.request('POST', '/api/sync/v2/push', { session: bia, body: oldOrderPush });
     expect(oldOrderResult.status).toBe(200);
     expect((await pull(bia)).body.orders.find(x => x.id === 'o')?.data?.packagingCharge).toBe(18);
   });
@@ -145,12 +146,12 @@ describe('Validação do conteúdo', () => {
   });
   it('rejeita corpo malformado, revisão base futura e envios grandes demais', async () => {
     for (const body of [null, 'x', {}, { baseRevision: -1, baseRevs: {}, upserts: {}, deletes: {} }, { ...emptyPush(0), upserts: { ingredients: 'x', recipes: [], orders: [] } }, { ...emptyPush(0), deletes: { ingredients: [1], recipes: [], orders: [] } }, { ...emptyPush(0), baseRevs: { ingredients: { a: -1 }, recipes: {}, orders: {} } }]) {
-      expect((await s.request('POST', '/api/sync/push', { session: bia, body })).status, JSON.stringify(body)).toBe(400);
+      expect((await s.request('POST', '/api/sync/v2/push', { session: bia, body })).status, JSON.stringify(body)).toBe(400);
     }
     expect((await push(bia, () => {}, 5)).status).toBe(400);
     const many = await push(bia, p => { p.upserts.ingredients = Array.from({ length: SYNC_LIMITS.maxChangesPerPush + 1 }, (_, i) => ing(`i${i}`)); });
     expect(many.status).toBe(413);
-    const huge = await s.request('POST', '/api/sync/push', { session: bia, body: { ...emptyPush(0), upserts: { ingredients: [ing('f', { name: 'x'.repeat(SYNC_LIMITS.maxBodyBytes) })], recipes: [], orders: [] } } });
+    const huge = await s.request('POST', '/api/sync/v2/push', { session: bia, body: { ...emptyPush(0), upserts: { ingredients: [ing('f', { name: 'x'.repeat(SYNC_LIMITS.maxBodyBytes) })], recipes: [], orders: [] } } });
     expect(huge.status).toBe(413);
   });
   it('relacionamentos: receita sem ingrediente e encomenda sem receita → 422', async () => {
@@ -200,7 +201,7 @@ describe('Conflitos, atomicidade e concorrência', () => {
     let first = true;
     const slowDb = { prepare: s.env.DB.prepare.bind(s.env.DB), batch: async (statements: Parameters<typeof s.env.DB.batch>[0]) => { if (first) { first = false; await gate; } return s.env.DB.batch(statements); } };
     const body = emptyPush(1); body.upserts.ingredients = [ing('lento')]; body.upserts.recipes = [rec('rlento', 'lento')];
-    const slow = s.handle(new Request(`https://api.exemplo.test/api/sync/push`, { method: 'POST', headers: { cookie: bia.cookie, 'x-csrf-token': bia.csrf, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify(body) }), { ...s.env, DB: slowDb });
+    const slow = s.handle(new Request(`https://api.exemplo.test/api/sync/v2/push`, { method: 'POST', headers: { cookie: bia.cookie, 'x-csrf-token': bia.csrf, origin: 'http://localhost:5174', 'content-type': 'application/json' }, body: JSON.stringify(body) }), { ...s.env, DB: slowDb });
     await new Promise(r => setTimeout(r, 20)); // o envio lento já leu a revisão 1 e está esperando para gravar
     expect((await push(bia, p => { p.upserts.ingredients = [ing('rapido')]; }, 1)).status).toBe(200); // outro dispositivo grava (revisão 2)
     release();

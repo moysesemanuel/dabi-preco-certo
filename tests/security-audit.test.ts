@@ -9,9 +9,9 @@ beforeEach(async () => { srv = makeServer(); await srv.issueFor('ana@exemplo.com
 const ing = (id: string, over: Record<string, unknown> = {}) => ({ id, name: `Ing ${id}`, unit: 'g', purchaseQuantity: 1000, purchasePrice: 6, ...over });
 const rec = (id: string, ingredientId: string) => ({ id, name: `Rec ${id}`, yield: 10, items: [{ ingredientId, quantity: 100, unit: 'g' }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 30 });
 const ord = (id: string, recipeId: string, over: Record<string, unknown> = {}) => ({ id, customer: 'Cliente', recipeId, quantity: 2, unitPrice: 50, deposit: 10, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
-const push = (s: Session, patch: (p: PushRequest) => void, base = 0) => { const p = emptyPush(base); patch(p); return srv.request('POST', '/api/sync/push', { session: s, body: p }); };
+const push = (s: Session, patch: (p: PushRequest) => void, base = 0) => { const p = emptyPush(base); patch(p); return srv.request('POST', '/api/sync/v2/push', { session: s, body: p }); };
 const seedA = async () => { const r = await push(A, p => { p.upserts.ingredients.push(ing('i1') as never); p.upserts.recipes.push(rec('r1', 'i1') as never); p.upserts.orders.push(ord('o1', 'r1', { quoteCode: 'ORC-K7M42P', payments: [{ id: 'p1', amount: 20, receivedAt: '2026-11-12' }] }) as never); }); expect(r.status).toBe(200); };
-const pull = async (s: Session, since = 0) => (await (await srv.request('GET', `/api/sync?since=${since}`, { session: s })).json()) as { revision: number; ingredients: { id: string; data?: { name: string } }[]; recipes: { id: string }[]; orders: { id: string; data?: { customer: string; payments?: { id: string }[]; quoteCode?: string } }[] };
+const pull = async (s: Session, since = 0) => (await (await srv.request('GET', `/api/sync/v2?since=${since}`, { session: s })).json()) as { revision: number; ingredients: { id: string; data?: { name: string } }[]; recipes: { id: string }[]; orders: { id: string; data?: { customer: string; payments?: { id: string }[]; quoteCode?: string } }[] };
 
 describe('Isolamento entre clientes (o usuário vem da sessão, nunca do payload)', () => {
   it('B não enxerga nada de A, nem pedindo desde a revisão 0', async () => {
@@ -41,12 +41,12 @@ describe('Isolamento entre clientes (o usuário vem da sessão, nunca do payload
   });
   it('configurações são por conta', async () => {
     await push(A, p => { p.upserts.settings = { cupSizeMl: 250, businessName: 'Doces da Ana' }; });
-    const b = await (await srv.request('GET', '/api/sync?since=0', { session: B })).json() as { settings?: unknown }; expect(b.settings).toBeUndefined();
+    const b = await (await srv.request('GET', '/api/sync/v2?since=0', { session: B })).json() as { settings?: unknown }; expect(b.settings).toBeUndefined();
   });
   it('sessões: B não vê, não encerra e não reaproveita sessões de A; o CSRF de uma conta não vale na outra', async () => {
     const list = await (await srv.request('GET', '/api/sessions', { session: B })).json() as { sessions: { id: string }[] }; expect(list.sessions.map(s => s.id)).toEqual([B.sessionId]);
     expect((await srv.request('DELETE', `/api/sessions/${A.sessionId}`, { session: B })).status).toBe(404); expect((await srv.request('GET', '/api/auth/session', { session: A })).status).toBe(200);
-    expect((await srv.request('POST', '/api/sync/push', { session: { ...A, csrf: B.csrf }, body: emptyPush(0) })).status).toBe(403);
+    expect((await srv.request('POST', '/api/sync/v2/push', { session: { ...A, csrf: B.csrf }, body: emptyPush(0) })).status).toBe(403);
   });
 });
 
@@ -66,7 +66,7 @@ describe('Integridade financeira também no servidor (o front-end não é a úni
   });
   it('JSON com número fora da faixa (1e999) é recusado', async () => {
     const body = JSON.stringify({ ...emptyPush(0), upserts: { ingredients: [], recipes: [], orders: [] } }).replace('"orders":[]', '"orders":[{"id":"o","customer":"x","recipeId":"r","quantity":1e999,"unitPrice":1,"deposit":0,"deliveryDate":"2026-12-01","status":"Confirmado","createdAt":"2026-11-11T10:00:00.000Z"}]');
-    const res = await srv.handle(new Request('https://api.exemplo.test/api/sync/push', { method: 'POST', body, headers: { cookie: A.cookie, 'x-csrf-token': A.csrf, origin: 'http://localhost:5174', 'content-type': 'application/json' } }), srv.env); expect([400, 422]).toContain(res.status);
+    const res = await srv.handle(new Request('https://api.exemplo.test/api/sync/v2/push', { method: 'POST', body, headers: { cookie: A.cookie, 'x-csrf-token': A.csrf, origin: 'http://localhost:5174', 'content-type': 'application/json' } }), srv.env); expect([400, 422]).toContain(res.status);
   });
   it('reenvio idêntico e envios SIMULTÂNEOS do mesmo recebimento: uma só linha de recebimento, nunca duplicada', async () => {
     await seedA(); const send = () => push(A, p => { p.upserts.orders.push(ord('o1', 'r1', { payments: [pay('p1', 20), pay('p2', 15)] }) as never); p.baseRevs.orders.o1 = 1; }, 1);
@@ -83,12 +83,12 @@ describe('Integridade financeira também no servidor (o front-end não é a úni
 
 describe('API: limites, métodos, CORS e vazamento de informação', () => {
   const raw = (method: string, path: string, over: { body?: string; origin?: string; s?: Session | null } = {}) => srv.handle(new Request(`https://api.exemplo.test${path}`, { method, body: over.body, headers: { 'content-type': 'application/json', origin: over.origin ?? 'http://localhost:5174', ...(over.s === null ? {} : { cookie: (over.s ?? A).cookie, 'x-csrf-token': (over.s ?? A).csrf }) } }), srv.env);
-  it('corpo gigante é recusado (413) antes de gravar', async () => { expect((await raw('POST', '/api/sync/push', { body: JSON.stringify({ x: 'a'.repeat(3_000_000) }) })).status).toBe(413); });
-  it('JSON inválido: 400 sem detalhes internos', async () => { const r = await raw('POST', '/api/sync/push', { body: '{nao-json' }); expect(r.status).toBe(400); expect(await r.text()).not.toMatch(/SyntaxError|at |node:|\.ts/); });
-  it('rotas protegidas sem sessão: 401', async () => { for (const [m, p] of [['GET', '/api/sync?since=0'], ['POST', '/api/sync/push'], ['GET', '/api/sessions'], ['GET', '/api/quotes']]) expect((await raw(m, p, { s: null, body: m === 'POST' ? '{}' : undefined })).status).toBe(401); });
-  it('métodos não previstos não são aceitos', async () => { for (const m of ['PUT', 'PATCH', 'DELETE']) expect([404, 405]).toContain((await raw(m, '/api/sync/push', { body: '{}' })).status); });
+  it('corpo gigante é recusado (413) antes de gravar', async () => { expect((await raw('POST', '/api/sync/v2/push', { body: JSON.stringify({ x: 'a'.repeat(3_000_000) }) })).status).toBe(413); });
+  it('JSON inválido: 400 sem detalhes internos', async () => { const r = await raw('POST', '/api/sync/v2/push', { body: '{nao-json' }); expect(r.status).toBe(400); expect(await r.text()).not.toMatch(/SyntaxError|at |node:|\.ts/); });
+  it('rotas protegidas sem sessão: 401', async () => { for (const [m, p] of [['GET', '/api/sync/v2?since=0'], ['POST', '/api/sync/v2/push'], ['GET', '/api/sessions'], ['GET', '/api/quotes']]) expect((await raw(m, p, { s: null, body: m === 'POST' ? '{}' : undefined })).status).toBe(401); });
+  it('métodos não previstos não são aceitos', async () => { for (const m of ['PUT', 'PATCH', 'DELETE']) expect([404, 405]).toContain((await raw(m, '/api/sync/v2/push', { body: '{}' })).status); });
   it('origem não permitida: sem cabeçalhos CORS e sem efeito (403)', async () => {
-    const r = await raw('POST', '/api/sync/push', { body: JSON.stringify(emptyPush(0)), origin: 'https://evil.example' });
+    const r = await raw('POST', '/api/sync/v2/push', { body: JSON.stringify(emptyPush(0)), origin: 'https://evil.example' });
     expect(r.status).toBe(403); expect(r.headers.get('access-control-allow-origin')).toBeNull(); expect(r.headers.get('access-control-allow-credentials')).toBeNull();
   });
   it("texto com SQL/HTML no conteúdo é gravado como texto, sem executar nada", async () => {
@@ -102,8 +102,8 @@ describe('Logout no servidor (homologação)', () => {
   it('revoga a sessão, libera a vaga do limite de 2 e o cookie antigo não sincroniza mais (nem de outra aba)', async () => {
     const a2 = await srv.login('ana@exemplo.com', 'A2', '10.0.0.1'); // Ana agora tem 2 sessões: A e A2
     expect((await srv.request('POST', '/api/auth/logout', { session: A })).status).toBe(200);
-    for (const [m, path] of [['GET', '/api/sync?since=0'], ['GET', '/api/auth/session'], ['GET', '/api/sessions']]) expect((await srv.request(m, path, { session: A })).status).toBe(401);
-    expect((await srv.request('POST', '/api/sync/push', { session: A, body: emptyPush(0) })).status).toBe(401);
+    for (const [m, path] of [['GET', '/api/sync/v2?since=0'], ['GET', '/api/auth/session'], ['GET', '/api/sessions']]) expect((await srv.request(m, path, { session: A })).status).toBe(401);
+    expect((await srv.request('POST', '/api/sync/v2/push', { session: A, body: emptyPush(0) })).status).toBe(401);
     const a3 = await srv.login('ana@exemplo.com', 'A3', '10.0.0.1'); // a vaga voltou: entra sem substituir ninguém
     expect((await srv.request('GET', '/api/auth/session', { session: a2 })).status).toBe(200);
     expect((await srv.request('GET', '/api/auth/session', { session: a3 })).status).toBe(200);
@@ -111,6 +111,6 @@ describe('Logout no servidor (homologação)', () => {
   it('o CSRF de uma sessão encerrada não vale na nova sessão da mesma conta', async () => {
     const old = A; await srv.request('POST', '/api/auth/logout', { session: A });
     const fresh = await srv.login('ana@exemplo.com', 'A-nova', '10.0.0.1');
-    expect((await srv.request('POST', '/api/sync/push', { session: { ...fresh, csrf: old.csrf }, body: emptyPush(0) })).status).toBe(403);
+    expect((await srv.request('POST', '/api/sync/v2/push', { session: { ...fresh, csrf: old.csrf }, body: emptyPush(0) })).status).toBe(403);
   });
 });

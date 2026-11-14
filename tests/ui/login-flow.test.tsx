@@ -19,8 +19,8 @@ function fakeApi(opts: Partial<Fake> = {}): Fake {
     if (u.pathname === '/api/auth/verify-code') { if (f.keepsCookie) f.jar.has = true; return json(200, SESSION); }
     if (u.pathname === '/api/auth/session') return f.jar.has ? json(200, SESSION) : json(401, { error: 'UNAUTHORIZED' });
     if (u.pathname === '/api/sessions') return f.jar.has ? json(200, { maxSessions: 2, sessions: [] }) : json(401, {});
-    if (u.pathname === '/api/sync') { if (f.dropSessionOnSync) { f.jar.has = false; return json(401, { error: 'UNAUTHORIZED' }); } return f.jar.has ? json(200, { revision: 0, ingredients: [], recipes: [], orders: [] }) : json(401, {}); }
-    if (u.pathname === '/api/sync/push') return f.jar.has ? json(200, { revision: 1, changed: true }) : json(401, {});
+    if (u.pathname === '/api/sync/v2') { if (f.dropSessionOnSync) { f.jar.has = false; return json(401, { error: 'UNAUTHORIZED' }); } return f.jar.has ? json(200, { protocol: 2, revision: 0, ingredients: [], recipes: [], orders: [] }) : json(401, {}); }
+    if (u.pathname === '/api/sync/v2/push') return f.jar.has ? json(200, { revision: 1, changed: true }) : json(401, {});
     return json(404, {});
   }));
   return f;
@@ -56,7 +56,7 @@ describe('Login com sessão por cookie', () => {
     // a sessão foi confirmada (GET /api/auth/session) DEPOIS de validar o código e ANTES de abrir o app
     const i = api.calls.indexOf(`POST ${API}/api/auth/verify-code`);
     expect(api.calls.slice(i + 1)).toContain(`GET ${API}/api/auth/session`);
-    await waitFor(() => expect(api.calls).toContain(`GET ${API}/api/sync`));
+    await waitFor(() => expect(api.calls).toContain(`GET ${API}/api/sync/v2`));
     expect(hasApp()).toBe(true);
     // "atualiza a página": novo App, mesmo cookie
     first.unmount();
@@ -73,7 +73,7 @@ describe('Login com sessão por cookie', () => {
     expect(screen.queryByText('Você entrou na sua conta.')).toBeNull(); // nenhum toast de sucesso falso
     expect(hasApp()).toBe(false);
     expect(screen.getByRole('heading', { name: 'Confirme seu código' })).toBeTruthy();
-    expect(api.calls.some(c => c.includes('/api/sync'))).toBe(false);
+    expect(api.calls.some(c => c.includes('/api/sync/v2'))).toBe(false);
   });
 
   it('sessão perdida logo depois do login (o servidor não reconhece o cookie na sincronização): volta ao login COM explicação, sem loop', async () => {
@@ -83,7 +83,7 @@ describe('Login com sessão por cookie', () => {
     expect((await screen.findByText(/não foi reconhecida pelo servidor/)).textContent).toBeTruthy();
     expect(hasApp()).toBe(false);
     await new Promise(r => setTimeout(r, 150));
-    expect(api.calls.filter(c => c === `GET ${API}/api/sync`).length).toBeLessThanOrEqual(2); // sem repetir em loop
+    expect(api.calls.filter(c => c === `GET ${API}/api/sync/v2`).length).toBeLessThanOrEqual(2); // sem repetir em loop
   });
 
   it('VITE_API_URL=same-origin: as chamadas vão para a origem do próprio app (é o que o proxy do Vite atende)', async () => {

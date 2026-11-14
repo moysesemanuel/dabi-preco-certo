@@ -6,6 +6,7 @@
  * Funções puras: devolvem os novos dados e o novo meta; lançam Error com a explicação quando a regra impede.
  */
 import { orderTotal, totalReceived } from '../domain/payments';
+import { statusAfterReceipt } from '../domain/orderStatus';
 import { toCents2 } from '../domain/money';
 import type { DataSet, Order, Payment } from '../domain/types';
 import type { RevMap } from '../../shared/sync';
@@ -29,6 +30,9 @@ function keepLocalOrder(local: Order, server: Order | null, base: Order | null):
   const payments = [...byId.values()];
   const next: Order = { ...local, deposit: local.deposit !== (base?.deposit ?? 0) ? local.deposit : server.deposit, ...(payments.length ? { payments } : {}) };
   if (!payments.length) delete next.payments;
+  // Recebimentos vindos da nuvem são recebimentos efetivos: um orçamento local que passa a tê-los fica confirmado (sem regressão de status).
+  const gained = toCents2(totalReceived(next) - totalReceived(local));
+  if (gained > 0) next.status = statusAfterReceipt(local.status, gained);
   if (toCents2(totalReceived(next)) > orderTotal(next) + 0.005) throw new Error('Manter a sua versão faria os recebimentos passarem do total da encomenda. Ajuste os recebimentos e tente de novo.');
   return next;
 }

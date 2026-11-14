@@ -11,11 +11,15 @@ const FIELD: Record<string, { label: string; money?: boolean }> = {
   densityGPerMl: { label: 'Densidade (g/ml)' }, gramsPerUnit: { label: 'Gramas por unidade' },
   yield: { label: 'Rendimento' }, items: { label: 'Ingredientes da receita' }, packagingItems: { label: 'Embalagens da receita' }, packagingPerUnit: { label: 'Embalagem por unidade', money: true }, laborTotal: { label: 'Mão de obra', money: true },
   extraTotal: { label: 'Custos extras', money: true }, desiredMargin: { label: 'Margem desejada (%)' }, prepMinutes: { label: 'Minutos de preparo' },
-  customer: { label: 'Cliente' }, recipeId: { label: 'Receita' }, quantity: { label: 'Quantidade' }, unitPrice: { label: 'Preço unitário', money: true }, deliveryDate: { label: 'Entrega' },
+  customer: { label: 'Cliente' }, recipeId: { label: 'Receita' }, quantity: { label: 'Quantidade' }, unitPrice: { label: 'Preço unitário', money: true }, deliveryDate: { label: 'Entrega' }, packagingCharge: { label: 'Cobrança de embalagens', money: true },
   status: { label: 'Situação' }, deposit: { label: 'Sinal', money: true }, createdAt: { label: 'Criada em' }, costSnapshot: { label: 'Custo registrado' }, payments: { label: 'Recebimentos' },
   catalogRef: { label: 'Medidas de referência' }, cupSizeMl: { label: 'Tamanho da xícara (ml)' }, businessName: { label: 'Nome do negócio' }, businessPhone: { label: 'Telefone' }, dailyCapacityMinutes: { label: 'Minutos por dia' }, workWeekdays: { label: 'Dias de trabalho' },
 };
 
+type ItemLike = { recipeName?: string; recipeId?: string; quantity?: number; unitPrice?: number };
+/** Itens de encomenda: "50 × Brigadeiro (R$ 2,50)". */
+const showOrderItems = (v: unknown): string => !Array.isArray(v) || !v.length ? 'Nenhum produto'
+  : (v as ItemLike[]).map(i => `${(i.quantity ?? 0).toLocaleString('pt-BR')} × ${i.recipeName ?? 'Receita'}${i.unitPrice !== undefined ? ` (${brl(i.unitPrice)})` : ''}`).join('; ');
 const show = (key: string, v: unknown, packagings: Packaging[] = []): string => {
   if (key === 'packagingItems') {
     if (v === undefined || v === null) return 'Registro legado sem informação de embalagens';
@@ -50,7 +54,10 @@ export function diffRows(c: ConflictRecord, packagings: Packaging[] = []): Field
   const L = c.local as Record<string, unknown> | null, S = c.server as Record<string, unknown> | null, B = c.base as Record<string, unknown> | null | undefined;
   if (!L || !S) return [{ key: '_', label: 'Registro', local: L ? 'Mantido' : 'Excluído', server: S ? 'Mantido' : 'Excluído', base: B ? 'Existia' : '—' }];
   const keys = [...new Set([...Object.keys(L), ...Object.keys(S)])].filter(k => k !== 'id' && !same(L[k], S[k]));
-  return keys.map(k => ({ key: k, label: FIELD[k]?.label ?? k, local: show(k, L[k], packagings), server: show(k, S[k], packagings), base: B ? show(k, B[k], packagings) : '—' }));
+  return keys.map(k => {
+    if (c.kind === 'orders' && k === 'items') return { key: k, label: 'Produtos da encomenda', local: showOrderItems(L[k]), server: showOrderItems(S[k]), base: B ? showOrderItems(B[k]) : '—' };
+    return { key: k, label: FIELD[k]?.label ?? k, local: show(k, L[k], packagings), server: show(k, S[k], packagings), base: B ? show(k, B[k], packagings) : '—' };
+  });
 }
 
 export const conflictName = (c: ConflictRecord): string => {

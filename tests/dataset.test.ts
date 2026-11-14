@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import { describe, expect, it } from 'vitest';
 import { DATASET_LIMITS, isIsoDate, isIsoDateTime, migrateStored, validateDataSet } from '../shared/dataset';
 import { emptyData } from '../src/storage/db';
@@ -15,7 +16,8 @@ const bad = (fn: (d: Tree) => void, message: string | RegExp) => expect(() => va
 
 describe('Validação estrita do conjunto de dados', () => {
   it('aceita dados válidos, inclusive o conjunto vazio, e devolve cópia normalizada', () => {
-    expect(validateDataSet(base())).toEqual(base());
+    // O backup v4 (encomendas de uma receita) volta como v5, com a encomenda convertida em um item; nada mais muda.
+    expect(validateDataSet(base())).toEqual({ ...base(), schemaVersion: 5, orders: base().orders.map(o => asOrder(o)) });
     expect(validateDataSet(emptyData())).toEqual(emptyData());
   });
   it('rejeita identificadores duplicados em cada coleção', () => {
@@ -77,7 +79,7 @@ describe('Validação estrita do conjunto de dados', () => {
   });
   it('rejeita formatos e versões incompatíveis e backups grandes demais', () => {
     for (const v of [null, 'x', 5, [], {}]) expect(() => validateDataSet(v)).toThrow();
-    bad(d => { d.schemaVersion = 5; }, 'incompatível');
+    bad(d => { d.schemaVersion = 6; }, 'incompatível');
     bad(d => { (d as { ingredients: unknown }).ingredients = {}; }, 'incompatível');
     expect(() => validateDataSet({ ...base(), orders: new Array(DATASET_LIMITS.orders + 1).fill(base().orders[0]) })).toThrow('grande demais');
   });
@@ -97,14 +99,15 @@ describe('Migração de dados', () => {
   it('backup v1 é aceito, vira v3 e as encomendas antigas continuam SEM custo registrado', () => {
     const v1 = mutate(d => { d.schemaVersion = 1; delete (d.orders[0] as { costSnapshot?: unknown }).costSnapshot; });
     const out = validateDataSet(v1);
-    expect(out.schemaVersion).toBe(4);
-    expect(out.orders[0].costSnapshot).toBeUndefined();
-    expect(out.orders[0]).toMatchObject({ id: 'o', quantity: 2, unitPrice: 5, deposit: 3 });
+    expect(out.schemaVersion).toBe(5);
+    expect(out.orders[0].items[0].costSnapshot).toBeUndefined();
+    expect(out.orders[0]).toMatchObject({ id: 'o', items: [{ id: 'item-1', quantity: 2, unitPrice: 5 }], deposit: 3 });
+    expect(out.orders[0].items[0].recipeName).toBeUndefined(); // nome histórico desconhecido: não é inventado
   });
   it('migrateStored não rejeita nem perde dados antigos, mesmo "imperfeitos"', () => {
     const odd = { schemaVersion: 1, ingredients: [{ id: 'f', name: 'F', purchaseQuantity: 1, unit: 'g', purchasePrice: 1, gramsPerCup: 120 }], recipes: [], orders: [{ id: 'o', customer: 'X', recipeId: 'sumiu', quantity: 1, unitPrice: 1, deposit: 5, deliveryDate: 'qualquer', status: 'Entregue', createdAt: 'x' }] };
     const out = migrateStored(odd);
-    expect(out.schemaVersion).toBe(4);
+    expect(out.schemaVersion).toBe(5);
     expect(out.orders).toHaveLength(1); expect(out.orders[0].id).toBe('o');
     expect(out.ingredients[0]).toMatchObject({ densityGPerMl: 0.5 }); expect('gramsPerCup' in out.ingredients[0]).toBe(false);
     expect(() => validateDataSet(odd)).toThrow(); // o mesmo dado seria rejeitado como BACKUP, mas continua legível no navegador
@@ -112,7 +115,7 @@ describe('Migração de dados', () => {
   it('migrateStored tolera lixo estrutural sem lançar erro', () => {
     for (const raw of [null, undefined, 'x', 5, {}, { ingredients: 'x', orders: null }]) {
       const out = migrateStored(raw);
-      expect(out).toMatchObject({ schemaVersion: 4, ingredients: [], recipes: [], orders: [], packagings: [] });
+      expect(out).toMatchObject({ schemaVersion: 5, ingredients: [], recipes: [], orders: [], packagings: [] });
     }
   });
   it('migrar duas vezes dá o mesmo resultado (idempotente)', () => {

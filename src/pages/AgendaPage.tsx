@@ -1,3 +1,4 @@
+import { itemsSummary } from '../domain/orders';
 import { useMemo, useState } from 'react';
 import { CalendarDays } from 'lucide-react';
 import { balanceDue } from '../domain/payments';
@@ -16,14 +17,13 @@ export function AgendaPage({ data, update, focus }: PageProps) {
   const [includeQuotes, setIncludeQuotes] = useState(false);
   const agenda = useMemo(() => buildAgenda(data.orders, today, includeQuotes), [data.orders, today, includeQuotes]);
   const forecast = useMemo(() => workloadForecast(data, today, 14), [data, today]);
-  const recipeName = (id: string) => data.recipes.find(r => r.id === id)?.name ?? 'Receita indisponível';
   const setStatus = (id: string, status: Order['status']) => update(d => ({ ...d, orders: d.orders.map(o => (o.id === id ? { ...o, status } : o)) }));
   const hasCapacity = !!data.settings?.dailyCapacityMinutes;
   const hiddenQuotes = includeQuotes ? 0 : data.orders.filter(o => o.status === 'Orçamento').length;
 
   const Row = ({ order, late }: { order: Order; late?: number }) => (
     <li style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 8, alignItems: 'center', padding: '10px 0', borderBottom: '1px solid var(--color-border)' }}>
-      <div><strong>{order.customer}</strong><div className="muted" style={{ fontSize: 13 }}>{recipeName(order.recipeId)} · {order.quantity} un. · entrega {brDate(order.deliveryDate)}</div>
+      <div><strong>{order.customer}</strong><div className="muted" style={{ fontSize: 13 }}>{itemsSummary(order, data.recipes)} · entrega {brDate(order.deliveryDate)}</div>
         <div style={{ marginTop: 4, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {late !== undefined && <span className="tag red">{late} dia(s) de atraso</span>}
           {balanceDue(order) > 0 && <span className="tag orange">A receber {money(balanceDue(order))}</span>}

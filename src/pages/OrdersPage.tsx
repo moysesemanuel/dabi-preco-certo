@@ -3,6 +3,7 @@ import { ArrowRight, ClipboardCheck, Plus } from 'lucide-react';
 import { OrderSearch } from '../components/OrderSearch';
 import { QuoteCode } from '../components/QuoteCode';
 import { filterOrders } from '../domain/orderSearch';
+import { itemsSummary, orderProductText } from '../domain/orders';
 import { balanceDue, orderTotal, totalReceived } from '../domain/payments';
 import { money } from '../domain/pricing';
 import type { Order } from '../domain/types';
@@ -21,7 +22,7 @@ export function OrdersPage({ data, focus, openOrder }: PageProps) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState<StatusFilter>('Todos');
   const codes = useMemo(() => effectiveQuoteCodes(data.orders), [data.orders]);
-  const searched = useMemo(() => filterOrders(data.orders, query, { codes, productOf: o => data.recipes.find(r => r.id === o.recipeId)?.name ?? '' }), [data.orders, data.recipes, codes, query]);
+  const searched = useMemo(() => filterOrders(data.orders, query, { codes, productOf: o => orderProductText(o, data.recipes) }), [data.orders, data.recipes, codes, query]);
   const visible = useMemo(() => searched.filter(o => status === 'Todos' || o.status === status).sort((a, b) => b.createdAt.localeCompare(a.createdAt)), [searched, status]);
 
   return <>
@@ -36,9 +37,8 @@ export function OrdersPage({ data, focus, openOrder }: PageProps) {
         : visible.length === 0 ? <div className="empty orders-empty" role="status"><ClipboardCheck size={30} /><strong>{query.trim() ? 'Nenhum pedido encontrado.' : `Nenhum pedido com status “${statusLabel(status as Order['status'])}”.`}</strong><span>{query.trim() ? 'Revise a busca ou limpe o filtro de status.' : 'Escolha outro status para consultar os pedidos.'}</span>{query.trim() && <button className="secondary" onClick={() => setQuery('')}>Limpar pesquisa</button>}</div>
           : <div className="orders-table-wrap"><div className="orders-table-head" aria-hidden="true"><span>Pedido</span><span>Status</span><span>Total</span><span>Recebido</span><span>Saldo</span><span>Entrega</span><span /></div>
             <ul className="orders-list">{visible.map(order => {
-              const recipe = data.recipes.find(r => r.id === order.recipeId);
               return <li className="order-list-row" key={order.id}>
-                <div className="order-list-primary"><div><QuoteCode code={codes.get(order.id)!} /><strong>{order.customer}</strong></div><span className="muted">{recipe?.name ?? 'Receita indisponível'} · {order.quantity} un.</span></div>
+                <div className="order-list-primary"><div><QuoteCode code={codes.get(order.id)!} /><strong>{order.customer}</strong></div><span className="muted order-items-summary">{itemsSummary(order, data.recipes)}</span></div>
                 <div className="order-list-status"><span className="order-mobile-label">Status</span><span className="tag">{statusLabel(order.status)}</span></div>
                 <div><span className="order-mobile-label">Total</span><strong>{money(orderTotal(order))}</strong></div>
                 <div><span className="order-mobile-label">Recebido</span><strong>{money(totalReceived(order))}</strong></div>

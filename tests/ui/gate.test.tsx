@@ -19,8 +19,8 @@ function fakeServer(): S {
     if (path === '/api/auth/verify-code') { if (s.verifyStatus !== 200) return json(s.verifyStatus, { error: 'INVALID_CODE' }); s.signedIn = true; return json(200, session(s.license)); }
     if (path === '/api/auth/logout') { s.signedIn = false; return json(200, { ok: true }); }
     if (path === '/api/sessions') return json(200, { maxSessions: 2, sessions: [] });
-    if (path.startsWith('/api/sync?')) return json(200, { revision: 0, ingredients: [], recipes: [], orders: [] });
-    if (path === '/api/sync/push') return json(200, { revision: 1, changed: true });
+    if (path.startsWith('/api/sync/v2?')) return json(200, { protocol: 2, revision: 0, ingredients: [], recipes: [], orders: [] });
+    if (path === '/api/sync/v2/push') return json(200, { revision: 1, changed: true });
     return json(404, {});
   }));
   return s;
@@ -66,7 +66,7 @@ describe('Acesso na versão comercial', () => {
     await waitFor(() => expect(hasApp()).toBe(true));
     await u.click(within(screen.getByRole('navigation', { name: 'Navegação principal' })).getByRole('button', { name: 'Ingredientes' }));
     expect(await screen.findByText('Farinha Local')).toBeTruthy();
-    await waitFor(() => expect(server.calls).toContain('POST /api/sync/push'));
+    await waitFor(() => expect(server.calls).toContain('POST /api/sync/v2/push'));
   });
 
   it('com sessão válida e licença ativa o app abre direto', async () => {
@@ -82,7 +82,7 @@ describe('Acesso na versão comercial', () => {
     expect(hasApp()).toBe(false);
     expect(screen.getByRole('button', { name: /Baixar backup/ })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Sair desta conta/ })).toBeTruthy();
-    expect(s.calls.some(c => c.includes('/api/sync'))).toBe(false); // nada é sincronizado sem licença
+    expect(s.calls.some(c => c.includes('/api/sync/v2'))).toBe(false); // nada é sincronizado sem licença
   });
 
   it('sem internet e sem acesso anterior: não abre', async () => {

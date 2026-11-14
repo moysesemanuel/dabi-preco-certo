@@ -1,7 +1,8 @@
+import { asOrder, updateLegacyOrder } from './helpers/orders';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { validateDataSet } from '../shared/dataset';
 import { emptyPush } from '../shared/sync';
-import { updateOrder } from '../src/domain/edit';
+
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../src/domain/payments';
 import { calculateOrderFinancials } from '../src/domain/orderFinancials';
 import type { DataSet, Order, Payment } from '../src/domain/types';
@@ -9,7 +10,7 @@ import { emptyDataSet } from '../src/sync/engine';
 import { Device } from './helpers/device';
 import { makeServer, type Server } from './helpers/server';
 
-const order = (over: Partial<Order> = {}): Order => ({ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 50, deposit: 20, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
+const order = (over: Partial<Order> = {}): Order => asOrder({ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 50, deposit: 20, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
 const base = (o: Order = order()): DataSet => ({
   ...emptyDataSet(),
   ingredients: [{ id: 'f', name: 'Farinha', unit: 'g', purchaseQuantity: 1000, purchasePrice: 6 }],
@@ -38,8 +39,8 @@ describe('Recebimentos: cálculo', () => {
     expect(orderTotal(legacy)).toBe(62.5);
   });
   it('inclui adicionais uma vez no custo e no preço para calcular o lucro', () => {
-    expect(calculateOrderFinancials({ quantity: 25, unitPrice: 2.5, packagingCharge: 3.75, recipeCostPerUnit: 1, additionalPackagingCost: 3.75 }))
-      .toEqual({ productsTotal: 62.5, packagingCharge: 3.75, totalCharged: 66.25, estimatedCost: 28.75, estimatedProfit: 37.5, balanceDue: 66.25 });
+    expect(calculateOrderFinancials({ items: [{ quantity: 25, unitPrice: 2.5, costPerUnit: 1 }], packagingCharge: 3.75, additionalPackagingCost: 3.75 }))
+      .toMatchObject({ productsTotal: 62.5, packagingCharge: 3.75, totalCharged: 66.25, estimatedCost: 28.75, estimatedProfit: 37.5, balanceDue: 66.25 });
   });
   it('saldo nunca fica negativo', () => expect(balanceDue(order({ deposit: 100 }))).toBe(0));
 });
@@ -95,15 +96,15 @@ describe('Recebimentos: edição da encomenda', () => {
   const patch = (over: Record<string, unknown> = {}) => ({ customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 50, deliveryDate: '2026-12-01', deposit: 20, ...over });
   it('o novo total não pode ficar abaixo do que já foi recebido', () => {
     const d = addPayment(base(), 'o', pay(30)); // recebido 50
-    expect(() => updateOrder(d, 'o', patch({ unitPrice: 24 }))).toThrow('abaixo do que já foi recebido'); // total 48
-    expect(updateOrder(d, 'o', patch({ unitPrice: 25 })).orders[0].unitPrice).toBe(25); // total 50: exatamente o recebido
-    expect(() => updateOrder(d, 'o', patch({ deposit: 80 }))).toThrow(); // 80 + 30 > 100
+    expect(() => updateLegacyOrder(d, 'o', patch({ unitPrice: 24 }))).toThrow('abaixo do que já foi recebido'); // total 48
+    expect(updateLegacyOrder(d, 'o', patch({ unitPrice: 25 })).orders[0].items[0].unitPrice).toBe(25); // total 50: exatamente o recebido
+    expect(() => updateLegacyOrder(d, 'o', patch({ deposit: 80 }))).toThrow(); // 80 + 30 > 100
   });
   it('editar a encomenda preserva os recebimentos e o custo registrado', () => {
     const snap = { costPerUnit: 4, capturedAt: '2026-11-11T10:00:00.000Z' };
     const d = addPayment(base(order({ costSnapshot: snap })), 'o', pay(30));
-    const next = updateOrder(d, 'o', patch({ quantity: 3, unitPrice: 60 })); // total 180
-    expect(next.orders[0].payments).toEqual([pay(30)]); expect(next.orders[0].costSnapshot).toEqual(snap);
+    const next = updateLegacyOrder(d, 'o', patch({ quantity: 3, unitPrice: 60 })); // total 180
+    expect(next.orders[0].payments).toEqual([pay(30)]); expect(next.orders[0].items[0].costSnapshot).toEqual(snap);
     expect(balanceDue(next.orders[0])).toBe(130);
   });
 });
@@ -116,7 +117,7 @@ describe('Recebimentos: backup e migração', () => {
   });
   it('listas vazias somem (forma canônica); backups v1/v2 sem recebimentos continuam válidos', () => {
     expect('payments' in validateDataSet(tree({ payments: [] })).orders[0]).toBe(false);
-    for (const version of [1, 2]) expect(validateDataSet({ ...tree({}), schemaVersion: version }).schemaVersion).toBe(4);
+    for (const version of [1, 2]) expect(validateDataSet({ ...tree({}), schemaVersion: version }).schemaVersion).toBe(5);
   });
   it('rejeita recebimentos inválidos', () => {
     const bad = (payments: unknown, re: RegExp) => expect(() => validateDataSet(tree({ payments })), JSON.stringify(payments)).toThrow(re);
@@ -138,9 +139,9 @@ describe('Recebimentos: servidor e sincronização', () => {
   const seed = async (session: Awaited<ReturnType<Server['login']>>, o: Order) => {
     const p = emptyPush(0); const d = base(o);
     p.upserts.ingredients = d.ingredients; p.upserts.recipes = d.recipes; p.upserts.orders = [o];
-    return s.request('POST', '/api/sync/push', { session, body: p });
+    return s.request('POST', '/api/sync/v2/push', { session, body: p });
   };
-  const pull = async (session: Awaited<ReturnType<Server['login']>>) => (await (await s.request('GET', '/api/sync?since=0', { session })).json()) as { orders: { data?: Order }[] };
+  const pull = async (session: Awaited<ReturnType<Server['login']>>) => (await (await s.request('GET', '/api/sync/v2?since=0', { session })).json()) as { orders: { data?: Order }[] };
 
   it('os recebimentos viajam com a encomenda, na ordem, e voltam idênticos', async () => {
     const bia = await s.login('bia@exemplo.com');
@@ -153,13 +154,13 @@ describe('Recebimentos: servidor e sincronização', () => {
     const bia = await s.login('bia@exemplo.com');
     await seed(bia, orderWith([pay(30, 'p1'), pay(10, 'p2')]));
     const edit = emptyPush(1); edit.baseRevs.orders = { o: 1 }; edit.upserts.orders = [orderWith([pay(5, 'p3')])];
-    expect((await s.request('POST', '/api/sync/push', { session: bia, body: edit })).status).toBe(200);
+    expect((await s.request('POST', '/api/sync/v2/push', { session: bia, body: edit })).status).toBe(200);
     expect(s.table('order_payments').map(r => r.id)).toEqual(['p3']);
     const clear = emptyPush(2); clear.baseRevs.orders = { o: 2 }; clear.upserts.orders = [orderWith()];
-    await s.request('POST', '/api/sync/push', { session: bia, body: clear });
+    await s.request('POST', '/api/sync/v2/push', { session: bia, body: clear });
     expect(s.table('order_payments')).toHaveLength(0); expect((await pull(bia)).orders[0].data).toEqual(orderWith());
     const del = emptyPush(3); del.baseRevs.orders = { o: 3 }; del.deletes.orders = ['o'];
-    expect((await s.request('POST', '/api/sync/push', { session: bia, body: del })).status).toBe(200);
+    expect((await s.request('POST', '/api/sync/v2/push', { session: bia, body: del })).status).toBe(200);
     expect(s.table('order_payments')).toHaveLength(0); expect(s.table('orders')).toHaveLength(1); // a encomenda fica como registro lógico
   });
   it('o servidor recusa recebimentos acima do total e reenvio idêntico é "sem alteração"', async () => {

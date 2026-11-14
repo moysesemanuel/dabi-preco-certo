@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import { describe, expect, it } from 'vitest';
 import { packagingUnitCost, suggestPackagingQuantity } from '../src/domain/packaging';
 import { recipeCost } from '../src/domain/pricing';
@@ -36,9 +37,9 @@ describe('embalagens', () => {
     const snap = captureCostSnapshot(d.recipes[0], d, new Date('2026-11-13T10:00:00Z'))!;
     expect(snap.costPerUnit).toBe(4.5);
     expect(snap.packagingItems).toEqual([{ packagingId: 'p', name: 'Caixa', quantityPerUnit: 1, unitCost: 4.5 }]);
-    const order = { id: 'o', customer: 'Ana', recipeId: 'r', quantity: 100, unitPrice: 10, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado' as const, createdAt: '2026-11-13T10:00:00.000Z', costSnapshot: snap, packagingItems: [{ packagingId: 'p', name: 'Caixa especial', quantity: 4, unitCost: 4.5 }] };
+    const order = asOrder({ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 100, unitPrice: 10, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado' as const, createdAt: '2026-11-13T10:00:00.000Z', costSnapshot: snap, packagingItems: [{ packagingId: 'p', name: 'Caixa especial', quantity: 4, unitCost: 4.5 }] });
     expect(orderTotalCost(order, { ...d, packagings: [{ ...d.packagings[0], purchasePrice: 9 }] })).toBe(468);
-    expect(order.quantity).toBe(100);
+    expect(order.items[0].quantity).toBe(100);
   });
   it('migração local preserva pedidos e pagamentos existentes e cria as tabelas aditivas', () => {
     const db = createTestD1({ upTo: '0009_admin.sql' });
@@ -59,7 +60,7 @@ describe('embalagens', () => {
   });
   it('backup valida coleção e preserva associações e snapshots congelados', () => {
     const source = { schemaVersion: 4, ingredients: [], packagings: [{ id: 'p', name: 'Caixa', purchasePrice: 4.5, purchaseQuantity: 1, capacity: 25, active: false }], recipes: [{ id: 'r', name: 'Doce', yield: 10, items: [], packagingItems: [{ packagingId: 'p', quantityPerUnit: 1 }], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 20 }], orders: [{ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 10, deposit: 0, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-13T10:00:00.000Z', costSnapshot: { costPerUnit: 4.5, capturedAt: '2026-11-13T10:00:00.000Z', packagingItems: [{ packagingId: 'p', name: 'Caixa histórica', quantityPerUnit: 1, unitCost: 4.5 }] }, packagingItems: [{ packagingId: 'p', name: 'Sacola especial', quantity: 1, unitCost: 2 }] }] };
-    expect(validateDataSet(source)).toMatchObject({ packagings: [{ active: false }], recipes: [{ packagingItems: [{ packagingId: 'p' }] }], orders: [{ packagingItems: [{ name: 'Sacola especial' }], costSnapshot: { packagingItems: [{ name: 'Caixa histórica' }] } }] });
+    expect(validateDataSet(source)).toMatchObject({ packagings: [{ active: false }], recipes: [{ packagingItems: [{ packagingId: 'p' }] }], orders: [{ packagingItems: [{ name: 'Sacola especial' }], items: [{ costSnapshot: { packagingItems: [{ name: 'Caixa histórica' }] } }] }] });
     expect(() => validateDataSet({ ...source, packagings: [] })).toThrow(/inexistente/);
   });
 });

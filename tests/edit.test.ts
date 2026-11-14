@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { removeOrder, unitChangeAffectsRecipes, updateIngredient, updateOrder, updateRecipe } from '../src/domain/edit';
+import { removeOrder, unitChangeAffectsRecipes, updateIngredient, updateRecipe } from '../src/domain/edit';
+import { asOrder, updateLegacyOrder as updateOrder } from './helpers/orders';
 import { recipeCost } from '../src/domain/pricing';
 import type { DataSet } from '../src/domain/types';
 
@@ -7,7 +8,7 @@ const data: DataSet = {
   schemaVersion: 1,
   ingredients: [{ id: 'f', name: 'Farinha', purchaseQuantity: 1000, unit: 'g', purchasePrice: 6 }],
   recipes: [{ id: 'r', name: 'Bolo', yield: 10, items: [{ ingredientId: 'f', quantity: 500 }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 20 }],
-  orders: [{ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 5, deliveryDate: '2026-12-01', status: 'Orçamento', deposit: 0, createdAt: '2026-11-11T00:00:00Z' }],
+  orders: [asOrder({ id: 'o', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 5, deliveryDate: '2026-12-01', status: 'Orçamento', deposit: 0, createdAt: '2026-11-11T00:00:00Z' })],
 };
 
 describe('Edição de cadastros', () => {
@@ -32,7 +33,7 @@ describe('Edição de cadastros', () => {
     expect(() => updateRecipe(data, 'nada', data.recipes[0])).toThrow();
   });
   it('normaliza o sinal em centavos antes de verificar o total ao editar uma encomenda', () => {
-    const tinyOrder = { ...data, orders: [{ ...data.orders[0], quantity: 1, unitPrice: 0.01, deposit: 0 }] };
+    const tinyOrder = { ...data, orders: [{ ...data.orders[0], items: [{ ...data.orders[0].items[0], quantity: 1, unitPrice: 0.01 }], deposit: 0 }] };
     expect(() => updateOrder(tinyOrder, 'o', { customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 0.01, deliveryDate: '2026-12-01', deposit: 0.015 })).toThrow('sinal');
     const rounded = updateOrder(tinyOrder, 'o', { customer: 'Ana', recipeId: 'r', quantity: 1, unitPrice: 0.02, deliveryDate: '2026-12-01', deposit: 0.014 });
     expect(rounded.orders[0].deposit).toBe(0.01);
@@ -51,8 +52,8 @@ describe('Edição de cadastros', () => {
   it('atualiza a encomenda preservando id, status e data de criação', () => {
     const withStatus = { ...data, orders: [{ ...data.orders[0], status: 'Produção' as const }] };
     const next = updateOrder(withStatus, 'o', { ...base, customer: '  Ana Martins ', quantity: 4, unitPrice: 6, deposit: 10, deliveryDate: '2026-12-10' });
-    expect(next.orders[0]).toMatchObject({ id: 'o', status: 'Produção', createdAt: '2026-11-11T00:00:00Z', customer: 'Ana Martins', quantity: 4, unitPrice: 6, deposit: 10, deliveryDate: '2026-12-10' });
-    expect(withStatus.orders[0].quantity).toBe(2);
+    expect(next.orders[0]).toMatchObject({ id: 'o', status: 'Produção', createdAt: '2026-11-11T00:00:00Z', customer: 'Ana Martins', items: [{ quantity: 4, unitPrice: 6 }], deposit: 10, deliveryDate: '2026-12-10' });
+    expect(withStatus.orders[0].items[0].quantity).toBe(2);
   });
   it('rejeita encomenda ou receita inexistente', () => {
     expect(() => updateOrder(data, 'nada', base)).toThrow('Encomenda');

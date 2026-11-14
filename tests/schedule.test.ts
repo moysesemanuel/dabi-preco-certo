@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import { describe, expect, it } from 'vitest';
 import { addDays, availableMinutes, buildAgenda, daysBetween, forecastUntil, formatMinutes, isPending, orderMinutes, weekdayOf, workloadForecast } from '../src/domain/schedule';
 import type { DataSet, Order, Recipe } from '../src/domain/types';
@@ -5,7 +6,7 @@ import { emptyDataSet } from '../src/sync/engine';
 
 const TODAY = '2026-11-11'; // quarta-feira
 const recipe = (over: Partial<Recipe> = {}): Recipe => ({ id: 'r', name: 'Bolo', yield: 10, items: [], packagingPerUnit: 0, laborTotal: 0, extraTotal: 0, desiredMargin: 20, prepMinutes: 120, ...over });
-const ord = (id: string, deliveryDate: string, over: Partial<Order> = {}): Order => ({ id, customer: `Cliente ${id}`, recipeId: 'r', quantity: 10, unitPrice: 5, deposit: 0, deliveryDate, status: 'Confirmado', createdAt: `2026-11-0${id.length}T10:00:00.000Z`, ...over });
+const ord = (id: string, deliveryDate: string, over: Partial<Order> = {}): Order => asOrder({ id, customer: `Cliente ${id}`, recipeId: 'r', quantity: 10, unitPrice: 5, deposit: 0, deliveryDate, status: 'Confirmado', createdAt: `2026-11-0${id.length}T10:00:00.000Z`, ...over });
 const data = (orders: Order[], settings: DataSet['settings'] = { cupSizeMl: 240, dailyCapacityMinutes: 240 }, recipes: Recipe[] = [recipe()]): DataSet => ({ ...emptyDataSet(), recipes, orders, settings });
 
 describe('Datas', () => {

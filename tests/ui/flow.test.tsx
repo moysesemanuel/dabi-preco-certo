@@ -64,8 +64,9 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     fireEvent.change(screen.getByLabelText('Data de entrega'), { target: { value: localToday() } });
     fireEvent.change(screen.getByLabelText('Sinal recebido (opcional)'), { target: { value: '10' } });
     await u.click(screen.getByRole('button', { name: /Registrar encomenda/ }));
-    expect(await screen.findByText('Encomenda cadastrada.')).toBeTruthy();
-    expect(screen.getByText(/Custo unitário congelado/)).toBeTruthy();
+    // Sinal recebido na criação: a encomenda nasce Confirmada (Etapa 11).
+    expect(await screen.findByText('Encomenda cadastrada e confirmada pelo sinal recebido.')).toBeTruthy();
+    expect(screen.getByText(/Custos unitários congelados/)).toBeTruthy();
     expect(screen.getByText('Total da encomenda').parentElement?.textContent).toMatch(/40,00/);
     expect(screen.getByText('Saldo pendente').parentElement?.textContent).toMatch(/30,00/); // saldo pendente: 40 − 10
 
@@ -75,7 +76,7 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: '60' } });
     await u.click(screen.getByRole('button', { name: /Salvar alterações/ }));
     await nav(u, 'Pedidos'); await u.click(screen.getByRole('button', { name: 'Ver detalhes' }));
-    expect(screen.getByText(/Custo unitário congelado/)).toBeTruthy();
+    expect(screen.getByText(/Custos unitários congelados/)).toBeTruthy();
 
     // Recebimento parcial e limite do saldo
     await u.click(screen.getByRole('button', { name: /Registrar recebimento/ }));
@@ -88,16 +89,9 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     expect(await screen.findByText('Recebimento registrado.')).toBeTruthy();
     expect(screen.getByText('Saldo pendente').parentElement?.textContent).toMatch(/10,00/); // saldo: 40 − 10 − 20
 
-    // Agenda: um pedido novo está em "Orçamento", e a tela explica por que ele ainda não aparece
-    await nav(u, 'Agenda');
-    expect(screen.getByText(/1 encomenda\(s\) em/)).toBeTruthy();
-    expect(screen.queryByText('Ana Martins')).toBeNull();
-    await u.click(screen.getByLabelText('Incluir orçamentos'));
-    expect(screen.getByText('Ana Martins')).toBeTruthy();
-    await u.click(screen.getByLabelText('Incluir orçamentos'));
-    // confirmado o pedido, a entrega de hoje aparece
+    // Agenda: o sinal recebido na criação já confirmou o pedido (Etapa 11), então ele aparece direto, sem "Incluir orçamentos".
     await nav(u, 'Pedidos'); await u.click(screen.getByRole('button', { name: 'Ver detalhes' }));
-    await u.selectOptions(screen.getByLabelText('Status'), 'Confirmado');
+    expect((screen.getByLabelText('Status') as HTMLSelectElement).value).toBe('Confirmado');
     await nav(u, 'Agenda');
     expect(screen.getByRole('heading', { name: 'Agenda' })).toBeTruthy();
     const today = screen.getByText(/^Hoje ·/).closest('section')!;

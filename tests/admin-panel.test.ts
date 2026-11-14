@@ -137,21 +137,21 @@ describe('Suspensão e reativação', () => {
   it('a conta suspensa não opera (sync, orçamentos), mantém a sessão e o dado financeiro, e os outros clientes seguem isolados', async () => {
     const bruno = await srv.login('bruno@exemplo.com', 'B', '10.0.0.3');
     const p = emptyPush(0); p.upserts.ingredients.push({ id: 'i1', name: 'Segredo da Ana', unit: 'g', purchaseQuantity: 1000, purchasePrice: 6 } as never);
-    expect((await srv.request('POST', '/api/sync/push', { session: cli, body: p })).status).toBe(200);
+    expect((await srv.request('POST', '/api/sync/v2/push', { session: cli, body: p })).status).toBe(200);
     const before = JSON.stringify(srv.table('ingredients'));
     expect((await sus('ana@exemplo.com')).status).toBe(200);
-    expect((await srv.request('GET', '/api/sync?since=0', { session: cli })).status).toBe(403); expect((await srv.request('POST', '/api/sync/push', { session: cli, body: emptyPush(0) })).status).toBe(403);
+    expect((await srv.request('GET', '/api/sync/v2?since=0', { session: cli })).status).toBe(403); expect((await srv.request('POST', '/api/sync/v2/push', { session: cli, body: emptyPush(0) })).status).toBe(403);
     expect((await srv.request('GET', '/api/quotes', { session: cli })).status).toBe(403);
     const me = await j(await srv.request('GET', '/api/auth/session', { session: cli })); expect(me.license.status).toBe('revoked'); // a UI mostra a mensagem e deixa exportar backup
     expect(JSON.stringify(srv.table('ingredients'))).toBe(before); // nada apagado
-    expect((await srv.request('GET', '/api/sync?since=0', { session: bruno })).status).toBe(200);
+    expect((await srv.request('GET', '/api/sync/v2?since=0', { session: bruno })).status).toBe(200);
     await srv.request('POST', '/api/auth/logout', { session: cli }); srv.mail.outbox.splice(0);
     await srv.request('POST', '/api/auth/request-code', { body: { email: 'ana@exemplo.com' } }); expect(srv.mail.outbox.length).toBe(0); // suspensa não recebe código de login
   });
   it('suspender duas vezes é seguro (noop auditado); reativar devolve o acesso', async () => {
     await sus('ana@exemplo.com'); const again = await j(await sus('ana@exemplo.com')); expect(again.changed).toBe(false);
     const act = await A('POST', `/customers/${licenseOf('ana@exemplo.com')}/activate`, {}); expect((await j(act)).changed).toBe(true);
-    expect((await srv.request('GET', '/api/sync?since=0', { session: cli })).status).toBe(200);
+    expect((await srv.request('GET', '/api/sync/v2?since=0', { session: cli })).status).toBe(200);
     expect(srv.table('admin_audit').map(a => `${a.action}:${a.result}`)).toEqual(['customer.suspend:ok', 'customer.suspend:noop', 'customer.activate:ok']);
   });
   it('contas administrativas não são suspensas pelo painel (nem o próprio dono)', async () => { const r = await sus('dono@exemplo.com'); expect(r.status).toBe(409); expect(srv.table('licenses').find(l => l.email === 'dono@exemplo.com')!.status).toBe('active'); });
@@ -162,7 +162,7 @@ describe('Suspensão e reativação', () => {
 
 describe('Detalhes e sessões', () => {
   it('detalhes mostram só dados administrativos e NUNCA tokens, códigos nem conteúdo do cliente', async () => {
-    const p = emptyPush(0); p.upserts.ingredients.push({ id: 'i1', name: 'Receita secreta', unit: 'g', purchaseQuantity: 1000, purchasePrice: 6 } as never); await srv.request('POST', '/api/sync/push', { session: cli, body: p });
+    const p = emptyPush(0); p.upserts.ingredients.push({ id: 'i1', name: 'Receita secreta', unit: 'g', purchaseQuantity: 1000, purchasePrice: 6 } as never); await srv.request('POST', '/api/sync/v2/push', { session: cli, body: p });
     expect((await srv.request('POST', '/api/quotes', { session: cli, body: { version: 1, quoteNumber: 'Q1', businessName: 'Doces Privados', issuedAt: '2026-11-12', items: [{ description: 'Bolo privado', quantity: 1, unitPriceCents: 5000 }] } })).status).toBe(201); // o orçamento existe de verdade
     const lic = licenseOf('ana@exemplo.com'); const dump = JSON.stringify([await j(await A('GET', `/customers/${lic}`)), await j(await A('GET', '/customers?q=ana')), await j(await A('GET', '/overview')), await j(await A('GET', '/audit'))]);
     expect(dump).toContain('ana@exemplo.com');

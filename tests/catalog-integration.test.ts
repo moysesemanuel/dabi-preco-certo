@@ -1,9 +1,10 @@
+import { asOrder } from './helpers/orders';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { validateDataSet } from '../shared/dataset';
 import { applyEquivalences, updateIngredient } from '../src/domain/edit';
 import { effectiveEquivalence } from '../src/domain/equivalence';
 import { costImpact } from '../src/domain/impact';
-import { captureCostSnapshot, orderUnitCost } from '../src/domain/orderCost';
+import { captureCostSnapshot, itemUnitCost } from '../src/domain/orderCost';
 import { recipeCost } from '../src/domain/pricing';
 import type { DataSet, Ingredient, Order, Recipe } from '../src/domain/types';
 import { CATALOG_VERSION, findItem, findVariant, makeRef } from '../src/features/measurement/catalog';
@@ -122,12 +123,12 @@ describe('Receitas, custos e histórico', () => {
   it('encomendas e snapshots financeiros não são recalculados quando as equivalências mudam', () => {
     const d = applyEquivalences(base(), [{ ingredientId: 'f', patch: { catalogRef: makeRef('farinha-de-trigo')! } }, { ingredientId: 'o', patch: { catalogRef: makeRef('ovo-inteiro')! } }]);
     const snap = captureCostSnapshot(d.recipes[0], d, new Date('2026-11-11T10:00:00Z'))!;
-    const order: Order = { id: 'ord', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 20, deposit: 5, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: snap, payments: [{ id: 'p', amount: 10, receivedAt: '2026-11-12' }] };
+    const order: Order = asOrder({ id: 'ord', customer: 'Ana', recipeId: 'r', quantity: 2, unitPrice: 20, deposit: 5, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', costSnapshot: snap, payments: [{ id: 'p', amount: 10, receivedAt: '2026-11-12' }] });
     const withOrder = { ...d, orders: [order] };
     const changed = updateIngredient(withOrder, 'f', { ...withOrder.ingredients[0], densityGPerMl: 0.9, catalogRef: undefined });
-    expect(changed.orders[0]).toEqual(order); expect(changed.orders[0].costSnapshot).toEqual(snap);
+    expect(changed.orders[0]).toEqual(order); expect(changed.orders[0].items[0].costSnapshot).toEqual(snap);
     expect(cost(changed).costPerUnit).not.toBe(snap.costPerUnit); // o custo ATUAL da receita muda; o registrado na encomenda, não
-    expect(orderUnitCost(changed.orders[0], changed)).toEqual({ basis: 'recorded', costPerUnit: snap.costPerUnit });
+    expect(itemUnitCost(changed.orders[0].items[0], changed)).toEqual({ basis: 'recorded', costPerUnit: snap.costPerUnit });
   });
 });
 

@@ -10,7 +10,7 @@ function failure(a: Extract<Awaited<ReturnType<typeof authorizeAccount>>, { ok: 
   return respond(JSON.stringify({ error: a.error, message: a.message }), a.status, 'application/json; charset=utf-8', a.retryAfterSeconds !== undefined ? { 'Retry-After': String(a.retryAfterSeconds) } : {});
 }
 
-/** GET /api/sync?since=N: alterações da conta com revisão maior que N (0 = tudo). */
+/** GET /api/sync/v2?since=N: alterações da conta com revisão maior que N (0 = tudo). */
 export async function syncPull(request: Request, env: SessionEnv, deps: Deps): Promise<Response> {
   const auth = await authorizeAccount(request, env, deps.now(), { write: false });
   if (!auth.ok) return failure(auth);
@@ -20,7 +20,7 @@ export async function syncPull(request: Request, env: SessionEnv, deps: Deps): P
   return json(await pull(env.DB, auth.userId, since, deps.now().toISOString()));
 }
 
-/** POST /api/sync/push: envia alterações de forma atômica; 409 CONFLICT/STALE se a conta mudou desde a revisão base. */
+/** POST /api/sync/v2/push: envia alterações de forma atômica; 409 CONFLICT/STALE se a conta mudou desde a revisão base. */
 export async function syncPush(request: Request, env: SessionEnv, deps: Deps): Promise<Response> {
   const auth = await authorizeAccount(request, env, deps.now(), { write: true });
   if (!auth.ok) return failure(auth);

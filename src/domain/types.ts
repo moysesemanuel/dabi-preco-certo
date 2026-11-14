@@ -30,7 +30,23 @@ export const PAYMENT_METHODS = ['Pix', 'Dinheiro', 'Cartão', 'Transferência', 
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 /** Um recebimento (parcial ou final) de uma encomenda. O total recebido nunca ultrapassa o total do pedido. */
 export type Payment = { id: string; amount: number; /** AAAA-MM-DD */ receivedAt: string; method?: PaymentMethod; note?: string };
-export type Order = { id: string; customer: string; recipeId: string; quantity: number; unitPrice: number; deliveryDate: string; status: 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue'; deposit: number; createdAt: string; packagingItems?: OrderPackagingSnapshot[]; /** Valor congelado efetivamente cobrado pelas embalagens adicionais; ausente em pedidos antigos significa zero. */ packagingCharge?: number; costSnapshot?: CostSnapshot;
+/**
+ * Um produto da encomenda. Cada item tem quantidade, preço de venda e custo próprios.
+ * O subtotal de venda não é gravado: é sempre `quantity × unitPrice` em centavos (`orderItemSubtotal`), para nunca divergir.
+ */
+export type OrderItem = { /** Único dentro da encomenda. */ id: string; recipeId: string;
+  /** Nome da receita quando o item foi registrado. Ausente em itens convertidos de encomendas antigas (o app mostra o nome atual). */
+  recipeName?: string; quantity: number; unitPrice: number;
+  /** Custo unitário congelado da receita (inclui as embalagens da receita). Ausente quando não havia registro histórico. */
+  costSnapshot?: CostSnapshot };
+export type OrderStatus = 'Orçamento' | 'Confirmado' | 'Produção' | 'Entregue';
+export type Order = { id: string; customer: string;
+  /** Produtos da encomenda (pelo menos um). Encomendas antigas, de uma receita só, viram um item (`LEGACY_ITEM_ID`). */
+  items: OrderItem[]; deliveryDate: string; status: OrderStatus; deposit: number; createdAt: string;
+  /** Embalagens adicionais da ENCOMENDA (caixa, sacola...), com custo congelado. */
+  packagingItems?: OrderPackagingSnapshot[];
+  /** Valor congelado efetivamente cobrado pelas embalagens adicionais; ausente em pedidos antigos significa zero. */
+  packagingCharge?: number;
   /** Código permanente de atendimento (ex.: ORC-K7M42P). Gerado na criação e nunca muda. Ausente só em encomendas antigas, que recebem um código derivado do id. */
   quoteCode?: string;
   /** Recebimentos posteriores ao sinal (`deposit`). Ausente = nenhum. */
@@ -49,6 +65,7 @@ export type Settings = {
 /**
  * Versão 2: encomendas podem ter `costSnapshot` (versão 1, sem snapshot, é migrada sem inventar custos históricos).
  * Versão 3: encomendas podem ter `payments` (sem mudança nos dados existentes: o sinal continua em `deposit`).
+ * Versão 4: embalagens. Versão 5: encomendas têm `items` (várias receitas); as antigas viram um item, sem inventar dados.
  */
-export const CURRENT_SCHEMA_VERSION = 4;
-export type DataSet = { schemaVersion: 4; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; packagings: Packaging[]; settings?: Settings };
+export const CURRENT_SCHEMA_VERSION = 5;
+export type DataSet = { schemaVersion: 5; ingredients: Ingredient[]; recipes: Recipe[]; orders: Order[]; packagings: Packaging[]; settings?: Settings };

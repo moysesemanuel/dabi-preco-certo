@@ -1,3 +1,4 @@
+import { asOrder } from '../helpers/orders';
 import type { DataSet, Order } from '../../src/domain/types';
 import { buildPublicQuote, createQuotesClient } from '../../src/features/sharing/quotes';
 import { emptyDataSet } from '../../src/sync/engine';
@@ -16,7 +17,7 @@ export const dataset = (ingredients = 30, recipes = 10, orders = 20): DataSet =>
   const d = emptyDataSet(); const used = new Set<string>();
   d.ingredients = Array.from({ length: ingredients }, (_, i) => ({ id: `i${i}`, name: `Ingrediente ${i}`, unit: 'g' as const, purchaseQuantity: 1000, purchasePrice: 5 + i }));
   d.recipes = Array.from({ length: recipes }, (_, r) => ({ id: `r${r}`, name: `Receita ${r}`, yield: 10, items: [0, 1, 2].map(k => ({ ingredientId: `i${(r + k) % ingredients}`, quantity: 100, unit: 'g' as const })), packagingPerUnit: 1, laborTotal: 10, extraTotal: 2, desiredMargin: 30 }));
-  d.orders = Array.from({ length: orders }, (_, o): Order => ({ id: `o${o}`, quoteCode: uniqueQuoteCode(used), customer: `Cliente ${o}`, recipeId: `r${o % recipes}`, quantity: 2, unitPrice: 40, deposit: 10, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', payments: o % 3 === 0 ? [{ id: `p${o}`, amount: 20, receivedAt: '2026-11-12' }] : undefined }));
+  d.orders = Array.from({ length: orders }, (_, o): Order => asOrder({ id: `o${o}`, quoteCode: uniqueQuoteCode(used), customer: `Cliente ${o}`, recipeId: `r${o % recipes}`, quantity: 2, unitPrice: 40, deposit: 10, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', payments: o % 3 === 0 ? [{ id: `p${o}`, amount: 20, receivedAt: '2026-11-12' }] : undefined }));
   return d;
 };
 
@@ -45,7 +46,7 @@ export async function measureProfile(opts: { ingredients?: number; recipes?: num
 
   const sess = sA;
   const client = createQuotesClient('https://api.exemplo.test', () => sess.csrf, s.fetchFor(sess));
-  const built = buildPublicQuote({ ...A.data.orders[0] }, A.data.recipes[0], { cupSizeMl: 240, businessName: 'Doces da Bia' }, { issuedAt: '2026-11-12', validUntil: '2026-11-19' });
+  const built = buildPublicQuote({ ...A.data.orders[0] }, A.data.recipes, { cupSizeMl: 240, businessName: 'Doces da Bia' }, { issuedAt: '2026-11-12', validUntil: '2026-11-19' });
   if (!built.ok) throw new Error(built.error);
   let pubId = '';
   out.push(await diff('Publicar link de orçamento', s, async () => { const r = await client.publish(built.quote); if (r.ok) pubId = r.value.id; }));

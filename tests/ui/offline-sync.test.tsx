@@ -18,11 +18,11 @@ function fakeServer(): Server {
     if (s.offline) throw new TypeError('Failed to fetch'); // o navegador não emite nenhum evento `online` ao voltar
     const path = url.replace(BASE, '');
     if (path === '/api/auth/session') return json(200, SESSION);
-    if (path.startsWith('/api/sync?')) {
+    if (path.startsWith('/api/sync/v2?')) {
       s.pulls++; const since = Number(new URL(url).searchParams.get('since'));
-      return json(200, { revision, ingredients: [...store].filter(([, v]) => v.rev > since).map(([id, v]) => ({ id, rev: v.rev, deleted: false, data: v.data })), recipes: [], orders: [] });
+      return json(200, { protocol: 2, revision, ingredients: [...store].filter(([, v]) => v.rev > since).map(([id, v]) => ({ id, rev: v.rev, deleted: false, data: v.data })), recipes: [], orders: [] });
     }
-    if (path === '/api/sync/push') {
+    if (path === '/api/sync/v2/push') {
       const body = JSON.parse(String(init.body)); s.pushes.push(body); revision++;
       for (const i of body.upserts.ingredients as { id: string }[]) store.set(i.id, { rev: revision, data: i });
       return json(200, { revision, changed: true });

@@ -52,7 +52,7 @@ describe('Sincronização do tempo de produção e das configurações', () => {
   });
   it('o servidor recusa configurações e tempos inválidos', async () => {
     const bia = await s.login('bia@exemplo.com');
-    const send = (build: (p: ReturnType<typeof emptyPush>) => void) => { const p = emptyPush(0); build(p); return s.request('POST', '/api/sync/push', { session: bia, body: p }); };
+    const send = (build: (p: ReturnType<typeof emptyPush>) => void) => { const p = emptyPush(0); build(p); return s.request('POST', '/api/sync/v2/push', { session: bia, body: p }); };
     expect((await send(p => { p.upserts.settings = { cupSizeMl: 240, businessPhone: '123' }; })).status).toBe(400);
     expect((await send(p => { p.upserts.settings = { cupSizeMl: 240, workWeekdays: [9] }; })).status).toBe(400);
     expect((await send(p => { p.upserts.ingredients = [{ id: 'f', name: 'F', unit: 'g', purchaseQuantity: 1, purchasePrice: 1 }]; p.upserts.recipes = [recipe({ prepMinutes: -3 })]; })).status).toBe(400);

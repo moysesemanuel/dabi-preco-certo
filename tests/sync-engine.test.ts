@@ -1,3 +1,4 @@
+import { asOrder } from './helpers/orders';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { PullResponse, PushRequest } from '../shared/sync';
 import { sameEntity, SYNC_LIMITS } from '../shared/sync';
@@ -9,7 +10,7 @@ import { BASE, makeServer, type Server } from './helpers/server';
 
 const ing = (id: string, over: Partial<Ingredient> = {}): Ingredient => ({ id, name: `Ingrediente ${id}`, unit: 'g', purchaseQuantity: 1000, purchasePrice: 6, ...over });
 const rec = (id: string, ingredientId: string, over: Partial<Recipe> = {}): Recipe => ({ id, name: `Receita ${id}`, yield: 10, items: [{ ingredientId, quantity: 500, unit: 'g' }], packagingPerUnit: 1, laborTotal: 20, extraTotal: 7, desiredMargin: 20, ...over });
-const ord = (id: string, recipeId: string, over: Partial<Order> = {}): Order => ({ id, customer: 'Ana', recipeId, quantity: 2, unitPrice: 5, deposit: 3, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
+const ord = (id: string, recipeId: string, over: Partial<Order> = {}): Order => asOrder({ id, customer: 'Ana', recipeId, quantity: 2, unitPrice: 5, deposit: 3, deliveryDate: '2026-12-01', status: 'Confirmado', createdAt: '2026-11-11T10:00:00.000Z', ...over });
 const data = (p: Partial<DataSet> = {}): DataSet => ({ ...emptyDataSet(), ...p });
 const pullOf = (p: Partial<PullResponse> = {}): PullResponse => ({ revision: 1, ingredients: [], recipes: [], orders: [], ...p });
 const E = <T,>(id: string, rev: number, d?: T) => (d === undefined ? { id, rev, deleted: true } : { id, rev, deleted: false, data: d });

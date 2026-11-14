@@ -19,7 +19,7 @@ describe('Proxy do Pages: não é um proxy aberto', () => {
     expect([400, 404]).toContain(res.status); expect(up).not.toHaveBeenCalled();
   });
   it('encaminha somente /api/* e /o/*', async () => {
-    const up = upstreamOk(); for (const p of ['/api/auth/session', '/api/sync?since=0', '/o/abc']) expect((await proxy(req(p), envWith(up))).status).toBe(200);
+    const up = upstreamOk(); for (const p of ['/api/auth/session', '/api/sync/v2?since=0', '/o/abc']) expect((await proxy(req(p), envWith(up))).status).toBe(200);
     expect(up).toHaveBeenCalledTimes(3);
   });
   it('métodos fora da lista (PATCH, PROPFIND, LOCK) são recusados com 405', async () => {
@@ -41,15 +41,15 @@ describe('Proxy do Pages: não é um proxy aberto', () => {
     await proxy(req('/api/_edge/health', { method: 'POST', body: '{}' }), envWith(up)); expect(up).toHaveBeenCalledTimes(1); // só GET/HEAD é o diagnóstico; POST segue para o Worker
   });
   it('corpo gigante é recusado antes de encaminhar', async () => {
-    const up = upstreamOk(); const r = await proxy(req('/api/sync/push', { method: 'POST', headers: { 'content-length': String(3 * 1024 * 1024) }, body: 'x' }), envWith(up)); expect(r.status).toBe(413); expect(up).not.toHaveBeenCalled();
+    const up = upstreamOk(); const r = await proxy(req('/api/sync/v2/push', { method: 'POST', headers: { 'content-length': String(3 * 1024 * 1024) }, body: 'x' }), envWith(up)); expect(r.status).toBe(413); expect(up).not.toHaveBeenCalled();
   });
 });
 
 describe('Proxy do Pages: fidelidade (método, corpo, cookies, cabeçalhos, status)', () => {
   it('preserva método, corpo, cookie, CSRF, origem e IP; só acrescenta X-Dabi-Expect-Env (sobrescrevendo o do cliente)', async () => {
     let seen: Request | undefined; const up = vi.fn(async (r: Request) => { seen = r; return new Response('{}'); });
-    await proxy(req('/api/sync/push?x=1', { method: 'POST', body: '{"a":1}', headers: { cookie: '__Host-dabi_session=abc', 'x-csrf-token': 't0k', origin: HOST, 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.7', 'x-dabi-expect-env': 'production' } }), envWith(up, 'staging'));
-    expect(seen!.method).toBe('POST'); expect(await seen!.text()).toBe('{"a":1}'); expect(new URL(seen!.url).pathname + new URL(seen!.url).search).toBe('/api/sync/push?x=1');
+    await proxy(req('/api/sync/v2/push?x=1', { method: 'POST', body: '{"a":1}', headers: { cookie: '__Host-dabi_session=abc', 'x-csrf-token': 't0k', origin: HOST, 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.7', 'x-dabi-expect-env': 'production' } }), envWith(up, 'staging'));
+    expect(seen!.method).toBe('POST'); expect(await seen!.text()).toBe('{"a":1}'); expect(new URL(seen!.url).pathname + new URL(seen!.url).search).toBe('/api/sync/v2/push?x=1');
     for (const [k, v] of Object.entries({ cookie: '__Host-dabi_session=abc', 'x-csrf-token': 't0k', origin: HOST, 'content-type': 'application/json', 'cf-connecting-ip': '203.0.113.7' })) expect(seen!.headers.get(k), k).toBe(v);
     expect(seen!.headers.get('x-dabi-expect-env')).toBe('staging'); expect(seen!.redirect).toBe('manual');
   });
@@ -90,18 +90,18 @@ describe('Proxy do Pages + Worker REAL: sessão, CSRF, cookies e links públicos
     expect(cookie).toMatch(/^__Host-dabi_session=[A-Za-z0-9_-]{20,};/); for (const a of ['HttpOnly', 'Secure', 'SameSite=Lax', 'Path=/']) expect(cookie).toContain(a); expect(cookie).not.toMatch(/Domain=/i);
     expect(res.headers.get('cache-control')).toBe('no-store');
     const s = cookie.split(';')[0]; const me = await hit('/api/auth/session', { cookie: s }); expect(me.status).toBe(200); expect(me.headers.get('cache-control')).toBe('no-store');
-    expect((await hit('/api/sync?since=0', { cookie: s })).headers.get('cache-control')).toBe('no-store');
+    expect((await hit('/api/sync/v2?since=0', { cookie: s })).headers.get('cache-control')).toBe('no-store');
   });
   it('fluxo completo pelo proxy: sincronizar, CSRF obrigatório, origem obrigatória, logout revoga', async () => {
     const { cookie, csrf } = await login('ana@exemplo.com'); const s = cookie.split(';')[0]; const body = JSON.stringify(emptyPush(0));
-    expect((await hit('/api/sync/push', { method: 'POST', body, cookie: s, csrf })).status).toBe(200);
-    expect((await hit('/api/sync/push', { method: 'POST', body, cookie: s })).status).toBe(403); // sem CSRF
-    expect((await hit('/api/sync/push', { method: 'POST', body, cookie: s, csrf: 'errado' })).status).toBe(403);
-    expect((await hit('/api/sync/push', { method: 'POST', body, cookie: s, csrf, origin: 'https://evil.example' })).status).toBe(403);
-    expect((await hit('/api/sync/push', { method: 'POST', body, cookie: s, csrf, origin: null })).status).toBe(403);
-    expect((await hit('/api/sync/push', { method: 'POST', body, csrf })).status).toBe(401); // sem cookie
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, cookie: s, csrf })).status).toBe(200);
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, cookie: s })).status).toBe(403); // sem CSRF
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, cookie: s, csrf: 'errado' })).status).toBe(403);
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, cookie: s, csrf, origin: 'https://evil.example' })).status).toBe(403);
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, cookie: s, csrf, origin: null })).status).toBe(403);
+    expect((await hit('/api/sync/v2/push', { method: 'POST', body, csrf })).status).toBe(401); // sem cookie
     expect((await hit('/api/auth/logout', { method: 'POST', cookie: s, csrf })).status).toBe(200);
-    expect((await hit('/api/sync?since=0', { cookie: s })).status).toBe(401);
+    expect((await hit('/api/sync/v2?since=0', { cookie: s })).status).toBe(401);
   });
   it('o IP do cliente chega ao Worker (limites por IP continuam por cliente, não por borda)', async () => {
     const seen: (string | null)[] = []; const penv = envWith(async r => { seen.push(r.headers.get('cf-connecting-ip')); return srv.handle(r, srv.env); });

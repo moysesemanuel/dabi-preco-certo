@@ -108,9 +108,9 @@ function seedLegacy(raw: InstanceType<typeof DatabaseSync>) {
 
 describe('Migrações 0007 e 0008 sobre dados antigos (banco descartável, dados sintéticos)', () => {
   it.each([
-    ['0001–0006', '0006_prep_minutes.sql', ['0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql']],
-    ['0001–0007', '0007_catalog_ref.sql', ['0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql']],
-    ['0001–0008', '0008_quote_code.sql', ['0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql']],
+    ['0001–0006', '0006_prep_minutes.sql', ['0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql', '0012_order_items.sql']],
+    ['0001–0007', '0007_catalog_ref.sql', ['0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql', '0012_order_items.sql']],
+    ['0001–0008', '0008_quote_code.sql', ['0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql', '0012_order_items.sql']],
   ])('estágio %s: detecta as aplicadas, simula só as pendentes e nada preexistente muda (mesmas colunas antes e depois)', (_n, upTo, expectedPending) => {
     const db = createTestD1({ upTo }); seedLegacy(db.raw); recordMigrations(db.raw, upTo);
     // Estágios mais novos já têm valores nas colunas que existem: eles precisam sobreviver intactos.
@@ -174,8 +174,8 @@ describe('Migrações 0007 e 0008 sobre dados antigos (banco descartável, dados
   });
 
   it('as migrações do repositório são exatamente as esperadas (nenhuma extra, nenhuma faltando)', () => {
-    expect(readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()).toEqual(['0001_quotes.sql', '0002_licenses.sql', '0003_accounts.sql', '0004_data.sql', '0005_payments.sql', '0006_prep_minutes.sql', '0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql']);
-    for (const f of ['0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql']) expect(sql(f), f).not.toMatch(/\b(DROP|DELETE|TRUNCATE)\b|UPDATE\s+\w+\s+SET/i);
+    expect(readdirSync(MIGRATIONS).filter(f => f.endsWith('.sql')).sort()).toEqual(['0001_quotes.sql', '0002_licenses.sql', '0003_accounts.sql', '0004_data.sql', '0005_payments.sql', '0006_prep_minutes.sql', '0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql', '0012_order_items.sql']);
+    for (const f of ['0007_catalog_ref.sql', '0008_quote_code.sql', '0009_admin.sql', '0010_packagings.sql', '0011_order_packaging_charge.sql', '0012_order_items.sql']) expect(sql(f), f).not.toMatch(/\b(DROP|DELETE|TRUNCATE)\b|UPDATE\s+\w+\s+SET/i);
   });
 });
 
@@ -214,9 +214,9 @@ describe('Atualização completa em ensaio: banco antigo → migração → Work
     expect(A.data.ingredients.map(i => i.id)).toContain('novo'); // e a alteração continua guardada no aparelho
   });
 
-  it('Worker novo lê encomendas legadas após aplicar as migrações 0010 e 0011', async () => {
+  it('Worker novo lê encomendas legadas após aplicar as migrações 0010 a 0012 (cada uma vira um item, sem regravar nada)', async () => {
     const { s, db, session, userId } = await legacyServer(); seedFor(db, userId);
-    db.raw.exec(sql('0007_catalog_ref.sql')); db.raw.exec(sql('0008_quote_code.sql')); db.raw.exec(sql('0009_admin.sql')); db.raw.exec(sql('0010_packagings.sql')); db.raw.exec(sql('0011_order_packaging_charge.sql'));
+    db.raw.exec(sql('0007_catalog_ref.sql')); db.raw.exec(sql('0008_quote_code.sql')); db.raw.exec(sql('0009_admin.sql')); db.raw.exec(sql('0010_packagings.sql')); db.raw.exec(sql('0011_order_packaging_charge.sql')); db.raw.exec(sql('0012_order_items.sql'));
     // O código do Worker antigo é o mesmo mas sem as colunas novas no INSERT: simulamos gravando como ele grava (sem quote_code/catalog_ref).
     db.raw.prepare('INSERT INTO orders (user_id,id,customer,recipe_id,quantity,unit_price,deposit,delivery_date,status,created_at,cost_per_unit,cost_captured_at,rev,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(userId, 'antigo-1', 'X', 'r0', 1, 10, 0, '2026-12-01', 'Orçamento', '2026-11-12T10:00:00.000Z', null, null, 99, null);
     db.raw.prepare('INSERT INTO orders (user_id,id,customer,recipe_id,quantity,unit_price,deposit,delivery_date,status,created_at,cost_per_unit,cost_captured_at,rev,deleted_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)').run(userId, 'antigo-2', 'Y', 'r0', 1, 10, 0, '2026-12-01', 'Orçamento', '2026-11-12T10:00:00.000Z', null, null, 100, null);
@@ -227,7 +227,7 @@ describe('Atualização completa em ensaio: banco antigo → migração → Work
 
   it('banco migrado + Worker novo + app novo: pedidos antigos recebem código derivado, únicos, e NENHUM dado financeiro muda', async () => {
     const { s, db, session, userId } = await legacyServer(); seedFor(db, userId);
-    db.raw.exec(sql('0007_catalog_ref.sql')); db.raw.exec(sql('0008_quote_code.sql')); db.raw.exec(sql('0009_admin.sql')); db.raw.exec(sql('0010_packagings.sql')); db.raw.exec(sql('0011_order_packaging_charge.sql'));
+    db.raw.exec(sql('0007_catalog_ref.sql')); db.raw.exec(sql('0008_quote_code.sql')); db.raw.exec(sql('0009_admin.sql')); db.raw.exec(sql('0010_packagings.sql')); db.raw.exec(sql('0011_order_packaging_charge.sql')); db.raw.exec(sql('0012_order_items.sql'));
     const before = money(db);
     const A = new Device(s, session), B = new Device(s, await s.login('bia@exemplo.com', 'Celular', '10.0.0.2'));
     await A.sync(); expect(A.data.orders).toHaveLength(5);

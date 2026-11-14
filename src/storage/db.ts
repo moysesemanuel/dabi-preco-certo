@@ -1,5 +1,5 @@
 import { CURRENT_SCHEMA_VERSION, type DataSet } from '../domain/types';
-import { migrateStored, validateDataSet } from '../../shared/dataset';
+import { migrateStored, upgradeOrderShape, validateDataSet } from '../../shared/dataset';
 import { withQuoteCodes } from '../../shared/quoteCode';
 import { emptyMeta, type SyncMeta } from '../sync/engine';
 /** Encomendas antigas (sem código de atendimento) recebem o código derivado do id; só esse campo é acrescentado (valores e recebimentos não mudam). */
@@ -82,10 +82,19 @@ export async function loadSyncMeta(): Promise<SyncMeta> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
     const request = tx.objectStore(STORE).get('sync');
-    request.onsuccess = () => { const v = request.result as Partial<SyncMeta> | undefined; resolve(v && typeof v.revision === 'number' && v.baseline && v.revs ? { ...emptyMeta(), ...v, revs: { ...emptyMeta().revs, ...v.revs, packagings: v.revs.packagings ?? {} } } as SyncMeta : emptyMeta()); };
+    request.onsuccess = () => { const v = request.result as Partial<SyncMeta> | undefined; resolve(v && typeof v.revision === 'number' && v.baseline && v.revs ? migrateMeta({ ...emptyMeta(), ...v, revs: { ...emptyMeta().revs, ...v.revs, packagings: v.revs.packagings ?? {} } } as SyncMeta) : emptyMeta()); };
     request.onerror = () => reject(request.error);
     tx.oncomplete = () => db.close();
   });
+}
+/**
+ * Metadados gravados antes das encomendas com itens: a base e os conflitos guardam encomendas no formato antigo.
+ * Converte com a MESMA regra dos dados (`upgradeOrderShape`), para a comparação local × base × nuvem continuar exata.
+ */
+export function migrateMeta(meta: SyncMeta): SyncMeta {
+  const order = (v: unknown) => (v === null || v === undefined ? v : upgradeOrderShape(v));
+  return { ...meta, baseline: { ...migrateStored(meta.baseline), ...(meta.baseline.settings ? { settings: meta.baseline.settings } : {}) },
+    conflicts: meta.conflicts.map(c => (c.kind !== 'orders' ? c : { ...c, local: order(c.local), server: order(c.server), ...(c.base !== undefined ? { base: order(c.base) } : {}) })) };
 }
 export async function saveSyncMeta(meta: SyncMeta): Promise<void> {
   const db = await connect();

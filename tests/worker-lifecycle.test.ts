@@ -22,7 +22,7 @@ describe('Revogação de licença: nenhuma operação protegida passa', () => {
     s.db.raw.exec(setLicenseStatusSql(id, 'revoked', s.state.clock.toISOString()));
     const before = JSON.stringify(s.table('quotes'));
     const attempts: [string, string, unknown?][] = [
-      ['GET', '/api/sync'], ['POST', '/api/sync/push', emptyPush(0)],
+      ['GET', '/api/sync/v2'], ['POST', '/api/sync/v2/push', emptyPush(0)],
       ['POST', '/api/quotes', quote()], ['PUT', `/api/quotes/${quoteId}`, quote()], ['DELETE', `/api/quotes/${quoteId}`],
       ['GET', '/api/quotes'], ['GET', '/api/license'],
     ];
@@ -36,11 +36,11 @@ describe('Revogação de licença: nenhuma operação protegida passa', () => {
   });
   it('a revogação vale já na PRÓXIMA requisição de uma sessão que estava aberta e é desfeita se a licença for reativada', async () => {
     const { s, id, ses } = await setup();
-    expect((await s.request('GET', '/api/sync', { session: ses })).status).toBe(200);
+    expect((await s.request('GET', '/api/sync/v2', { session: ses })).status).toBe(200);
     s.db.raw.exec(setLicenseStatusSql(id, 'revoked', s.state.clock.toISOString()));
-    expect((await s.request('GET', '/api/sync', { session: ses })).status).toBe(403);
+    expect((await s.request('GET', '/api/sync/v2', { session: ses })).status).toBe(403);
     s.db.raw.exec(setLicenseStatusSql(id, 'active', s.state.clock.toISOString()));
-    expect((await s.request('GET', '/api/sync', { session: ses })).status).toBe(200);
+    expect((await s.request('GET', '/api/sync/v2', { session: ses })).status).toBe(200);
   });
   it('não entra de novo: nem pedido de código envia e-mail, nem código já enviado abre sessão', async () => {
     const { s, id } = await setup();
@@ -58,7 +58,7 @@ describe('Revogação de licença: nenhuma operação protegida passa', () => {
     s.db.raw.exec(setLicenseStatusSql(id, 'revoked', s.state.clock.toISOString()));
     s.db.raw.exec(revokeLicenseSessionsSql(id, s.state.clock.toISOString()));
     expect(await alive(s, ses)).toBe(false);
-    expect((await s.request('GET', `/api/sync`, { session: ses })).status).toBe(401);
+    expect((await s.request('GET', `/api/sync/v2`, { session: ses })).status).toBe(401);
     expect((await s.request('GET', `/o/${quoteId}`)).status).toBe(200); // comportamento documentado: use --revoke-quotes para retirar do ar
   });
   it('conta desativada perde o acesso na hora', async () => {

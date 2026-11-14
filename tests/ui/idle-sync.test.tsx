@@ -20,7 +20,7 @@ const dataset = (over: Partial<DataSet> = {}, codes = true): DataSet => ({ schem
 
 type Log = { t: number; method: string; path: string; inflight: number }[];
 let srv: Server, session: Session, log: Log, inflight: number, maxInflight: number, offline: boolean;
-const syncCalls = (kind?: 'GET' | 'POST') => log.filter(l => l.path.startsWith('/api/sync') && (!kind || l.method === kind));
+const syncCalls = (kind?: 'GET' | 'POST') => log.filter(l => l.path.startsWith('/api/sync/v2') && (!kind || l.method === kind));
 
 /** Prepara o servidor (Worker real + SQLite) e o aparelho (IndexedDB) já sincronizados e abre o app. */
 async function boot(opts: { strict?: boolean; serverData?: DataSet; localData?: DataSet; serverCodes?: boolean } = {}) {
@@ -32,7 +32,7 @@ async function boot(opts: { strict?: boolean; serverData?: DataSet; localData?: 
   await saveSyncMeta({ ...seed.meta, userId }); await saveData(opts.localData ?? seed.data);
   const real = srv.fetchFor(session); const t0 = Date.now();
   vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
-    const path = url.replace(BASE, ''); const isSync = path.startsWith('/api/sync'); log.push({ t: Date.now() - t0, method: init?.method ?? 'GET', path: path.split('?')[0], inflight: isSync ? ++inflight : inflight }); maxInflight = Math.max(maxInflight, inflight);
+    const path = url.replace(BASE, ''); const isSync = path.startsWith('/api/sync/v2'); log.push({ t: Date.now() - t0, method: init?.method ?? 'GET', path: path.split('?')[0], inflight: isSync ? ++inflight : inflight }); maxInflight = Math.max(maxInflight, inflight);
     try { if (offline) throw new TypeError('Failed to fetch'); return await real(url, init); } finally { if (isSync) inflight--; }
   }));
   vi.resetModules(); vi.stubEnv('VITE_API_URL', BASE); vi.stubEnv('VITE_QUOTES_API_URL', '');
