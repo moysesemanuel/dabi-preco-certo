@@ -38,7 +38,7 @@ export function renderMessagePage(title: string, message: string): string {
 
 export function renderQuotePage(quote: PublicQuote, opts: { expired: boolean }): string {
   const t = computeTotals(quote);
-  const items = quote.items.map((item, i) => `<div class="item"><b>${escapeHtml(formatQuantity(item.quantity))} × ${escapeHtml(item.description)}</b><span>Valor unitário: ${formatCents(item.unitPriceCents)}</span><span>Subtotal: ${formatCents(t.lines[i].lineTotalCents)}</span></div>`).join('');
+  const items = quote.items.map((item, i) => `<div class="item"><b>${item.quantity === 1 ? escapeHtml(item.description) : `${escapeHtml(formatQuantity(item.quantity))} × ${escapeHtml(item.description)}`}</b><span>${item.quantity === 1 ? 'Valor' : 'Valor unitário'}: ${formatCents(item.unitPriceCents)}</span><span>Subtotal: ${formatCents(t.lines[i].lineTotalCents)}</span></div>`).join('');
   const notes = quote.notes ? `<section><h2>Observações</h2><div class="notes">${escapeHtml(quote.notes).replace(/\n/g, '<br>')}</div></section>` : '';
   const wa = whatsappContactUrl(quote);
   const button = wa ? `<a class="btn" href="${escapeHtml(wa)}" rel="noopener noreferrer">Falar pelo WhatsApp</a>` : '';

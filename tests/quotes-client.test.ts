@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { computeTotals } from '../shared/publicQuote';
+import { computeTotals, validatePublicQuote } from '../shared/publicQuote';
 import type { Order, Recipe, Settings } from '../src/domain/types';
 import { buildPublicQuote, createQuotesClient, QUOTE_MESSAGES, quoteNumberOf, toCents, whatsappShareUrl } from '../src/features/sharing/quotes';
 import { makeServer } from './helpers/server';
@@ -29,16 +29,22 @@ describe('Montagem do orçamento público', () => {
     const r = buildPublicQuote(order({ unitPrice: 6.9, quantity: 3 }), recipe, settings, opts);
     if (!r.ok) throw new Error(r.error); expect(computeTotals(r.quote).totalCents).toBe(2070);
   });
-  it('inclui embalagens adicionais no orçamento público sem expor custos internos', () => {
+  it('inclui o valor das embalagens no total sem discriminá-lo no orçamento público', () => {
     const r = buildPublicQuote(order({ quantity: 25, unitPrice: 2.5, packagingCharge: 3.75, packagingItems: [{ packagingId: 'box', name: 'Caixa', quantity: 1, unitCost: 3.75 }] }), recipe, settings, opts);
     if (!r.ok) throw new Error(r.error);
     expect(computeTotals(r.quote).totalCents).toBe(6625);
     expect(r.quote.items).toEqual([
-      { description: 'Bolo de chocolate', quantity: 25, unitPriceCents: 250 },
-      { description: 'Embalagens adicionais', quantity: 1, unitPriceCents: 375 },
+      { description: '25 × Bolo de chocolate', quantity: 1, unitPriceCents: 6625 },
     ]);
     expect(JSON.stringify(r.quote)).not.toContain('unitCost');
     expect(JSON.stringify(r.quote)).not.toContain('packagingId');
+    expect(JSON.stringify(r.quote)).not.toContain('Embalagens');
+  });
+  it('mantém válidos totais de encomenda acima do limite por unidade após agregar embalagem', () => {
+    const r = buildPublicQuote(order({ quantity: 2000, unitPrice: 60, packagingCharge: 20 }), recipe, settings, opts);
+    if (!r.ok) throw new Error(r.error);
+    expect(computeTotals(r.quote).totalCents).toBe(12_002_000);
+    expect(validatePublicQuote(r.quote).ok).toBe(true);
   });
   it('exige o nome do negócio e a receita; sem telefone, o orçamento sai sem WhatsApp', () => {
     expect(buildPublicQuote(order(), recipe, { cupSizeMl: 240 }, opts)).toMatchObject({ ok: false, error: expect.stringContaining('nome do negócio') });

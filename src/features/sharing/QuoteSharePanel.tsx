@@ -65,7 +65,7 @@ export function QuoteSharePanel({ order, code, data, update, inform, focus, onCl
     {built.ok && t ? <div className="formula" aria-label="Prévia do orçamento">
       <strong>{built.quote.businessName}</strong>
       <span className="muted">Orçamento nº {built.quote.quoteNumber} · emitido em {formatDate(built.quote.issuedAt)}{built.quote.validUntil ? ` · válido até ${formatDate(built.quote.validUntil)}` : ''}</span>
-      {built.quote.items.map((i, k) => <div key={k} className="formula-row"><span>{formatQuantity(i.quantity)} × {i.description} ({formatCents(i.unitPriceCents)})</span><strong>{formatCents(t.lines[k].lineTotalCents)}</strong></div>)}
+      {built.quote.items.map((i, k) => <div key={k} className="formula-row"><span>{i.quantity === 1 ? i.description : `${formatQuantity(i.quantity)} × ${i.description} (${formatCents(i.unitPriceCents)})`}</span><strong>{formatCents(t.lines[k].lineTotalCents)}</strong></div>)}
       {t.deliveryFeeCents > 0 && <div className="formula-row"><span>Entrega</span><strong>{formatCents(t.deliveryFeeCents)}</strong></div>}
       {t.discountCents > 0 && <div className="formula-row"><span>Desconto</span><strong>− {formatCents(t.discountCents)}</strong></div>}
       <div className="formula-row" style={{ fontSize: 17 }}><strong>Total</strong><strong>{formatCents(t.totalCents)}</strong></div>

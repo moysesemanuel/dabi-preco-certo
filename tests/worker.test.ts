@@ -35,6 +35,23 @@ describe('Leitura pública', () => {
     expect(page).toContain('https://wa.me/5541999990000?text=');
     expect(page).not.toContain('Validade encerrada');
   });
+  it('oculta a discriminação de embalagens em links antigos e mantém o total no HTML e JSON públicos', async () => {
+    await seed(ID_A, quote({ items: [
+      { description: 'Brigadeiro Gourmet', quantity: 25, unitPriceCents: 250 },
+      { description: 'Embalagens adicionais', quantity: 1, unitPriceCents: 375 },
+    ] }));
+    const page = await (await readOnly(req('GET', `/o/${ID_A}`), env)).text();
+    expect(page).toContain('25 × Brigadeiro Gourmet');
+    expect(page).toContain('R$ 66,25');
+    expect(page).not.toContain('Embalagens');
+    expect(page).not.toContain('R$ 3,75');
+
+    const body = await (await readOnly(req('GET', `/api/quotes/${ID_A}`), env)).json() as { quote: PublicQuote; totals: { totalCents: number } };
+    expect(body.totals).toMatchObject({ subtotalCents: 6625, deliveryFeeCents: 1500, totalCents: 8125 });
+    expect(body.quote.items).toEqual([{ description: '25 × Brigadeiro Gourmet', quantity: 1, unitPriceCents: 6625 }]);
+    expect(JSON.stringify(body)).not.toContain('Embalagens');
+    expect(JSON.stringify(body)).not.toContain('375');
+  });
   it('sem telefone válido não há botão de WhatsApp', async () => {
     await seed(ID_A, quote({ businessPhone: undefined }));
     const page = await (await readOnly(req('GET', `/o/${ID_A}`), env)).text();

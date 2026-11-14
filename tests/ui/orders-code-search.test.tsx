@@ -56,6 +56,16 @@ describe('Código no card', () => {
     await u.click(screen.getByRole('button', { name: /Copiar orçamento/ }));
     expect(await navigator.clipboard.readText()).toContain('orçamento ORC-K7M42P');
   });
+  it('o texto copiado inclui o total final sem discriminar o valor da embalagem', async () => {
+    await seed([order('o1', 'Ana Martins', 'Orçamento', 'brig', { quantity: 25, unitPrice: 2.5, packagingCharge: 3.75, packagingItems: [{ packagingId: 'box', name: 'Caixa', quantity: 1, unitCost: 3.75 }] })]);
+    const u = user(); render(<App />); await loaded(); await nav(u, 'Pedidos');
+    await u.click(screen.getByRole('button', { name: 'Ver detalhes' }));
+    await u.click(screen.getByRole('button', { name: /Copiar orçamento/ }));
+    const copied = await navigator.clipboard.readText();
+    expect(copied).toMatch(/Total: R\$\s*66,25/);
+    expect(copied).not.toContain('Embalagens');
+    expect(copied).not.toContain('3,75');
+  });
 });
 
 describe('Pesquisa expansível', () => {

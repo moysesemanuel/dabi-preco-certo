@@ -29,7 +29,7 @@ export const LIMITS = {
   description: 120,
   notes: 1000,
   maxQuantity: 10_000,
-  maxPriceCents: 10_000_000, // R$ 100.000,00 por unidade/taxa/desconto
+  maxPriceCents: 10_000_000, // R$ 100.000,00 por unidade/taxa/desconto; encomenda agregada é limitada por maxTotalCents
   maxTotalCents: 1_000_000_000, // R$ 10.000.000,00 por orçamento
   /** Tamanho máximo do corpo JSON aceito na publicação. */
   maxBodyBytes: 16_384,
@@ -78,7 +78,7 @@ export function normalizePhone(raw: string): string | undefined {
   return isValidPhone(withCountry) ? withCountry : undefined;
 }
 
-const isCents = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= LIMITS.maxPriceCents;
+const isCents = (v: unknown, max: number = LIMITS.maxPriceCents): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max;
 const quantityMilli = (q: number) => Math.round(q * 1000);
 const isQuantity = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= LIMITS.maxQuantity && Math.abs(v * 1000 - quantityMilli(v)) < 1e-6;
@@ -109,7 +109,8 @@ export function validatePublicQuote(input: unknown): ValidationResult {
     const description = cleanText(raw.description, LIMITS.description, false);
     if (!description.ok || !description.value) return fail(description.ok ? 'MISSING_FIELD' : description.error, `${at}.description`);
     if (!isQuantity(raw.quantity)) return fail('INVALID_QUANTITY', `${at}.quantity`);
-    if (!isCents(raw.unitPriceCents)) return fail('INVALID_PRICE', `${at}.unitPriceCents`);
+    const maxItemPrice = raw.quantity === 1 ? LIMITS.maxTotalCents : LIMITS.maxPriceCents;
+    if (!isCents(raw.unitPriceCents, maxItemPrice)) return fail('INVALID_PRICE', `${at}.unitPriceCents`);
     items.push({ description: description.value, quantity: raw.quantity, unitPriceCents: raw.unitPriceCents });
   }
   if (input.deliveryFeeCents !== undefined && !isCents(input.deliveryFeeCents)) return fail('INVALID_PRICE', 'deliveryFeeCents');
@@ -161,6 +162,23 @@ const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' 
 export const formatCents = (cents: number): string => brl.format(cents / 100).replace(/ /g, ' ');
 export const formatQuantity = (q: number): string => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).format(q);
 export const formatDate = (iso: string): string => iso.split('-').reverse().join('/');
+
+/**
+ * Oculta a linha de embalagem de orçamentos publicados antes da cobrança agregada.
+ * Mantém exatamente o subtotal público, representando os itens como um valor fechado da encomenda.
+ */
+export function collapsePackagingBreakdown(quote: PublicQuote): PublicQuote {
+  if (!quote.items.some(item => item.description === 'Embalagens adicionais')) return quote;
+  const productDescription = quote.items
+    .filter(item => item.description !== 'Embalagens adicionais')
+    .map(item => item.quantity === 1 ? item.description : `${formatQuantity(item.quantity)} × ${item.description}`)
+    .join('; ');
+  const description = Array.from(productDescription || 'Encomenda').slice(0, LIMITS.description).join('');
+  return {
+    ...quote,
+    items: [{ description, quantity: 1, unitPriceCents: computeTotals(quote).subtotalCents }],
+  };
+}
 
 /** Link de WhatsApp para falar com o vendedor. Só existe quando o telefone é válido. */
 export function whatsappContactUrl(quote: PublicQuote): string | undefined {

@@ -1,4 +1,4 @@
-import { computeTotals, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
+import { collapsePackagingBreakdown, computeTotals, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
 import { apiError, html, json, readJsonBody, respond, SECURITY_HEADERS } from './http';
 import { renderMessagePage, renderQuotePage } from './render';
 import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authorizer } from './auth';
@@ -51,7 +51,7 @@ function authFailure(f: Extract<AuthResult, { ok: false }>): Response {
 function readStored(row: QuoteRow): PublicQuote | undefined {
   try {
     const parsed = validatePublicQuote(JSON.parse(row.payload));
-    return parsed.ok ? parsed.quote : undefined; // dado corrompido nunca é exibido
+    return parsed.ok ? collapsePackagingBreakdown(parsed.quote) : undefined; // dado corrompido nunca é exibido; links antigos também ocultam a linha de embalagem
   } catch { return undefined; }
 }
 

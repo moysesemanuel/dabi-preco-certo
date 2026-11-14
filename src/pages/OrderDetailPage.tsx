@@ -51,8 +51,7 @@ export function OrderDetailPage({ data, update, inform, focus, openOrder, orderI
   const quoteCodes = effectiveQuoteCodes(data.orders);
 
   function copyQuote() {
-    const packageLine = (currentOrder.packagingCharge ?? 0) > 0 ? `\nEmbalagens adicionais: ${money(currentOrder.packagingCharge!)}` : '';
-    const text = `Olá, ${currentOrder.customer}! Segue seu orçamento ${code}:\nProduto: ${product?.name ?? 'Encomenda'}\nQuantidade: ${currentOrder.quantity}\nValor unitário: ${money(currentOrder.unitPrice)}${packageLine}\nTotal: ${money(orderTotal(currentOrder))}\nData solicitada: ${brDate(currentOrder.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
+    const text = `Olá, ${currentOrder.customer}! Segue seu orçamento ${code}:\nProduto: ${product?.name ?? 'Encomenda'}\nQuantidade: ${currentOrder.quantity}\nValor unitário: ${money(currentOrder.unitPrice)}\nTotal: ${money(orderTotal(currentOrder))}\nData solicitada: ${brDate(currentOrder.deliveryDate)}\nCondições de pagamento e disponibilidade sujeitas à confirmação.`;
     void navigator.clipboard.writeText(text).then(() => inform('Orçamento copiado para enviar no WhatsApp.')).catch(() => inform('Não foi possível copiar automaticamente.'));
   }
 

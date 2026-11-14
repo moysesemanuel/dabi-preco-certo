@@ -1,4 +1,4 @@
-import { computeTotals, validatePublicQuote, type PublicQuote } from '../../../shared/publicQuote';
+import { collapsePackagingBreakdown, computeTotals, validatePublicQuote, type PublicQuote } from '../../../shared/publicQuote';
 import { legacyQuoteCode } from '../../../shared/quoteCode';
 import { apiCall, field } from '../../account/http';
 import type { Order, Recipe, Settings } from '../../domain/types';
@@ -31,7 +31,7 @@ export function buildPublicQuote(order: Order, recipe: Recipe | undefined, setti
     ...(opts.notes?.trim() ? { notes: opts.notes.trim() } : {}),
   };
   const v = validatePublicQuote(candidate);
-  if (v.ok) return { ok: true, quote: v.quote };
+  if (v.ok) return { ok: true, quote: collapsePackagingBreakdown(v.quote) };
   const why: Record<string, string> = { INVALID_DATE: 'A validade deve ser uma data igual ou posterior à emissão.', INVALID_PHONE: 'O telefone do negócio é inválido. Corrija em Configurações.', DISCOUNT_EXCEEDS_TOTAL: 'O desconto não pode ser maior que o total.', TOO_LONG: 'Algum texto está longo demais.', INVALID_PRICE: 'Algum valor está inválido.', INVALID_QUANTITY: 'A quantidade da encomenda é inválida para um orçamento.', TOTAL_TOO_LARGE: 'O total é grande demais para um orçamento.' };
   return { ok: false, error: why[v.error] ?? 'Não foi possível montar o orçamento com estes dados.' };
 }
