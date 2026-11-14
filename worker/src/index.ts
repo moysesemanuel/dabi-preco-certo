@@ -1,7 +1,14 @@
-import { computeTotals, LIMITS, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
+import { collapsePackagingBreakdown, computeTotals, validatePublicQuote, type PublicQuote } from '../../shared/publicQuote';
+import { apiError, html, json, readJsonBody, respond, SECURITY_HEADERS } from './http';
 import { renderMessagePage, renderQuotePage } from './render';
 import { createLicenseAuthorizer, DEFAULT_LIMITS, type AuthResult, type Authorizer } from './auth';
-import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
+import { currentSession, logout, requestCode, sessionRevoke, sessionsList, verifyCode, type AuthEnv } from './authRoutes';
+import { createEmailSender, type EmailSender } from './email';
+import { createCompositeAuthorizer } from './session';
+import { adminRoute } from './adminRoutes';
+import { syncPull, syncPush } from './syncRoutes';
+import { LEGACY_SYNC_PATHS, SYNC_PATHS } from '../../shared/sync';
+import { countQuotaUsage, generateId, getQuote, ID_PATTERN, insertQuoteWithinQuotas, listQuotesByOwner, revokeQuote, updateQuotePayload, type D1Like, type QuoteRow } from './store';
 
 export interface Env {
   DB: D1Like;
@@ -9,26 +16,25 @@ export interface Env {
   PUBLIC_BASE_URL?: string;
   /** Origens do app autorizadas a chamar a API (CORS), separadas por vírgula. Vazio = nenhuma. */
   ALLOWED_ORIGINS?: string;
+  /** SEGREDO do servidor (wrangler secret) usado para proteger os códigos de acesso. Sem ele, o login responde 503. */
+  AUTH_SECRET?: string;
+  /** `resend` envia pelo Resend (exige RESEND_API_KEY e EMAIL_FROM); `dev` imprime no terminal (só com origens locais). Sem valor, não há envio e o login responde 503. */
+  EMAIL_ADAPTER?: string;
+  /** SEGREDO (wrangler secret) do provedor Resend. Nunca em arquivos versionados. */
+  RESEND_API_KEY?: string;
+  /** Remetente verificado no Resend, ex.: `PedidoCerto <acesso@seudominio.com.br>`. Não é segredo. */
+  EMAIL_FROM?: string;
+  /** Limite diário de e-mails de código de acesso (padrão 80, abaixo dos 100/dia do plano gratuito do Resend). Ajuste ao mudar de plano. */
+  EMAIL_DAILY_LIMIT?: string;
+  /** `on` reativa a autenticação antiga por chave de licença (Bearer). Padrão: desligada. */
+  LEGACY_KEY_AUTH?: string;
+  /** `staging` ou `production`. Se definido, requisições do Pages com `X-Dabi-Expect-Env` de OUTRO ambiente são recusadas (421): um Pages de homologação nunca usa o banco de produção por engano. */
+  APP_ENV?: string;
 }
 
 export type { Authorizer, AuthResult };
 
-type Options = { authorize: Authorizer; now?: () => Date; newId?: () => string };
-
-const SECURITY_HEADERS: Record<string, string> = {
-  'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
-  'X-Content-Type-Options': 'nosniff',
-  'Referrer-Policy': 'no-referrer',
-  'X-Robots-Tag': 'noindex, nofollow',
-  'Cache-Control': 'no-store',
-};
-
-function respond(body: BodyInit | null, status: number, contentType: string, extra: Record<string, string> = {}): Response {
-  return new Response(body, { status, headers: { ...SECURITY_HEADERS, 'Content-Type': contentType, ...extra } });
-}
-const json = (data: unknown, status = 200) => respond(JSON.stringify(data), status, 'application/json; charset=utf-8');
-const apiError = (status: number, error: string, message: string) => json({ error, message }, status);
-const html = (body: string, status = 200, head = false) => respond(head ? null : body, status, 'text/html; charset=utf-8');
+type Options = { authorize: Authorizer; now?: () => Date; newId?: () => string; email?: (env: Env) => EmailSender };
 
 /** Data de hoje no Brasil (UTC-3, sem horário de verão), para decidir se a validade encerrou. */
 const todayInBrazil = (now: Date) => new Date(now.getTime() - 3 * 3600_000).toISOString().slice(0, 10);
@@ -46,22 +52,14 @@ function authFailure(f: Extract<AuthResult, { ok: false }>): Response {
 function readStored(row: QuoteRow): PublicQuote | undefined {
   try {
     const parsed = validatePublicQuote(JSON.parse(row.payload));
-    return parsed.ok ? parsed.quote : undefined; // dado corrompido nunca é exibido
+    return parsed.ok ? collapsePackagingBreakdown(parsed.quote) : undefined; // dado corrompido nunca é exibido; links antigos também ocultam a linha de embalagem
   } catch { return undefined; }
-}
-
-/** Lê o corpo JSON com limite real de tamanho (não confia só no Content-Length). */
-async function readJsonBody(request: Request): Promise<{ ok: true; data: unknown } | { ok: false; status: number; error: string }> {
-  const declared = Number(request.headers.get('content-length') ?? '0');
-  if (declared > LIMITS.maxBodyBytes) return { ok: false, status: 413, error: 'BODY_TOO_LARGE' };
-  const text = await request.text();
-  if (new TextEncoder().encode(text).length > LIMITS.maxBodyBytes) return { ok: false, status: 413, error: 'BODY_TOO_LARGE' };
-  try { return { ok: true, data: JSON.parse(text) }; } catch { return { ok: false, status: 400, error: 'INVALID_JSON' }; }
 }
 
 export function createHandler(options: Options) {
   const now = options.now ?? (() => new Date());
   const newId = options.newId ?? generateId;
+  const authDeps = { now, email: options.email ?? ((env: AuthEnv) => createEmailSender(env)) };
 
   async function readQuote(env: Env, id: string, head: boolean, wantJson: boolean): Promise<Response> {
     const notFound = () => (wantJson ? apiError(404, 'NOT_FOUND', 'Orçamento não encontrado.') : html(renderMessagePage('Orçamento não encontrado', 'Verifique se o link está completo ou peça um novo link ao vendedor.'), 404, head));
@@ -119,6 +117,21 @@ export function createHandler(options: Options) {
     return json({ id, updated: true });
   }
 
+  /** GET /api/quotes: os orçamentos publicados pelo próprio usuário (para consultar e revogar links). */
+  async function listMine(request: Request, env: Env): Promise<Response> {
+    const auth = await options.authorize(request, env, { scope: 'verify', now: now() });
+    if (!auth.ok) return authFailure(auth);
+    const today = todayInBrazil(now());
+    const rows = await listQuotesByOwner(env.DB, auth.ownerId);
+    const quotes = rows.flatMap(row => {
+      const quote = readStored(row);
+      if (!quote) return [];
+      const status = row.revoked_at ? 'revoked' : quote.validUntil && quote.validUntil < today ? 'expired' : 'active';
+      return [{ id: row.id, status, quoteNumber: quote.quoteNumber, businessName: quote.businessName, issuedAt: quote.issuedAt, validUntil: quote.validUntil ?? null, totalCents: computeTotals(quote).totalCents, createdAt: row.created_at, updatedAt: row.updated_at, ...(env.PUBLIC_BASE_URL ? { url: `${env.PUBLIC_BASE_URL}/o/${row.id}` } : {}) }];
+    });
+    return json({ quotes });
+  }
+
   /** Verifica a licença e informa o uso das cotas. Usada pelo botão "Ativar/verificar" do app. */
   async function verifyLicense(request: Request, env: Env): Promise<Response> {
     const auth = await options.authorize(request, env, { scope: 'verify', now: now() });
@@ -135,6 +148,7 @@ export function createHandler(options: Options) {
     if (origin && allowed.includes(origin)) {
       response.headers.set('Access-Control-Allow-Origin', origin);
       response.headers.set('Access-Control-Expose-Headers', 'Retry-After');
+      response.headers.set('Access-Control-Allow-Credentials', 'true'); // cookie de sessão (somente origens autorizadas)
       response.headers.append('Vary', 'Origin');
     }
     return response;
@@ -150,12 +164,33 @@ export function createHandler(options: Options) {
         if (method !== 'GET' && method !== 'HEAD') return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
         return await readQuote(env, page[1], method === 'HEAD', false);
       }
+      if (pathname.startsWith('/api/auth/') || pathname.startsWith('/api/sessions')) {
+        const r = pathname.replace(/\/+$/, '');
+        if (r === '/api/auth/request-code' && method === 'POST') return await requestCode(request, env, authDeps);
+        if (r === '/api/auth/verify-code' && method === 'POST') return await verifyCode(request, env, authDeps);
+        if (r === '/api/auth/session' && method === 'GET') return await currentSession(request, env, authDeps);
+        if (r === '/api/auth/logout' && method === 'POST') return await logout(request, env, authDeps);
+        if (r === '/api/sessions' && method === 'GET') return await sessionsList(request, env, authDeps);
+        const del = r.match(/^\/api\/sessions\/([^/]+)$/);
+        if (del && method === 'DELETE') return await sessionRevoke(request, env, authDeps, del[1]);
+        return apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
+      }
+      if (pathname === '/api/admin' || pathname.startsWith('/api/admin/')) return (await adminRoute(request, env, { now }, pathname)) ?? apiError(404, 'NOT_FOUND', 'Rota não encontrada.');
+      if (pathname === SYNC_PATHS.pull || pathname === SYNC_PATHS.push) {
+        if (pathname === SYNC_PATHS.pull && method === 'GET') return await syncPull(request, env, authDeps);
+        if (pathname === SYNC_PATHS.push && method === 'POST') return await syncPush(request, env, authDeps);
+        return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
+      }
+      // Protocolo antigo (encomendas de uma receita só): recusado sem ler nem gravar nada. Um app antigo não conhece `items`
+      // e regravaria encomendas com vários produtos perdendo itens; ele mantém os dados no aparelho até ser recarregado.
+      if ((LEGACY_SYNC_PATHS as readonly string[]).includes(pathname)) return apiError(426, 'CLIENT_OUTDATED', 'Atualize o aplicativo: recarregue a página para continuar sincronizando. Seus dados continuam neste dispositivo.');
       if (/^\/api\/license\/?$/.test(pathname)) {
         return method === 'GET' ? await verifyLicense(request, env) : apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
       }
       const api = pathname.match(/^\/api\/quotes(?:\/([^/]+))?\/?$/);
       if (api) {
         const id = api[1];
+        if (method === 'GET' && id === undefined) return await listMine(request, env);
         if (method === 'GET' && id !== undefined) return await readQuote(env, id, false, true); // leitura pública: sem autenticação
         if ((method === 'POST' && id === undefined) || ((method === 'PUT' || method === 'DELETE') && id !== undefined)) return await write(request, env, method, id);
         return apiError(405, 'METHOD_NOT_ALLOWED', 'Método não permitido.');
@@ -170,16 +205,18 @@ export function createHandler(options: Options) {
 
   return async function handle(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
+    const expected = request.headers.get('x-dabi-expect-env');
+    if (env.APP_ENV && expected && expected !== env.APP_ENV) return apiError(421, 'ENVIRONMENT_MISMATCH', 'Este front-end pertence a outro ambiente.');
     if (request.method.toUpperCase() === 'OPTIONS' && pathname.startsWith('/api/')) {
-      const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Max-Age': '600' } });
+      const preflight = new Response(null, { status: 204, headers: { ...SECURITY_HEADERS, 'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE', 'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-CSRF-Token', 'Access-Control-Max-Age': '600' } });
       return withCors(request, env, preflight);
     }
     return withCors(request, env, await route(request, env));
   };
 }
 
-// O Worker publicado autoriza SOMENTE por chave de licença individual (veja auth.ts).
-const handler = createHandler({ authorize: createLicenseAuthorizer() });
+// O Worker publicado autoriza por SESSÃO de conta (cookie + CSRF). A chave de licença antiga só vale com LEGACY_KEY_AUTH=on.
+const handler = createHandler({ authorize: createCompositeAuthorizer(createLicenseAuthorizer()) });
 export default {
   fetch: (request: Request, env: Env) => handler(request, env),
 };

@@ -2,12 +2,13 @@ import { recipeCost } from './domain/pricing';
 import type { DataSet, Recipe, Unit } from './domain/types';
 import { DEFAULT_CUP_ML } from './features/measurement/convert';
 
-export type Page = 'dashboard' | 'ingredients' | 'recipes' | 'orders' | 'converter' | 'settings' | 'backup';
+export type Page = 'dashboard' | 'ingredients' | 'packagings' | 'recipes' | 'new-order' | 'orders' | 'order-detail' | 'agenda' | 'converter' | 'settings' | 'backup';
 export type PageProps = {
   data: DataSet;
   update: (fn: (prev: DataSet) => DataSet) => void;
   inform: (msg: string) => void;
   focus: (page: Page) => void;
+  openOrder: (id: string) => void;
 };
 
 export const newId = () => crypto.randomUUID();
@@ -18,6 +19,36 @@ export const cupSizeOf = (d: DataSet) => d.settings?.cupSizeMl ?? DEFAULT_CUP_ML
 export type Priced = { ok: true; cost: ReturnType<typeof recipeCost> } | { ok: false; message: string };
 /** Calcula o custo da receita. Em caso de falha devolve a mensagem; nunca assume custo zero. */
 export function priceRecipe(r: Recipe, d: DataSet): Priced {
-  try { return { ok: true, cost: recipeCost(r, d.ingredients, cupSizeOf(d)) }; }
+  try { return { ok: true, cost: recipeCost(r, d.ingredients, cupSizeOf(d), d.packagings ?? []) }; }
   catch (e) { return { ok: false, message: e instanceof Error ? e.message : 'Não foi possível calcular o custo.' }; }
+}
+
+/** Atualiza parte das configurações sem perder as demais (nome do negócio, capacidade, xícara...). */
+export const withSettings = (d: DataSet, patch: Partial<NonNullable<DataSet['settings']>>): DataSet => ({ ...d, settings: { cupSizeMl: DEFAULT_CUP_ML, ...d.settings, ...patch } });
+
+/** Data de hoje (AAAA-MM-DD) no fuso do dispositivo. */
+export const localToday = (now: Date = new Date()): string => `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+/** Copia para a área de transferência, tratando falhas (navegador sem permissão ou sem suporte). */
+export async function copyText(text: string): Promise<boolean> {
+  try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+}
+
+/**
+ * Aplica uma regra de domínio que pode recusar a operação (lançar Error).
+ * O novo estado é calculado AGORA, dentro de try/catch; passar a regra direto para `setState(fn)` faria o erro estourar
+ * depois, durante a renderização do React, e poderia deixar a tela em branco. Devolve a mensagem do erro, ou null se deu certo.
+ */
+export function tryApply(data: DataSet, update: (fn: (d: DataSet) => DataSet) => void, rule: (d: DataSet) => DataSet): string | null {
+  try { const next = rule(data); update(() => next); return null; }
+  catch (e) { return e instanceof Error ? e.message : 'Não foi possível concluir a operação.'; }
+}
+
+/** Baixa um backup JSON dos dados (usado na página de Backup e na tela de acesso). */
+export function downloadBackup(data: unknown): void {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `custo-backup-${new Date().toISOString().slice(0, 10)}.json`; a.click();
+  URL.revokeObjectURL(url);
 }

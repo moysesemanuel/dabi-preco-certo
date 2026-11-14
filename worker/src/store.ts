@@ -1,11 +1,13 @@
 /** Interface mínima do D1 usada aqui (compatível com D1Database do Cloudflare e com o simulador dos testes). */
+export interface BoundStatement {
+  first<T = Record<string, unknown>>(): Promise<T | null>;
+  run(): Promise<{ meta: { changes?: number } }>;
+  all<T = Record<string, unknown>>(): Promise<{ results: T[] }>;
+}
 export interface D1Like {
-  prepare(sql: string): {
-    bind(...values: unknown[]): {
-      first<T = Record<string, unknown>>(): Promise<T | null>;
-      run(): Promise<{ meta: { changes?: number } }>;
-    };
-  };
+  prepare(sql: string): { bind(...values: unknown[]): BoundStatement };
+  /** Executa as instruções em UMA transação: ou todas valem, ou nenhuma (como D1Database.batch). */
+  batch(statements: BoundStatement[]): Promise<{ meta: { changes?: number } }[]>;
 }
 
 export type QuoteRow = { id: string; payload: string; created_at: string; updated_at: string; revoked_at: string | null; owner_id: string | null };
@@ -47,7 +49,7 @@ export const getLicenseByHash = (db: D1Like, keyHash: string) =>
  * Conta uma operação na janela atual de forma ATÔMICA (um único UPSERT): se o contador já atingiu o limite,
  * a cláusula WHERE impede o incremento e nenhuma linha é devolvida. Requisições concorrentes não ultrapassam o limite.
  */
-export async function consumeRateLimit(db: D1Like, licenseId: string, scope: 'write' | 'verify', limit: number, windowSeconds: number, nowMs: number): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
+export async function consumeRateLimit(db: D1Like, licenseId: string, scope: string, limit: number, windowSeconds: number, nowMs: number): Promise<{ allowed: boolean; retryAfterSeconds: number }> {
   const nowSec = Math.floor(nowMs / 1000);
   const windowStart = nowSec - (nowSec % windowSeconds);
   const row = await db.prepare(
@@ -55,8 +57,16 @@ export async function consumeRateLimit(db: D1Like, licenseId: string, scope: 'wr
      ON CONFLICT (license_id, scope, window_start) DO UPDATE SET count = count + 1 WHERE count < ?4
      RETURNING count`,
   ).bind(licenseId, scope, windowStart, limit).first<{ count: number }>();
-  if (row && row.count === 1) await db.prepare('DELETE FROM rate_limits WHERE license_id = ?1 AND window_start < ?2').bind(licenseId, windowStart).run();
+  // Limpa só janelas ANTIGAS DO MESMO ESCOPO (antes apagava também as de outros escopos, o que zerava limites de janela maior, como o diário).
+  if (row && row.count === 1) await db.prepare('DELETE FROM rate_limits WHERE license_id = ?1 AND scope = ?2 AND window_start < ?3').bind(licenseId, scope, windowStart).run();
   return { allowed: row !== null, retryAfterSeconds: windowStart + windowSeconds - nowSec };
+}
+
+/** Quanto já foi consumido na janela atual (só leitura; não consome). */
+export async function windowCount(db: D1Like, licenseId: string, scope: string, windowSeconds: number, nowMs: number): Promise<number> {
+  const nowSec = Math.floor(nowMs / 1000);
+  const row = await db.prepare('SELECT count FROM rate_limits WHERE license_id = ?1 AND scope = ?2 AND window_start = ?3').bind(licenseId, scope, nowSec - (nowSec % windowSeconds)).first<{ count: number }>();
+  return row?.count ?? 0;
 }
 
 export const countQuotaUsage = (db: D1Like, ownerId: string, dayStartIso: string) =>
@@ -85,4 +95,10 @@ export async function insertQuoteWithinQuotas(
   const usage = await countQuotaUsage(db, row.ownerId, row.dayStartIso);
   if ((usage?.active ?? 0) >= row.quotaActive) return { ok: false, reason: 'ACTIVE', used: usage?.active ?? 0, limit: row.quotaActive };
   return { ok: false, reason: 'DAILY', used: usage?.today ?? 0, limit: row.quotaDaily };
+}
+
+/** Orçamentos publicados por um proprietário (mais recentes primeiro). O payload é validado de novo ao ser lido. */
+export async function listQuotesByOwner(db: D1Like, ownerId: string, limit = 200): Promise<QuoteRow[]> {
+  const r = await db.prepare('SELECT id, payload, created_at, updated_at, revoked_at, owner_id FROM quotes WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?').bind(ownerId, limit).all<QuoteRow>();
+  return r.results;
 }

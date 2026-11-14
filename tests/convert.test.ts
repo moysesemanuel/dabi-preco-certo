@@ -65,10 +65,14 @@ describe('Mensagens, referências e apresentação', () => {
     expect(conversionErrorMessage('MISSING_UNIT_EQUIVALENCE', 'un', 'g', 'Ovo')).toContain('1 unidade');
   });
   it('referências só casam com o nome completo, sem adivinhar', () => {
-    expect(findReference('farinha de trigo')?.gramsPerCup).toBe(120);
-    expect(findReference('Açúcar Refinado')?.gramsPerCup).toBe(200);
-    expect(findReference('Farinha de trigo integral')).toBeUndefined();
-    expect(findReference('Leite condensado')).toBeUndefined();
+    expect(findReference('farinha de trigo')?.gramsPerCup).toBeCloseTo(125 / (3785.411784 / 16) * 240, 9); // USDA: 125 g por xícara americana
+    expect(findReference('Açúcar Refinado')?.gramsPerCup).toBeCloseTo(200 / (3785.411784 / 16) * 240, 9);
+    expect(findReference('Farinha de trigo integral')?.name).toBe('Farinha de trigo integral'); // item próprio, não confundido com a comum
+    expect(findReference('Farinha de trigo integral')).not.toBe(findReference('farinha de trigo'));
+    expect(findReference('Leite condensado')?.name).toBe('Leite condensado'); // item próprio: 'leite' sozinho não o escolhe
+    expect(findReference('Leite condensado')).not.toBe(findReference('leite'));
+    expect(findReference('farinha')).toBeUndefined(); // nome incompleto: só sugestão, nunca escolha automática
+    expect(findReference('Leite desnatado')).toBeUndefined();
     expect(findReference('Farinha de mandioca')).toBeUndefined();
     expect(findReference('')).toBeUndefined();
   });

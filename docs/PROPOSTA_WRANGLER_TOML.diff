@@ -1,0 +1,31 @@
+--- worker/wrangler.toml (atual, local)	2026-11-12 11:45:16
++++ worker/wrangler.toml (proposta)	2026-11-12 22:25:12
+@@ -35,7 +35,10 @@
+ 
+ [env.staging.vars]
+ PUBLIC_BASE_URL = "https://dabi-preco-certo-staging.pages.dev"
+-ALLOWED_ORIGINS = "https://dabi-preco-certo-staging.pages.dev,http://localhost:5174,http://127.0.0.1:5174"
++# Front-end de homologação (Cloudflare Pages) + desenvolvimento local. A origem do Pages de PRODUÇÃO nunca entra aqui.
++ALLOWED_ORIGINS = "https://dabi-preco-certo-staging.pages.dev,http://localhost:5174,http://127.0.0.1:5174"
++# Guarda de ambiente: o Pages envia X-Dabi-Expect-Env; se não bater, o Worker responde 421.
++APP_ENV = "staging"
+ LEGACY_KEY_AUTH = "off"
+ # E-mail pelo Resend. Sem o segredo RESEND_API_KEY o login responde 503 (nada finge ser enviado).
+ # Segredo: `wrangler secret put RESEND_API_KEY --env staging`. EMAIL_FROM precisa ser um remetente de domínio verificado no Resend.
+@@ -50,11 +53,14 @@
+ 
+ [env.production]
+ name = "dabi-orcamentos"
++# Sem endereço workers.dev público: a produção só é alcançada pelo Pages (Service Binding), um único ponto de entrada.
+ workers_dev = false
+ 
+ [env.production.vars]
+-PUBLIC_BASE_URL = "https://precocerto.dabitech.com.br"
+-ALLOWED_ORIGINS = "https://precocerto.dabitech.com.br"
++PUBLIC_BASE_URL = "https://precocerto.dabitech.com.br"
++# SOMENTE a origem de produção: um front-end de homologação que aponte para este Worker falha no CSRF (e na guarda APP_ENV).
++ALLOWED_ORIGINS = "https://precocerto.dabitech.com.br"
++APP_ENV = "production"
+ LEGACY_KEY_AUTH = "off"
+ # Segredo: `wrangler secret put RESEND_API_KEY --env production`.
+ EMAIL_ADAPTER = "resend"

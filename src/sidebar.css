@@ -1,0 +1,154 @@
+.sidebar {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  max-height: 100dvh;
+  flex: 0 0 246px;
+  overflow: visible;
+  transition: flex-basis 240ms ease, width 240ms ease, padding 240ms ease;
+}
+
+.sidebar-brand-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.sidebar-brand-row .brand {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.brand-logo-wrap {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+  width: 152px;
+  height: 40px;
+  transition: width 240ms ease;
+}
+
+.brand-logo-wrap .brand-logo {
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 152px;
+  max-width: none;
+  height: 40px;
+  object-fit: contain;
+  object-position: left center;
+  transition: opacity 180ms ease, width 240ms ease;
+}
+
+.brand-logo-icon { opacity: 0; }
+
+.sidebar-toggle {
+  position: absolute;
+  z-index: 3;
+  top: 21px;
+  right: -26px;
+  display: grid;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-accent-action);
+  color: var(--color-surface);
+  box-shadow: 0 2px 7px var(--color-shadow-strong);
+  transition: color 160ms ease, background 160ms ease, box-shadow 160ms ease;
+}
+
+.sidebar-toggle:hover { color: var(--color-surface); background: var(--color-accent-hover); box-shadow: 0 3px 9px var(--color-shadow-strong); }
+.sidebar-toggle:focus-visible { outline: 3px solid var(--color-accent); outline-offset: 3px; }
+
+.sidebar .nav button {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: gap 240ms ease, padding 240ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.nav-label {
+  display: inline-block;
+  min-width: 0;
+  max-width: 180px;
+  overflow: hidden;
+  opacity: 1;
+  text-overflow: clip;
+  white-space: nowrap;
+  transition: max-width 240ms ease, opacity 160ms ease;
+}
+
+.sidebar.is-collapsed {
+  width: 92px;
+  flex-basis: 92px;
+  padding-right: 12px;
+  padding-left: 12px;
+  gap: 24px;
+}
+
+.sidebar.is-collapsed .sidebar-brand-row { gap: 4px; }
+.sidebar.is-collapsed .sidebar-brand-row .brand { width: 100%; justify-content: center; }
+.sidebar.is-collapsed .brand-logo-wrap { width: 32px; }
+.sidebar.is-collapsed .brand-logo-wrap .brand-logo-full { opacity: 0; }
+.sidebar.is-collapsed .brand-logo-wrap .brand-logo-icon { width: 32px; opacity: 1; }
+.sidebar.is-collapsed .sidebar-toggle { top: 21px; right: -16px; flex-basis: 20px; width: 20px; height: 20px; }
+.sidebar.is-collapsed .nav button { justify-content: center; gap: 0; padding-right: 8px; padding-left: 8px; }
+.sidebar.is-collapsed .nav-label { max-width: 0; opacity: 0; }
+.sidebar.is-collapsed .sidebar-foot { max-height: 0; margin: 0; padding-top: 0; padding-bottom: 0; border-color: transparent; opacity: 0; overflow: hidden; }
+.sidebar-foot { transition: max-height 240ms ease, opacity 160ms ease, padding 240ms ease, margin 240ms ease, border-color 160ms ease; }
+
+@media (max-width: 1000px) and (min-width: 701px) {
+  .sidebar { width: 210px; flex-basis: 210px; }
+  .brand-logo-wrap, .brand-logo-wrap .brand-logo { width: 132px; }
+}
+
+@media (max-width: 700px) {
+  .sidebar,
+  .sidebar.is-collapsed {
+    position: sticky;
+    top: 0;
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    max-height: none;
+    flex: 0 0 auto;
+    align-self: auto;
+    overflow: visible;
+    padding: 13px 16px;
+    gap: 10px;
+    transition: none;
+  }
+
+  .sidebar-brand-row { min-height: 31px; }
+  .sidebar-brand-row .brand { font-size: 18px; }
+  .sidebar.is-collapsed .sidebar-brand-row .brand { justify-content: flex-start; }
+  .brand-logo-wrap,
+  .sidebar.is-collapsed .brand-logo-wrap { width: 150px; height: 34px; }
+  .brand-logo-wrap .brand-logo,
+  .sidebar.is-collapsed .brand-logo-wrap .brand-logo-full { width: 150px; height: 34px; opacity: 1; }
+  .brand-logo-wrap .brand-logo-icon,
+  .sidebar.is-collapsed .brand-logo-wrap .brand-logo-icon { opacity: 0; }
+  .sidebar-toggle { display: none; }
+  .sidebar .nav,
+  .sidebar.is-collapsed .nav { flex-direction: row; overflow-x: auto; gap: 4px; margin: 0 -8px; }
+  .sidebar .nav button,
+  .sidebar.is-collapsed .nav button { width: auto; flex: 0 0 auto; justify-content: flex-start; gap: 5px; padding: 10px; font-size: 12px; }
+  .nav-label,
+  .sidebar.is-collapsed .nav-label { max-width: 180px; opacity: 1; }
+  .sidebar.is-collapsed .sidebar-foot { display: none; }
+  .sidebar-foot { display: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar * { transition-duration: 0.01ms !important; }
+}

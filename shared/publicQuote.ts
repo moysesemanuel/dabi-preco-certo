@@ -7,6 +7,8 @@
  * Sem dependências; funções puras.
  */
 export type PublicQuoteItem = { description: string; quantity: number; unitPriceCents: number };
+/** Produto listado sem preço próprio: o valor dele está dentro de uma linha consolidada de `items` (ex.: encomenda com embalagens inclusas). */
+export type PublicIncludedItem = { description: string; quantity: number };
 export type PublicQuote = {
   version: 1;
   quoteNumber: string;
@@ -17,6 +19,11 @@ export type PublicQuote = {
   issuedAt: string;
   validUntil?: string;
   items: PublicQuoteItem[];
+  /**
+   * Opcional. Produtos de uma encomenda cujo valor está consolidado em `items` (uma linha só). Usado quando há embalagens
+   * adicionais: o cliente vê os produtos e o valor final, nunca o valor da embalagem nem preços que somariam outro total.
+   */
+  includedItems?: PublicIncludedItem[];
   deliveryFeeCents?: number;
   discountCents?: number;
   notes?: string;
@@ -29,7 +36,7 @@ export const LIMITS = {
   description: 120,
   notes: 1000,
   maxQuantity: 10_000,
-  maxPriceCents: 10_000_000, // R$ 100.000,00 por unidade/taxa/desconto
+  maxPriceCents: 10_000_000, // R$ 100.000,00 por unidade/taxa/desconto; encomenda agregada é limitada por maxTotalCents
   maxTotalCents: 1_000_000_000, // R$ 10.000.000,00 por orçamento
   /** Tamanho máximo do corpo JSON aceito na publicação. */
   maxBodyBytes: 16_384,
@@ -41,7 +48,8 @@ export type ValidationErrorCode =
   | 'DISCOUNT_EXCEEDS_TOTAL' | 'TOTAL_TOO_LARGE';
 export type ValidationResult = { ok: true; quote: PublicQuote } | { ok: false; error: ValidationErrorCode; field: string };
 
-const TOP_KEYS = new Set(['version', 'quoteNumber', 'businessName', 'businessPhone', 'issuedAt', 'validUntil', 'items', 'deliveryFeeCents', 'discountCents', 'notes']);
+const TOP_KEYS = new Set(['version', 'quoteNumber', 'businessName', 'businessPhone', 'issuedAt', 'validUntil', 'items', 'includedItems', 'deliveryFeeCents', 'discountCents', 'notes']);
+const INCLUDED_KEYS = new Set(['description', 'quantity']);
 const ITEM_KEYS = new Set(['description', 'quantity', 'unitPriceCents']);
 // Controle (exceto \n e \t), separadores de linha/parágrafo e sobreposições bidirecionais (usadas para disfarçar texto).
 const FORBIDDEN_CHARS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F\u2028\u2029\u202A-\u202E\u2066-\u2069]/;
@@ -78,7 +86,7 @@ export function normalizePhone(raw: string): string | undefined {
   return isValidPhone(withCountry) ? withCountry : undefined;
 }
 
-const isCents = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= LIMITS.maxPriceCents;
+const isCents = (v: unknown, max: number = LIMITS.maxPriceCents): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 0 && v <= max;
 const quantityMilli = (q: number) => Math.round(q * 1000);
 const isQuantity = (v: unknown): v is number =>
   typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= LIMITS.maxQuantity && Math.abs(v * 1000 - quantityMilli(v)) < 1e-6;
@@ -109,8 +117,25 @@ export function validatePublicQuote(input: unknown): ValidationResult {
     const description = cleanText(raw.description, LIMITS.description, false);
     if (!description.ok || !description.value) return fail(description.ok ? 'MISSING_FIELD' : description.error, `${at}.description`);
     if (!isQuantity(raw.quantity)) return fail('INVALID_QUANTITY', `${at}.quantity`);
-    if (!isCents(raw.unitPriceCents)) return fail('INVALID_PRICE', `${at}.unitPriceCents`);
+    const maxItemPrice = raw.quantity === 1 ? LIMITS.maxTotalCents : LIMITS.maxPriceCents;
+    if (!isCents(raw.unitPriceCents, maxItemPrice)) return fail('INVALID_PRICE', `${at}.unitPriceCents`);
     items.push({ description: description.value, quantity: raw.quantity, unitPriceCents: raw.unitPriceCents });
+  }
+  let includedItems: PublicIncludedItem[] | undefined;
+  if (input.includedItems !== undefined) {
+    if (!Array.isArray(input.includedItems) || input.includedItems.length === 0) return fail('EMPTY_ITEMS', 'includedItems');
+    if (input.includedItems.length > LIMITS.maxItems) return fail('TOO_MANY_ITEMS', 'includedItems');
+    includedItems = [];
+    for (let i = 0; i < input.includedItems.length; i++) {
+      const raw: unknown = input.includedItems[i];
+      const at = `includedItems[${i}]`;
+      if (!isRecord(raw)) return fail('INVALID_TYPE', at);
+      for (const key of Object.keys(raw)) if (!INCLUDED_KEYS.has(key)) return fail('UNKNOWN_FIELD', `${at}.${key}`);
+      const description = cleanText(raw.description, LIMITS.description, false);
+      if (!description.ok || !description.value) return fail(description.ok ? 'MISSING_FIELD' : description.error, `${at}.description`);
+      if (!isQuantity(raw.quantity)) return fail('INVALID_QUANTITY', `${at}.quantity`);
+      includedItems.push({ description: description.value, quantity: raw.quantity });
+    }
   }
   if (input.deliveryFeeCents !== undefined && !isCents(input.deliveryFeeCents)) return fail('INVALID_PRICE', 'deliveryFeeCents');
   if (input.discountCents !== undefined && !isCents(input.discountCents)) return fail('INVALID_PRICE', 'discountCents');
@@ -126,6 +151,7 @@ export function validatePublicQuote(input: unknown): ValidationResult {
     version: 1, quoteNumber: quoteNumber.value, businessName: businessName.value, issuedAt: input.issuedAt, items,
     ...(input.businessPhone !== undefined ? { businessPhone: input.businessPhone } : {}),
     ...(input.validUntil !== undefined ? { validUntil: input.validUntil } : {}),
+    ...(includedItems ? { includedItems } : {}),
     ...(input.deliveryFeeCents !== undefined ? { deliveryFeeCents: input.deliveryFeeCents } : {}),
     ...(input.discountCents !== undefined ? { discountCents: input.discountCents } : {}),
     ...(notes !== undefined ? { notes } : {}),
@@ -161,6 +187,26 @@ const brl = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' 
 export const formatCents = (cents: number): string => brl.format(cents / 100).replace(/ /g, ' ');
 export const formatQuantity = (q: number): string => new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 3 }).format(q);
 export const formatDate = (iso: string): string => iso.split('-').reverse().join('/');
+
+/**
+ * Oculta a linha de embalagem de orçamentos publicados antes da cobrança agregada.
+ * Mantém exatamente o subtotal público, representando os itens como um valor fechado da encomenda.
+ */
+export function collapsePackagingBreakdown(quote: PublicQuote): PublicQuote {
+  if (!quote.items.some(item => item.description === 'Embalagens adicionais')) return quote;
+  const productDescription = quote.items
+    .filter(item => item.description !== 'Embalagens adicionais')
+    .map(item => item.quantity === 1 ? item.description : `${formatQuantity(item.quantity)} × ${item.description}`)
+    .join('; ');
+  const description = Array.from(productDescription || 'Encomenda').slice(0, LIMITS.description).join('');
+  return {
+    ...quote,
+    items: [{ description, quantity: 1, unitPriceCents: computeTotals(quote).subtotalCents }],
+  };
+}
+
+/** "50 × Brigadeiro" (ou só o nome, quando a quantidade é 1). */
+export const describeQuantity = (item: { description: string; quantity: number }): string => item.quantity === 1 ? item.description : `${formatQuantity(item.quantity)} × ${item.description}`;
 
 /** Link de WhatsApp para falar com o vendedor. Só existe quando o telefone é válido. */
 export function whatsappContactUrl(quote: PublicQuote): string | undefined {

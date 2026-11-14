@@ -5,14 +5,34 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "dev:staging": "DEV_API_PROXY_TARGET=https://dabi-orcamentos-staging.moyses-adm.workers.dev VITE_API_URL=same-origin VITE_REQUIRE_LOGIN=on vite --host 127.0.0.1",
+    "build": "tsc -b && vite build && node scripts/generate-headers.mjs",
     "preview": "vite preview",
     "test": "vitest run",
-    "worker:migrate": "wrangler d1 migrations apply dabi-orcamentos --local --config worker/wrangler.toml",
+    "worker:migrate": "node worker/scripts/d1.ts migrate --env local",
+    "d1": "node worker/scripts/d1.ts",
+    "worker:dry-run:staging": "wrangler deploy --dry-run --env staging --config worker/wrangler.toml --outdir .wrangler/dry-run",
+    "worker:deploy:staging": "node scripts/worker.mjs deploy staging --publish",
     "worker:dev": "wrangler dev --local --config worker/wrangler.toml",
-    "licenses": "node worker/scripts/licenses.ts"
+    "licenses": "node worker/scripts/licenses.ts",
+    "typecheck": "tsc -b",
+    "rehearse": "REHEARSE_BACKUP=${BACKUP:?informe BACKUP=backups/arquivo.sql} vitest run tests/ops/migration-rehearsal.test.ts",
+    "costs": "COST_REPORT=1 vitest run tests/costs/report.test.ts",
+    "audit": "npm audit --audit-level=high",
+    "check:secrets": "sh scripts/check-secrets.sh",
+    "pages:build:staging": "node scripts/pages.mjs build staging",
+    "pages:build:production": "node scripts/pages.mjs build production",
+    "pages:check:staging": "node scripts/pages.mjs check staging",
+    "pages:check:production": "node scripts/pages.mjs check production",
+    "pages:dev": "wrangler pages dev dist --service API=dabi-orcamentos --binding APP_ENV=staging --port 8788",
+    "pages:deploy:staging": "node scripts/pages.mjs deploy staging --publish",
+    "pages:deploy:staging:dry": "node scripts/pages.mjs deploy staging",
+    "pages:deploy:production": "node scripts/pages.mjs deploy production --publish",
+    "pages:deploy:production:dry": "node scripts/pages.mjs deploy production"
   },
   "dependencies": {
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource-variable/manrope": "^5.3.0",
     "@tailwindcss/vite": "^4.1.0",
     "lucide-react": "^0.468.0",
     "react": "^19.0.0",
@@ -20,12 +40,19 @@
     "tailwindcss": "^4.1.0"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.9",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
+    "fake-indexeddb": "^6.2.8",
+    "jsdom": "^29.1.1",
     "typescript": "^5.7.3",
     "vite": "^6.0.5",
     "vitest": "^4.1.12",
     "wrangler": "^4.160.1"
+  },
+  "engines": {
+    "node": ">=22.18"
   }
 }

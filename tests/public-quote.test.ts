@@ -40,6 +40,10 @@ describe('Validação do orçamento público', () => {
     expect(code(check(q => { q.deliveryFeeCents = -5; }))).toBe('INVALID_PRICE');
     expect(code(check(q => { q.discountCents = 1.5; }))).toBe('INVALID_PRICE');
   });
+  it('aceita valor agregado acima do preço unitário quando a linha representa uma encomenda inteira', () => {
+    const r = check(q => { (q.items as { quantity: number; unitPriceCents: number }[])[0].quantity = 1; (q.items as { unitPriceCents: number }[])[0].unitPriceCents = LIMITS.maxPriceCents + 1; });
+    expect(r.ok).toBe(true);
+  });
   it('rejeita textos longos demais ou com caracteres de controle', () => {
     expect(code(check(q => { q.businessName = 'x'.repeat(LIMITS.businessName + 1); }))).toBe('TOO_LONG');
     expect(code(check(q => { q.quoteNumber = 'x'.repeat(LIMITS.quoteNumber + 1); }))).toBe('TOO_LONG');
