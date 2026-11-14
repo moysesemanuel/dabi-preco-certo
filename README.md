@@ -33,6 +33,7 @@ npm test
 - [`docs/HOMOLOGACAO_PRE_BETA.md`](docs/HOMOLOGACAO_PRE_BETA.md): homologação pré-beta (o que foi testado em navegador real, o que falta, checklist manual e critérios de aprovação).
 - [`docs/AUDITORIA_SEGURANCA_PRE_BETA.md`](docs/AUDITORIA_SEGURANCA_PRE_BETA.md): auditoria de segurança pré-beta (achados, testes negativos, riscos residuais, recomendação).
 - [`docs/POLITICA_DE_CUSTOS.md`](docs/POLITICA_DE_CUSTOS.md): **política de infraestrutura de custo zero** (limites gratuitos verificados, metas, medição com `npm run costs`, proteções, upgrade). Vale para toda nova funcionalidade.
+- [`docs/DIAGNOSTICO_SYNC_ETAPA_11.md`](docs/DIAGNOSTICO_SYNC_ETAPA_11.md): causa e correção da "Falha ao sincronizar" no staging (lista vazia de embalagens × campo omitido pelo servidor), proteção contra reenvio em laço e diagnóstico opcional da sincronização.
 - [`docs/ETAPA_11_PEDIDOS_MULTIPLOS.md`](docs/ETAPA_11_PEDIDOS_MULTIPLOS.md): encomendas com várias receitas, confirmação automática por pagamento, orçamento público sem discriminar embalagens, migração 0012 e protocolo de sincronização v2.
 - [`docs/EMBALAGENS_E_PRECISAO_MONETARIA.md`](docs/EMBALAGENS_E_PRECISAO_MONETARIA.md): catálogo e custo de embalagens, precisão monetária, snapshots, compatibilidade de sync e preparação local da migration 0010.
 - [`docs/ETAPA_1_PROGRESSO.md`](docs/ETAPA_1_PROGRESSO.md): histórico e decisões da Etapa 1.
