@@ -19,7 +19,7 @@ const base = (extra: Partial<DataSet> = {}): DataSet => ({ schemaVersion: 3, set
 let locks: ReturnType<typeof createFakeLocks>, BC: ReturnType<typeof createFakeBroadcast>, n = 0;
 type Tab = { id: string; c: HTMLElement; close(): void };
 const tabs: Tab[] = [];
-beforeEach(async () => { await resetStorage(); locks = createFakeLocks(); BC = createFakeBroadcast(); vi.stubGlobal('BroadcastChannel', BC); vi.stubGlobal('confirm', () => true); });
+beforeEach(async () => { await resetStorage(); window.history.replaceState({}, '', '/'); locks = createFakeLocks(); BC = createFakeBroadcast(); vi.stubGlobal('BroadcastChannel', BC); vi.stubGlobal('confirm', () => true); });
 afterEach(() => { for (const t of tabs.splice(0)) t.close(); Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true }); });
 
 async function openTab(opts: { webLocks?: boolean; api?: boolean } = {}): Promise<Tab> {
@@ -91,7 +91,7 @@ describe('Duas abas (Web Locks): uma edita, a outra consulta', () => {
 
 describe('Dinheiro entre abas (cenários E, F, G)', () => {
   const pay = async (t: Tab, amount: string) => {
-    const u = userEvent.setup(); await nav(t, 'Encomendas'); await u.click(within(t.c).getByRole('button', { name: /Registrar recebimento/ }));
+    const u = userEvent.setup(); await nav(t, 'Pedidos'); await u.click(within(t.c).getByRole('button', { name: 'Ver detalhes' })); await u.click(within(t.c).getByRole('button', { name: /^Registrar recebimento$/ }));
     fireEvent.change(within(t.c).getByLabelText('Valor recebido (R$)'), { target: { value: amount } }); fireEvent.change(within(t.c).getByLabelText('Data do recebimento'), { target: { value: '2026-11-12' } });
     await u.click(within(t.c).getAllByRole('button', { name: /Registrar recebimento/ }).at(-1)!); await within(t.c).findByText('Recebimento registrado.');
   };
@@ -100,7 +100,7 @@ describe('Dinheiro entre abas (cenários E, F, G)', () => {
   it('F: A e B registram recebimentos DIFERENTES na mesma encomenda: os dois ficam, sem duplicar e sem passar do total', async () => {
     await saveData(base()); const A = await openTab(); await settle(); const B = await openTab(); await settle();
     await pay(A, '30'); await waitFor(async () => expect(await paymentsOnDisk()).toEqual([30]));
-    await nav(B, 'Encomendas'); await waitFor(() => expect(within(B.c).getByText(/Saldo pendente/).textContent).toMatch(/70,00/)); // B já enxerga o recebimento de A
+    await nav(B, 'Pedidos'); await userEvent.setup().click(within(B.c).getByRole('button', { name: 'Ver detalhes' })); await waitFor(() => expect(within(B.c).getByText('Saldo pendente').parentElement?.textContent).toMatch(/70,00/)); // B já enxerga o recebimento de A
     await userEvent.setup().click(within(B.c).getByRole('button', { name: 'Editar nesta aba' })); await settle();
     await pay(B, '20'); await waitFor(async () => expect(await paymentsOnDisk()).toEqual([30, 20]));
     const o = (await disk()).orders[0]; expect(new Set(o.payments!.map(p => p.id)).size).toBe(2); expect(o.payments!.reduce((s, p) => s + p.amount, 0)).toBe(50);
@@ -110,7 +110,7 @@ describe('Dinheiro entre abas (cenários E, F, G)', () => {
     await saveData(base()); const A = await openTab(); await settle(); const B = await openTab(); await settle();
     await pay(A, '30'); await waitFor(async () => expect(await paymentsOnDisk()).toEqual([30]));
     await userEvent.setup().click(within(B.c).getByRole('button', { name: 'Editar nesta aba' })); await settle();
-    const u = userEvent.setup(); await nav(B, 'Encomendas'); await u.click(within(B.c).getByRole('button', { name: /Editar/ }));
+    const u = userEvent.setup(); await nav(B, 'Pedidos'); await u.click(within(B.c).getByRole('button', { name: 'Ver detalhes' })); await u.click(within(B.c).getByRole('button', { name: /Editar/ }));
     await u.clear(within(B.c).getByLabelText('Nome do cliente')); await u.type(within(B.c).getByLabelText('Nome do cliente'), 'Ana Paula'); await u.click(within(B.c).getByRole('button', { name: /Salvar alterações/ }));
     await waitFor(async () => expect((await disk()).orders[0].customer).toBe('Ana Paula'));
     expect(await paymentsOnDisk()).toEqual([30]); expect((await disk()).orders[0].quoteCode).toBe('ORC-K7M42P'); // recebimento e código preservados

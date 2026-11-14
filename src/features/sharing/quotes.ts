@@ -20,7 +20,12 @@ export function buildPublicQuote(order: Order, recipe: Recipe | undefined, setti
     version: 1, quoteNumber: quoteNumberOf(order), businessName: settings.businessName, issuedAt: opts.issuedAt,
     ...(settings.businessPhone ? { businessPhone: settings.businessPhone } : {}),
     ...(opts.validUntil ? { validUntil: opts.validUntil } : {}),
-    items: [{ description: recipe.name, quantity: order.quantity, unitPriceCents: toCents(order.unitPrice) }],
+    items: [
+      { description: recipe.name, quantity: order.quantity, unitPriceCents: toCents(order.unitPrice) },
+      ...(order.packagingCharge && order.packagingCharge > 0
+        ? [{ description: 'Embalagens adicionais', quantity: 1, unitPriceCents: toCents(order.packagingCharge) }]
+        : []),
+    ],
     ...(opts.deliveryFee ? { deliveryFeeCents: toCents(opts.deliveryFee) } : {}),
     ...(opts.discount ? { discountCents: toCents(opts.discount) } : {}),
     ...(opts.notes?.trim() ? { notes: opts.notes.trim() } : {}),

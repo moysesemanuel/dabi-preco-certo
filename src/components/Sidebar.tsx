@@ -1,12 +1,14 @@
-import { ArchiveRestore, CalendarDays, ChefHat, ChevronRight, ClipboardCheck, LayoutDashboard, Ruler, Settings, ShoppingBasket } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, ChefHat, ChevronRight, ClipboardList, LayoutDashboard, Package, PlusCircle, Ruler, Settings, ShoppingBasket } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '../utils';
 
 const pages: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'dashboard', label: 'Visão geral', icon: LayoutDashboard },
   { id: 'ingredients', label: 'Ingredientes', icon: ShoppingBasket },
+  { id: 'packagings', label: 'Embalagens', icon: Package },
   { id: 'recipes', label: 'Receitas e preços', icon: ChefHat },
-  { id: 'orders', label: 'Encomendas', icon: ClipboardCheck },
+  { id: 'new-order', label: 'Nova encomenda', icon: PlusCircle },
+  { id: 'orders', label: 'Pedidos', icon: ClipboardList },
   { id: 'agenda', label: 'Agenda', icon: CalendarDays },
   { id: 'converter', label: 'Conversor', icon: Ruler },
   { id: 'backup', label: 'Backup', icon: ArchiveRestore },

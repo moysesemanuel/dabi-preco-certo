@@ -8,4 +8,5 @@ export const isMoney = (v: unknown): v is number => typeof v === 'number' && Num
 export const isCentMoney = (v: unknown): v is number => isMoney(v) && Math.abs(v * 100 - Math.round(v * 100)) < 1e-6;
 export const isPositiveQuantity = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_QUANTITY;
 /** Arredonda para centavos ao gravar valores digitados (ex.: 6,999 → 7,00). */
-export const toCents2 = (v: number): number => Math.round((v + Number.EPSILON) * 100) / 100;
+export const toCents2 = (v: number): number => Math.round((v + Math.sign(v) * Number.EPSILON * Math.max(1, Math.abs(v))) * 100) / 100;
+export { formatMoneyInput, parseMoneyInput } from './moneyInput';

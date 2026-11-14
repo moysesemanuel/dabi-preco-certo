@@ -1,6 +1,6 @@
 import { ArrowRight, CalendarDays, ChartNoAxesCombined, CheckCircle2, ClipboardCheck, Plus, Wallet } from 'lucide-react';
 import { money } from '../domain/pricing';
-import { orderUnitCost } from '../domain/orderCost';
+import { orderTotalCost, orderUnitCost } from '../domain/orderCost';
 import { balanceDue } from '../domain/payments';
 import { brDate, type Page, type PageProps } from '../utils';
 
@@ -15,16 +15,16 @@ export function DashboardPage({ data, focus }: PageProps) {
     const c = orderUnitCost(o, data);
     if (c.basis === 'unavailable') { costUnavailable = true; continue; }
     if (c.basis === 'estimated') withoutRecord++;
-    estimatedCost += c.costPerUnit * o.quantity;
+    estimatedCost += orderTotalCost(o, data) ?? c.costPerUnit * o.quantity;
   }
   const steps: { label: string; ok: boolean; pg: Page }[] = [
     { label: 'Cadastre seus ingredientes', ok: data.ingredients.length > 0, pg: 'ingredients' },
     { label: 'Monte sua primeira receita', ok: data.recipes.length > 0, pg: 'recipes' },
-    { label: 'Registre uma encomenda', ok: data.orders.length > 0, pg: 'orders' },
+    { label: 'Registre uma encomenda', ok: data.orders.length > 0, pg: 'new-order' },
     { label: 'Faça um backup dos dados', ok: false, pg: 'backup' },
   ];
   return <>
-    <div className="head"><div><div className="eyebrow">Painel principal</div><h1>Bom trabalho começa organizado.</h1><p className="muted">Acompanhe suas encomendas, custos e valores a receber.</p></div><button className="primary" onClick={() => focus('orders')}><Plus size={17} /> Nova encomenda</button></div>
+    <div className="head"><div><div className="eyebrow">Painel principal</div><h1>Bom trabalho começa organizado.</h1><p className="muted">Acompanhe suas encomendas, custos e valores a receber.</p></div><button className="primary" onClick={() => focus('new-order')}><Plus size={17} /> Nova encomenda</button></div>
     <div className="welcome"><div><h2>Seu negócio, no caminho certo.</h2><p>Cadastre seus ingredientes, monte receitas e calcule preços antes de aceitar pedidos. Comece por uma tarefa de cada vez.</p></div><button className="primary" onClick={() => focus(data.ingredients.length ? 'recipes' : 'ingredients')}>{data.ingredients.length ? 'Criar receita' : 'Cadastrar ingrediente'} <ArrowRight size={17} /></button></div>
     <div className="cards">
       <div className="card metric-card"><span className="icon-box"><ClipboardCheck size={20} /></span><span className="metric-label">Pedidos em aberto</span><span className="metric">{openOrders.length.toString().padStart(2, '0')}</span></div>

@@ -8,11 +8,11 @@
  *  - Dados já gravados no navegador são migrados de forma tolerante (`migrateStored`), para nunca tornar dados antigos ilegíveis.
  *  - Backups importados e payloads de sincronização passam por `validateDataSet` (estrito).
  */
-import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CatalogRef, type CostSnapshot, type DataSet, type Ingredient, type Order, type Payment, type Recipe, type RecipeItem, type Settings } from '../src/domain/types';
+import { CURRENT_SCHEMA_VERSION, PAYMENT_METHODS, type CatalogRef, type CostSnapshot, type DataSet, type Ingredient, type Order, type Packaging, type Payment, type Recipe, type RecipeItem, type RecipePackagingSnapshot, type Settings } from '../src/domain/types';
 import { isCentMoney, isPositiveQuantity, toCents2 } from '../src/domain/money';
 import { isQuoteCode } from './quoteCode';
 
-export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, itemsPerRecipe: 200, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
+export const DATASET_LIMITS = { ingredients: 5_000, recipes: 5_000, packagings: 5_000, itemsPerRecipe: 200, packagingItemsPerRecipe: 100, packagingItemsPerOrder: 100, orders: 20_000, paymentsPerOrder: 100, text: 120, note: 200, idLength: 64 } as const;
 export { CURRENT_SCHEMA_VERSION };
 
 const UNITS = ['g', 'kg', 'ml', 'l', 'un'];
@@ -54,6 +54,7 @@ export function migrateStored(raw: unknown): DataSet {
     ingredients: arr<Obj>(o.ingredients).map(i => (isObj(i) ? legacyIngredient(i) : i)) as unknown as Ingredient[],
     recipes: arr<Recipe>(o.recipes),
     orders: arr<Order>(o.orders),
+    packagings: arr<Packaging>(o.packagings),
   };
 }
 
@@ -84,7 +85,7 @@ function ingredientOf(i: unknown, n: number, seen: Set<string>): Ingredient {
     ...(v.catalogRef !== undefined ? { catalogRef: parseCatalogRef(v.catalogRef) } : {}) };
 }
 
-function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<string>): Recipe {
+function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<string>, packagingIds: Set<string>): Recipe {
   const at = `Receita inválida no backup (#${n + 1})`;
   if (!isObj(r)) return fail(`${at}: formato incorreto.`);
   if (typeof r.id !== 'string' || !ID.test(r.id)) return fail(`${at}: identificador inválido.`);
@@ -103,10 +104,19 @@ function recipeOf(r: unknown, n: number, seen: Set<string>, ingredientIds: Set<s
     return { ingredientId: it.ingredientId, quantity: it.quantity, ...(it.unit !== undefined ? { unit: it.unit as RecipeItem['unit'] } : {}) };
   });
   if (r.prepMinutes !== undefined && (typeof r.prepMinutes !== 'number' || !Number.isFinite(r.prepMinutes) || r.prepMinutes <= 0 || r.prepMinutes > 10_080)) return fail(`${at}: tempo de produção inválido.`);
-  return { id: r.id, name: r.name.trim(), yield: r.yield, items, packagingPerUnit: r.packagingPerUnit as number, laborTotal: r.laborTotal as number, extraTotal: r.extraTotal as number, desiredMargin: r.desiredMargin, ...(r.prepMinutes !== undefined ? { prepMinutes: r.prepMinutes } : {}) };
+  let packagingItems: Recipe['packagingItems'];
+  if (r.packagingItems !== undefined) {
+    if (!Array.isArray(r.packagingItems) || r.packagingItems.length > DATASET_LIMITS.packagingItemsPerRecipe) return fail(`${at}: embalagens associadas inválidas.`);
+    const used = new Set<string>();
+    packagingItems = r.packagingItems.map((raw: unknown) => {
+      if (!isObj(raw) || typeof raw.packagingId !== 'string' || !packagingIds.has(raw.packagingId) || used.has(raw.packagingId) || typeof raw.quantityPerUnit !== 'number' || !Number.isFinite(raw.quantityPerUnit) || raw.quantityPerUnit <= 0 || raw.quantityPerUnit > 1e9) return fail(`${at}: embalagem associada inválida ou inexistente.`);
+      used.add(raw.packagingId); return { packagingId: raw.packagingId, quantityPerUnit: raw.quantityPerUnit };
+    });
+  }
+  return { id: r.id, name: r.name.trim(), yield: r.yield, items, ...(packagingItems ? { packagingItems } : {}), packagingPerUnit: r.packagingPerUnit as number, laborTotal: r.laborTotal as number, extraTotal: r.extraTotal as number, desiredMargin: r.desiredMargin, ...(r.prepMinutes !== undefined ? { prepMinutes: r.prepMinutes } : {}) };
 }
 
-function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string>): Order {
+function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string>, packagingIds: Set<string>): Order {
   const at = `Encomenda inválida no backup (#${n + 1})`;
   if (!isObj(o)) return fail(`${at}: formato incorreto.`);
   if (typeof o.id !== 'string' || !ID.test(o.id)) return fail(`${at}: identificador inválido.`);
@@ -116,7 +126,9 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
   if (typeof o.recipeId !== 'string' || !recipeIds.has(o.recipeId)) return fail(`${at}: aponta para uma receita inexistente.`);
   if (!isPositiveQuantity(o.quantity)) return fail(`${at}: quantidade inválida.`);
   if (!isCentMoney(o.unitPrice) || !isCentMoney(o.deposit)) return fail(`${at}: preço ou sinal inválido; use no máximo duas casas decimais.`);
-  const orderTotal = toCents2(o.quantity * o.unitPrice);
+  const packagingCharge = o.packagingCharge === undefined ? 0 : o.packagingCharge;
+  if (!isCentMoney(packagingCharge)) return fail(`${at}: cobrança de embalagens inválida; use no máximo duas casas decimais.`);
+  const orderTotal = toCents2(toCents2(o.quantity * o.unitPrice) + packagingCharge);
   if (o.deposit > orderTotal) return fail(`${at}: sinal maior que o total.`);
   if (!isIsoDate(o.deliveryDate)) return fail(`${at}: data de entrega inválida.`);
   if (!isIsoDateTime(o.createdAt)) return fail(`${at}: data de criação inválida.`);
@@ -124,8 +136,8 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
   let costSnapshot: CostSnapshot | undefined;
   if (o.costSnapshot !== undefined) {
     const c = o.costSnapshot;
-    if (!isObj(c) || !isCentMoney(c.costPerUnit) || !isIsoDateTime(c.capturedAt)) return fail(`${at}: custo registrado inválido.`);
-    costSnapshot = { costPerUnit: c.costPerUnit, capturedAt: c.capturedAt };
+    if (!isObj(c) || !isMoney(c.costPerUnit) || !isIsoDateTime(c.capturedAt) || (c.packagingItems !== undefined && !Array.isArray(c.packagingItems))) return fail(`${at}: custo registrado inválido.`);
+    costSnapshot = { costPerUnit: c.costPerUnit, capturedAt: c.capturedAt, ...(Array.isArray(c.packagingItems) ? { packagingItems: parseRecipePackagingSnapshots(c.packagingItems, packagingIds, at) } : {}) };
   }
   if (o.quoteCode !== undefined && !isQuoteCode(o.quoteCode)) return fail(`${at}: código do orçamento inválido.`);
   let payments: Payment[] | undefined;
@@ -145,23 +157,44 @@ function orderOf(o: unknown, n: number, seen: Set<string>, recipeIds: Set<string
     if (received > orderTotal) return fail(`${at}: o total recebido é maior que o total da encomenda.`);
     if (parsed.length) payments = parsed;
   }
-  return { id: o.id, customer: o.customer.trim(), recipeId: o.recipeId, quantity: o.quantity, unitPrice: o.unitPrice, deposit: o.deposit, deliveryDate: o.deliveryDate, status: o.status as Order['status'], createdAt: o.createdAt, ...(costSnapshot ? { costSnapshot } : {}), ...(payments ? { payments } : {}), ...(o.quoteCode !== undefined ? { quoteCode: o.quoteCode as string } : {}) };
+  if (o.packagingItems !== undefined && !Array.isArray(o.packagingItems)) return fail(`${at}: lista de embalagens adicionais inválida.`);
+  return { id: o.id, customer: o.customer.trim(), recipeId: o.recipeId, quantity: o.quantity, unitPrice: o.unitPrice, deposit: o.deposit, deliveryDate: o.deliveryDate, status: o.status as Order['status'], createdAt: o.createdAt, ...(o.packagingCharge !== undefined ? { packagingCharge } : {}), ...(Array.isArray(o.packagingItems) ? { packagingItems: parseOrderPackaging(o.packagingItems, packagingIds, at) } : {}), ...(costSnapshot ? { costSnapshot } : {}), ...(payments ? { payments } : {}), ...(o.quoteCode !== undefined ? { quoteCode: o.quoteCode as string } : {}) };
+}
+
+function isMoney(v: unknown): v is number { return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1_000_000_000; }
+function parseOrderPackaging(raw: unknown[], packagingIds: Set<string>, at: string) {
+  if (raw.length > DATASET_LIMITS.packagingItemsPerOrder) return fail(`${at}: lista de embalagens da encomenda inválida.`);
+  return raw.map((entry: unknown) => {
+    if (!isObj(entry) || typeof entry.packagingId !== 'string' || !packagingIds.has(entry.packagingId) || !text(entry.name) || typeof entry.quantity !== 'number' || !Number.isFinite(entry.quantity) || entry.quantity <= 0 || !isMoney(entry.unitCost)) return fail(`${at}: snapshot de embalagem inválido.`);
+    return { packagingId: entry.packagingId, name: entry.name.trim(), quantity: entry.quantity, unitCost: entry.unitCost };
+  });
+}
+function parseRecipePackagingSnapshots(raw: unknown[], packagingIds: Set<string>, at: string): RecipePackagingSnapshot[] {
+  if (raw.length > DATASET_LIMITS.packagingItemsPerRecipe) return fail(`${at}: snapshot de embalagens da receita inválido.`);
+  return raw.map((entry: unknown) => {
+    if (!isObj(entry) || typeof entry.packagingId !== 'string' || !packagingIds.has(entry.packagingId) || !text(entry.name) || typeof entry.quantityPerUnit !== 'number' || !Number.isFinite(entry.quantityPerUnit) || entry.quantityPerUnit <= 0 || !isMoney(entry.unitCost)) return fail(`${at}: snapshot de embalagem da receita inválido.`);
+    return { packagingId: entry.packagingId, name: entry.name.trim(), quantityPerUnit: entry.quantityPerUnit, unitCost: entry.unitCost };
+  });
 }
 
 /** Validação estrita (backup e sincronização). Aceita versões 1 e 2 e devolve sempre a versão atual. */
 export function validateDataSet(value: unknown): DataSet {
   if (!isObj(value)) return fail('Arquivo de backup inválido.');
-  if ((value.schemaVersion !== 1 && value.schemaVersion !== 2 && value.schemaVersion !== CURRENT_SCHEMA_VERSION) || !Array.isArray(value.ingredients) || !Array.isArray(value.recipes) || !Array.isArray(value.orders)) return fail('Formato de backup incompatível.');
-  if (value.ingredients.length > DATASET_LIMITS.ingredients || value.recipes.length > DATASET_LIMITS.recipes || value.orders.length > DATASET_LIMITS.orders) return fail('Backup grande demais para este aplicativo.');
+  if (![1, 2, 3, CURRENT_SCHEMA_VERSION].includes(value.schemaVersion as number) || !Array.isArray(value.ingredients) || !Array.isArray(value.recipes) || !Array.isArray(value.orders) || (value.packagings !== undefined && !Array.isArray(value.packagings))) return fail('Formato de backup incompatível.');
+  if (value.ingredients.length > DATASET_LIMITS.ingredients || value.recipes.length > DATASET_LIMITS.recipes || value.orders.length > DATASET_LIMITS.orders || (value.packagings?.length ?? 0) > DATASET_LIMITS.packagings) return fail('Backup grande demais para este aplicativo.');
 
-  const ingredientIds = new Set<string>(), recipeIds = new Set<string>(), orderIds = new Set<string>();
+  const ingredientIds = new Set<string>(), recipeIds = new Set<string>(), orderIds = new Set<string>(), packagingIds = new Set<string>();
   const ingredients = value.ingredients.map((i, n) => ingredientOf(i, n, ingredientIds));
-  const recipes = value.recipes.map((r, n) => recipeOf(r, n, recipeIds, ingredientIds));
-  const orders = value.orders.map((o, n) => orderOf(o, n, orderIds, recipeIds));
+  const packagings: Packaging[] = (value.packagings ?? []).map((p: unknown, n: number) => {
+    if (!isObj(p) || typeof p.id !== 'string' || !ID.test(p.id) || packagingIds.has(p.id) || !text(p.name) || !isCentMoney(p.purchasePrice) || !isPositiveQuantity(p.purchaseQuantity) || (p.capacity !== undefined && !isPositiveQuantity(p.capacity)) || (p.active !== undefined && typeof p.active !== 'boolean')) return fail(`Embalagem inválida no backup (#${n + 1}).`);
+    packagingIds.add(p.id); return { id: p.id, name: p.name.trim(), purchasePrice: p.purchasePrice, purchaseQuantity: p.purchaseQuantity, ...(p.capacity !== undefined ? { capacity: p.capacity } : {}), active: p.active !== false };
+  });
+  const recipes = value.recipes.map((r, n) => recipeOf(r, n, recipeIds, ingredientIds, packagingIds));
+  const orders = value.orders.map((o, n) => orderOf(o, n, orderIds, recipeIds, packagingIds));
   const codes = new Set<string>();
   for (const o of orders) { if (!o.quoteCode) continue; if (codes.has(o.quoteCode)) return fail(`Código de orçamento repetido no backup: ${o.quoteCode}.`); codes.add(o.quoteCode); }
 
-  const result: DataSet = { schemaVersion: CURRENT_SCHEMA_VERSION, ingredients, recipes, orders };
+  const result: DataSet = { schemaVersion: CURRENT_SCHEMA_VERSION, ingredients, recipes, orders, packagings };
   if (value.settings !== undefined) {
     try { result.settings = parseSettings(value.settings); } catch { return fail('Configurações inválidas no backup.'); }
   }
@@ -170,8 +203,12 @@ export function validateDataSet(value: unknown): DataSet {
 
 // ---- Validadores por entidade (usados pela sincronização no servidor; mesmas regras do backup) ----
 export const parseIngredient = (raw: unknown): Ingredient => ingredientOf(raw, 0, new Set());
-export const parseRecipe = (raw: unknown, ingredientIds: Set<string>): Recipe => recipeOf(raw, 0, new Set(), ingredientIds);
-export const parseOrder = (raw: unknown, recipeIds: Set<string>): Order => orderOf(raw, 0, new Set(), recipeIds);
+export const parsePackaging = (raw: unknown): Packaging => {
+  if (!isObj(raw) || typeof raw.id !== 'string' || !ID.test(raw.id) || !text(raw.name) || !isCentMoney(raw.purchasePrice) || !isPositiveQuantity(raw.purchaseQuantity) || (raw.capacity !== undefined && !isPositiveQuantity(raw.capacity)) || (raw.active !== undefined && typeof raw.active !== 'boolean')) return fail('Embalagem inválida.');
+  return { id: raw.id, name: raw.name.trim(), purchasePrice: raw.purchasePrice, purchaseQuantity: raw.purchaseQuantity, ...(raw.capacity !== undefined ? { capacity: raw.capacity as number } : {}), active: raw.active !== false };
+};
+export const parseRecipe = (raw: unknown, ingredientIds: Set<string>, packagingIds: Set<string> = new Set()): Recipe => recipeOf(raw, 0, new Set(), ingredientIds, packagingIds);
+export const parseOrder = (raw: unknown, recipeIds: Set<string>, packagingIds: Set<string> = new Set()): Order => orderOf(raw, 0, new Set(), recipeIds, packagingIds);
 export function parseSettings(raw: unknown): Settings {
   if (!isObj(raw) || typeof raw.cupSizeMl !== 'number' || !Number.isFinite(raw.cupSizeMl) || raw.cupSizeMl <= 0 || raw.cupSizeMl > 1000) return fail('Configurações inválidas.');
   const out: Settings = { cupSizeMl: raw.cupSizeMl };

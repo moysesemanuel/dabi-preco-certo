@@ -18,7 +18,7 @@ export function updateRecipe(data: DataSet, id: string, patch: RecipePatch): Dat
   return { ...data, recipes: data.recipes.map(r => (r.id === id ? { ...patch, id } : r)) };
 }
 
-export type OrderPatch = Pick<Order, 'customer' | 'recipeId' | 'quantity' | 'unitPrice' | 'deliveryDate' | 'deposit'>;
+export type OrderPatch = Pick<Order, 'customer' | 'recipeId' | 'quantity' | 'unitPrice' | 'deliveryDate' | 'deposit'> & Partial<Pick<Order, 'packagingItems' | 'packagingCharge'>>;
 
 /**
  * Atualiza os dados de uma encomenda. Status, data de criação e id são preservados.
@@ -29,10 +29,11 @@ export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: D
   if (!data.orders.some(o => o.id === id)) throw new Error('Encomenda não encontrada.');
   if (!data.recipes.some(r => r.id === patch.recipeId)) throw new Error('Receita não encontrada.');
   if (!patch.customer.trim() || !patch.deliveryDate) throw new Error('Informe cliente e data de entrega.');
-  if (!isPositiveQuantity(patch.quantity) || !isMoney(patch.unitPrice) || !isMoney(patch.deposit)) throw new Error('Quantidade, preço ou sinal inválido.');
+  if (!isPositiveQuantity(patch.quantity) || !isMoney(patch.unitPrice) || !isMoney(patch.deposit) || (patch.packagingCharge !== undefined && !isMoney(patch.packagingCharge))) throw new Error('Quantidade, preço, sinal ou cobrança de embalagens inválida.');
   const existing = data.orders.find(o => o.id === id)!;
   const unitPrice = toCents2(patch.unitPrice), deposit = toCents2(patch.deposit);
-  const normalizedPatch = { ...patch, unitPrice, deposit };
+  const packagingCharge = toCents2(patch.packagingCharge ?? existing.packagingCharge ?? 0);
+  const normalizedPatch = { ...patch, unitPrice, deposit, packagingCharge };
   const total = orderTotal(normalizedPatch);
   if (deposit > total) throw new Error('O sinal não pode ser maior que o total.');
   // Sem crédito nem reembolso: o novo total não pode ficar abaixo do que já foi recebido.
@@ -45,7 +46,7 @@ export function updateOrder(data: DataSet, id: string, patch: OrderPatch, now: D
     orders: data.orders.map(o => {
       if (o.id !== id) return o;
       const { costSnapshot, ...rest } = o;
-      const next = { ...rest, ...normalizedPatch, customer: patch.customer.trim() };
+      const next = { ...rest, ...normalizedPatch, ...(patch.packagingItems ? { packagingItems: patch.packagingItems } : {}), customer: patch.customer.trim() };
       if (!recipeChanged) return costSnapshot ? { ...next, costSnapshot } : next;
       const snap = captureCostSnapshot(data.recipes.find(r => r.id === patch.recipeId)!, data, now);
       return snap ? { ...next, costSnapshot: snap } : next;

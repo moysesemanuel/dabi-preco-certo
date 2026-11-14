@@ -2,8 +2,8 @@ import 'fake-indexeddb/auto';
 import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { DataSet, Ingredient, Order, Recipe } from '../src/domain/types';
-import { buildPushes, emptyDataSet, healConflicts, isPendingConflict, isUnresolved, type ConflictRecord } from '../src/sync/engine';
-import { loadSyncMeta, saveSyncMeta } from '../src/storage/db';
+import { applyPull, buildPushes, emptyDataSet, emptyMeta, healConflicts, isPendingConflict, isUnresolved, type ConflictRecord } from '../src/sync/engine';
+import { loadData, loadSyncMeta, saveData, saveSyncMeta } from '../src/storage/db';
 import { diffRows } from '../src/sync/describe';
 import { Device } from './helpers/device';
 import { makeServer, type Server } from './helpers/server';
@@ -114,6 +114,47 @@ describe('Cenário reproduzido: R$ 11 → A offline R$ 12 / B online R$ 13 → A
 });
 
 describe('Integridade', () => {
+  const packaged = () => data({ ingredients: [ing('farinha')], packagings: [{ id: 'paper', name: 'Forminha', purchasePrice: 12, purchaseQuantity: 100, active: true }], recipes: [{ ...rec('brig', 'farinha'), name: 'Brigadeiro Gourmet', packagingItems: [{ packagingId: 'paper', quantityPerUnit: 1 }] }] });
+  const setPackagingQuantity = (quantityPerUnit: number) => (d: DataSet): DataSet => ({ ...d, recipes: d.recipes.map(r => ({ ...r, packagingItems: [{ packagingId: 'paper', quantityPerUnit }] })) });
+  it('detecta divergência real em embalagens e manter a alteração sincroniza sem recriar o conflito após reload', async () => {
+    const { A, B } = await twoDevices(packaged());
+    A.offline = true; A.edit(setPackagingQuantity(2)); expect((await A.sync()).status).toBe('offline');
+    B.edit(setPackagingQuantity(3)); await B.sync(); A.offline = false; await A.sync();
+    const c = pending(A).find(x => x.kind === 'recipes')!;
+    expect(c).toBeTruthy();
+    const rows = diffRows(c, A.data.packagings);
+    expect(rows).toContainEqual({ key: 'packagingItems', label: 'Embalagens da receita', local: 'Forminha · 2 por unidade', server: 'Forminha · 3 por unidade', base: 'Forminha · 1 por unidade' });
+    expect(rows.find(r => r.key === 'packagingItems')?.local).not.toContain('[object Object]');
+    expect(rows.find(r => r.key === 'packagingItems')?.server).not.toContain('[object Object]');
+    A.resolve(c.id, 'keep-local');
+    await saveData(A.data); await saveSyncMeta(A.meta); A.data = await loadData(); A.meta = await loadSyncMeta(); // recarga dos dados e metadados antes da sincronização
+    expect((await A.sync()).status).toBe('synced');
+    expect((await A.sync()).newConflicts).toEqual([]);
+    expect(A.data.recipes[0].packagingItems).toEqual([{ packagingId: 'paper', quantityPerUnit: 2 }]);
+    await B.sync(); expect(B.data.recipes[0].packagingItems).toEqual([{ packagingId: 'paper', quantityPerUnit: 2 }]);
+  });
+  it('manter a versão da nuvem preserva embalagem remota após resolução offline e reconexão', async () => {
+    const { A, B } = await twoDevices(packaged());
+    A.offline = true; A.edit(setPackagingQuantity(2)); await A.sync();
+    B.edit(setPackagingQuantity(3)); await B.sync(); A.offline = false; await A.sync();
+    const c = pending(A).find(x => x.kind === 'recipes')!;
+    A.offline = true; A.resolve(c.id, 'keep-server'); expect((await A.sync()).status).toBe('offline');
+    await saveData(A.data); await saveSyncMeta(A.meta); A.data = await loadData(); A.meta = await loadSyncMeta(); A.offline = false;
+    expect((await A.sync()).status).toBe('synced');
+    expect(A.data.recipes[0].packagingItems).toEqual([{ packagingId: 'paper', quantityPerUnit: 3 }]);
+    expect(A.meta.conflicts.find(x => x.id === c.id)?.resolution?.action).toBe('keep-server');
+  });
+  it('equivalência legado/vazio não cria conflito, mas lista com quantidade diferente continua divergente', async () => {
+    const legacy = packaged(); delete (legacy.recipes[0] as Partial<Recipe>).packagingItems;
+    const meta = { ...emptyMeta(), revision: 3, baseline: legacy, revs: { ...emptyMeta().revs, recipes: { brig: 2 }, ingredients: { farinha: 1 }, packagings: { paper: 1 } } };
+    const local = { ...legacy, recipes: [{ ...legacy.recipes[0], packagingItems: [] }] };
+    const pull = { revision: 4, ingredients: [], orders: [], packagings: [], recipes: [{ id: 'brig', rev: 2, deleted: false, data: legacy.recipes[0] }] };
+    const noConflict = applyPull(local, meta, pull);
+    expect(noConflict.conflicts).toEqual([]);
+    const mine = { ...local.recipes[0], packagingItems: [{ packagingId: 'paper', quantityPerUnit: 2 }] };
+    const theirs = { ...legacy.recipes[0], packagingItems: [{ packagingId: 'paper', quantityPerUnit: 3 }] };
+    expect(applyPull({ ...local, recipes: [mine] }, meta, { ...pull, recipes: [{ ...pull.recipes[0], data: theirs, rev: 4 }] }).conflicts).toHaveLength(1);
+  });
   it('alterações em entidades diferentes sincronizam normalmente, sem conflito', async () => {
     const { A, B } = await twoDevices(data({ ingredients: [ing('farinha'), ing('acucar', { purchasePrice: 5 })] }));
     A.edit(setPrice('farinha', 12)); B.edit(setPrice('acucar', 7));

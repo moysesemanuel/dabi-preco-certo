@@ -15,8 +15,8 @@ describe('Orçamentos por ação', () => {
     for (const r of rows) expect(r.maxQueriesPerRequest, r.name).toBeLessThanOrEqual(FREE_LIMITS.d1QueriesPerInvocation / 2);
   });
   it('nenhuma consulta quente varre uma tabela inteira (todas usam índice/chave)', () => { for (const r of rows) expect(r.scans, r.name).toEqual([]); });
-  it('sincronização sem mudanças: 1 requisição, ≤ 8 consultas, ≤ 1 escrita (só o contador de limite)', () => {
-    const r = row('Sincronização sem mudanças'); expect(r.requests).toBe(1); expect(r.queries).toBeLessThanOrEqual(8); expect(r.rowsWritten).toBeLessThanOrEqual(1);
+  it('sincronização sem mudanças: 1 requisição, ≤ 9 consultas com o pull do catálogo, ≤ 1 escrita', () => {
+    const r = row('Sincronização sem mudanças'); expect(r.requests).toBe(1); expect(r.queries).toBeLessThanOrEqual(9); expect(r.rowsWritten).toBeLessThanOrEqual(1);
   });
   it('abrir o app já logado custa só 3 consultas de leitura', () => { const r = row('Abrir o app'); expect(r.queries).toBe(3); expect(r.rowsWritten).toBe(0); });
   it('editar e sincronizar: 3 requisições (pull + push + pull de confirmação), poucas escritas', () => {

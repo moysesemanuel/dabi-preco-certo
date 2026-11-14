@@ -4,6 +4,8 @@
 
 **Diretriz:** manter o DaBi Preço Certo dentro dos limites **gratuitos** dos serviços, enquanto o volume de clientes permitir, **sem** limitar funcionalidades importantes nem comprometer a integridade dos dados. Vale para toda nova implementação (veja a lista de verificação no fim).
 
+**Etapa 9 — embalagens:** o catálogo adiciona uma entidade sincronizada por conta; relações de embalagem da receita são gravadas junto à receita e snapshots adicionais junto à encomenda. Uma edição de catálogo/receita/pedido pode tocar mais linhas D1 que uma edição simples, em especial a substituição das relações da receita e pagamentos, mas as gravações continuam em lote (`db.batch`). Não há polling novo. Acompanhar no dashboard de staging Worker invocations/CPU e D1 rows written/read antes de ampliar o beta; os custos unitários subcentavo não causam consultas adicionais.
+
 > Estimativas deste documento são **projeções com hipóteses explícitas**, nunca capacidade garantida. Os números oficiais vêm dos painéis dos provedores.
 
 ## 1. Provedores e limites gratuitos

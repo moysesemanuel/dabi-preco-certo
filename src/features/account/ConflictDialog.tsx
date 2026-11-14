@@ -9,13 +9,13 @@ import { FinancialConflict } from './FinancialConflict';
 const when = (iso: string) => new Date(iso).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 
 /** Comparação lado a lado de um conflito de dados, com confirmação explícita antes de aplicar a escolha. */
-function Compare({ c, onDone, inform }: { c: ConflictRecord; onDone: () => void; inform: (m: string) => void }) {
+function Compare({ c, onDone, inform, packagings }: { c: ConflictRecord; onDone: () => void; inform: (m: string) => void; packagings: import('../../domain/types').Packaging[] }) {
   const acc = useAccount();
   const [confirming, setConfirming] = useState<ConflictAction | null>(null);
   const [error, setError] = useState('');
   const [seenRev] = useState(c.serverRev);
   const changed = c.serverRev !== seenRev;
-  const rows = diffRows(c);
+  const rows = diffRows(c, packagings);
   const localDeleted = c.local === null, cloudDeleted = c.server === null;
   const apply = () => {
     if (!confirming) return;
@@ -49,7 +49,7 @@ function Compare({ c, onDone, inform }: { c: ConflictRecord; onDone: () => void;
 }
 
 /** Tela de resolução: percorre os conflitos pendentes (dados e recebimentos). "Decidir depois" não perde nada. */
-export function ConflictDialog({ inform }: { inform: (m: string) => void }) {
+export function ConflictDialog({ inform, packagings = [] }: { inform: (m: string) => void; packagings?: import('../../domain/types').Packaging[] }) {
   const acc = useAccount();
   const id = useId();
   const items = [...acc.pendingConflicts, ...acc.conflicts.filter(isOpenFinancial)];
@@ -63,7 +63,7 @@ export function ConflictDialog({ inform }: { inform: (m: string) => void }) {
       <button className="secondary" disabled={idx === 0} onClick={() => setI(idx - 1)}>Anterior</button>
       <span className="muted" role="status">Conflito {idx + 1} de {items.length}</span>
       <button className="secondary" disabled={idx === items.length - 1} onClick={() => setI(idx + 1)}>Próximo</button></div>}
-    {isOpenFinancial(cur) ? <FinancialConflict key={cur.id} c={cur} inform={inform} /> : <Compare key={`${cur.id}:${cur.serverRev}`} c={cur} inform={inform} onDone={() => setI(0)} />}
+    {isOpenFinancial(cur) ? <FinancialConflict key={cur.id} c={cur} inform={inform} /> : <Compare key={`${cur.id}:${cur.serverRev}`} c={cur} inform={inform} packagings={packagings} onDone={() => setI(0)} />}
     <div style={{ marginTop: 16 }}><button className="secondary" onClick={() => acc.setConflictsOpen(false)}>Decidir depois</button> <span className="muted">Nada é perdido: o aviso continua visível até você decidir.</span></div>
   </Modal>;
 }

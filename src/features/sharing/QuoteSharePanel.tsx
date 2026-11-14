@@ -6,7 +6,9 @@ import { computeTotals, formatCents, formatDate, formatQuantity } from '../../..
 import { addDays } from '../../domain/schedule';
 import type { Order } from '../../domain/types';
 import { Field } from '../../components/Field';
-import { copyText, localToday, parse, type PageProps } from '../../utils';
+import { MoneyInput } from '../../components/MoneyInput';
+import { parseMoneyInput } from '../../domain/money';
+import { copyText, localToday, type PageProps } from '../../utils';
 import { buildPublicQuote, QUOTE_MESSAGES, whatsappShareUrl } from './quotes';
 
 type Props = Pick<PageProps, 'data' | 'update' | 'inform' | 'focus'> & { order: Order; /** código de atendimento permanente do pedido */ code: string; onClose: () => void };
@@ -24,7 +26,7 @@ export function QuoteSharePanel({ order, code, data, update, inform, focus, onCl
   const [published, setPublished] = useState<{ url: string } | null>(null);
 
   const built = useMemo(() => buildPublicQuote({ ...order, quoteCode: code }, data.recipes.find(r => r.id === order.recipeId), data.settings, {
-    issuedAt: localToday(), validUntil: validUntil || undefined, deliveryFee: fee.trim() ? parse(fee) : undefined, discount: discount.trim() ? parse(discount) : undefined, notes,
+    issuedAt: localToday(), validUntil: validUntil || undefined, deliveryFee: fee.trim() ? parseMoneyInput(fee) : undefined, discount: discount.trim() ? parseMoneyInput(discount) : undefined, notes,
   }), [order, data, validUntil, fee, discount, notes]);
 
   if (!acc.entitled) return <div className="notice warn" style={{ marginTop: 8 }}>Para gerar um link de orçamento, entre na sua conta com licença ativa em <button type="button" className="secondary" style={{ minHeight: 32, padding: '4px 10px' }} onClick={() => focus('settings')}>Configurações</button>. O botão “Copiar orçamento” continua disponível sem conta.</div>;
@@ -55,8 +57,8 @@ export function QuoteSharePanel({ order, code, data, update, inform, focus, onCl
     <strong>Orçamento por link</strong>
     <div className="form-grid">
       <Field label="Válido até"><input type="date" value={validUntil} min={localToday()} onChange={e => setValidUntil(e.target.value)} /></Field>
-      <Field label="Taxa de entrega (R$)"><input type="number" min="0" step="0.01" value={fee} onChange={e => setFee(e.target.value)} placeholder="0,00" /></Field>
-      <Field label="Desconto (R$)"><input type="number" min="0" step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} placeholder="0,00" /></Field>
+      <Field label="Taxa de entrega (R$)"><MoneyInput value={fee} onValueChange={setFee} /></Field>
+      <Field label="Desconto (R$)"><MoneyInput value={discount} onValueChange={setDiscount} /></Field>
     </div>
     <Field label="Observações (aparecem no orçamento)"><textarea value={notes} maxLength={1000} rows={3} onChange={e => setNotes(e.target.value)} placeholder="Ex.: Reserva sujeita à confirmação" style={{ width: '100%', border: '1px solid var(--color-border)', borderRadius: 10, padding: 10, font: 'inherit' }} /></Field>
 

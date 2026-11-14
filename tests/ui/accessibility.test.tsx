@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../../src/App';
 import { resetStorage } from './setup';
 
-beforeEach(async () => { await resetStorage(); });
+beforeEach(async () => { await resetStorage(); window.history.replaceState({}, '', '/'); });
 const loaded = async () => { await waitFor(() => expect(screen.queryByText('Carregando seus dados…')).toBeNull()); };
 
 describe('Acessibilidade básica', () => {
@@ -32,8 +32,8 @@ describe('Acessibilidade básica', () => {
     for (const label of ['Nome do ingrediente', 'Quantidade comprada', 'Unidade', 'Preço pago (R$)']) expect(screen.getByLabelText(label), label).toBeTruthy();
     await go('Receitas e preços');
     for (const label of ['Nome da receita', 'Rendimento (unidades)', 'Margem desejada (%)', 'Tempo de produção, em minutos (opcional)']) expect(screen.getByLabelText(label), label).toBeTruthy();
-    await go('Encomendas');
-    for (const label of ['Nome do cliente', 'Receita', 'Quantidade', 'Preço unitário (R$)', 'Data da entrega', 'Sinal recebido (R$)']) expect(screen.getByLabelText(label), label).toBeTruthy();
+    await go('Nova encomenda');
+    for (const label of ['Nome do cliente', 'Receita', 'Quantidade', 'Preço de venda unitário (R$)', 'Data de entrega', 'Sinal recebido (opcional)']) expect(screen.getByLabelText(label), label).toBeTruthy();
     await go('Configurações');
     for (const label of ['Nome do negócio (aparece nos orçamentos)', 'Telefone/WhatsApp do negócio (aparece nos orçamentos)', 'Capacidade de produção por dia (minutos)']) expect(screen.getByLabelText(label), label).toBeTruthy();
   });

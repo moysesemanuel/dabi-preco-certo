@@ -7,7 +7,7 @@ import { QUOTE_MESSAGES, type PublishedQuote } from './quotes';
 
 const STATUS: Record<PublishedQuote['status'], { label: string; cls: string }> = { active: { label: 'Ativo', cls: 'tag green' }, expired: { label: 'Validade encerrada', cls: 'tag orange' }, revoked: { label: 'Revogado', cls: 'tag red' } };
 
-export function PublishedLinks({ inform }: { inform: (m: string) => void }) {
+export function PublishedLinks({ inform, quoteNumber }: { inform: (m: string) => void; quoteNumber?: string }) {
   const acc = useAccount();
   const [list, setList] = useState<PublishedQuote[] | null>(null);
   const [error, setError] = useState('');
@@ -19,17 +19,18 @@ export function PublishedLinks({ inform }: { inform: (m: string) => void }) {
   useEffect(() => { if (acc.entitled) void load(); }, [acc.entitled, load]);
   if (!acc.entitled || !acc.quotes) return null;
   const quotes = acc.quotes;
+  const visible = quoteNumber ? (list ?? []).filter(q => q.quoteNumber === quoteNumber) : list;
 
   async function revoke(q: PublishedQuote) {
     if (!confirm(`Revogar o link do orçamento ${q.quoteNumber}? Quem abrir o link verá que ele foi retirado. Isto não pode ser desfeito.`)) return;
     const r = await quotes.revoke(q.id);
     if (r.ok) { inform('Link revogado.'); void load(); } else inform(QUOTE_MESSAGES[r.reason]);
   }
-  return <section className="card stack"><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}><h2 className="section-title" style={{ margin: 0 }}>Links de orçamentos publicados</h2><button className="inline-icon" aria-label="Atualizar lista" title="Atualizar" onClick={() => void load()}><RefreshCw size={16} /></button></div>
+  return <section className="card stack"><div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}><h2 className="section-title" style={{ margin: 0 }}>{quoteNumber ? 'Links deste pedido' : 'Links de orçamentos publicados'}</h2><button className="inline-icon" aria-label="Atualizar lista" title="Atualizar" onClick={() => void load()}><RefreshCw size={16} /></button></div>
     <p className="muted">Quem tem o link vê o orçamento. Revogar retira o link do ar; o que já foi visto não pode ser desfeito.</p>
     {error && <div className="notice warn">{error}</div>}
-    {list && !list.length && <div className="empty"><Link2 size={30} />Nenhum link publicado ainda.</div>}
-    {list?.map(q => <div key={q.id} style={{ border: '1px solid var(--color-border)', borderRadius: 12, padding: 12 }}>
+    {visible && !visible.length && <div className="empty"><Link2 size={30} />{quoteNumber ? 'Nenhum link publicado para este pedido.' : 'Nenhum link publicado ainda.'}</div>}
+    {visible?.map(q => <div key={q.id} style={{ border: '1px solid var(--color-border)', borderRadius: 12, padding: 12 }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}><strong>{/^ORC-/.test(q.quoteNumber) ? q.quoteNumber : `Nº ${q.quoteNumber}`} · {formatCents(q.totalCents)}</strong><span className={STATUS[q.status].cls}>{STATUS[q.status].label}</span></div>
       <p className="muted" style={{ margin: '4px 0 8px', fontSize: 13 }}>Emitido em {brDate(q.issuedAt)}{q.validUntil ? ` · válido até ${brDate(q.validUntil)}` : ''}</p>
       {q.status !== 'revoked' && q.url && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

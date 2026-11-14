@@ -4,7 +4,7 @@ import type { DataSet, Recipe } from './types';
 
 export type CostChange = { recipeId: string; name: string; before?: number; after?: number };
 
-const costOf = (d: DataSet, r: Recipe): number | undefined => { try { return recipeCost(r, d.ingredients, d.settings?.cupSizeMl ?? DEFAULT_CUP_ML).costPerUnit; } catch { return undefined; } };
+const costOf = (d: DataSet, r: Recipe): number | undefined => { try { return recipeCost(r, d.ingredients, d.settings?.cupSizeMl ?? DEFAULT_CUP_ML, d.packagings ?? []).costPerUnit; } catch { return undefined; } };
 
 /**
  * Receitas cujo custo por unidade muda (ou deixa de ser calculável) entre dois estados dos dados. Serve para avisar quando uma

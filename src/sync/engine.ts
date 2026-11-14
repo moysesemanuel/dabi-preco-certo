@@ -12,11 +12,11 @@
  */
 import { uniqueQuoteCode } from '../../shared/quoteCode';
 import { emptyPush, KINDS, SYNC_LIMITS, sameEntity, type Kind, type PullResponse, type PushRequest, type RevMap } from '../../shared/sync';
-import type { DataSet, Ingredient, Order, Payment, Recipe } from '../domain/types';
+import type { DataSet, Ingredient, Order, Packaging, Payment, Recipe } from '../domain/types';
 import { CURRENT_SCHEMA_VERSION } from '../domain/types';
 
-type Entity = Ingredient | Recipe | Order;
-type KindMaps = { ingredients: Map<string, Ingredient>; recipes: Map<string, Recipe>; orders: Map<string, Order> };
+type Entity = Ingredient | Recipe | Order | Packaging;
+type KindMaps = { ingredients: Map<string, Ingredient>; recipes: Map<string, Recipe>; orders: Map<string, Order>; packagings: Map<string, Packaging> };
 
 /** O que este dispositivo fez com o DINHEIRO de uma encomenda e o servidor não tem. Exige reconciliação explícita. */
 export type FinancialDiff = { addedPayments: Payment[]; removedPayments: Payment[]; deposit?: { local: number; server: number | null } };
@@ -58,15 +58,15 @@ export type SyncMeta = {
   /** Revisão do servidor refletida no baseline. */
   revision: number;
   /** Revisão de cada entidade quando foi sincronizada (guarda também a revisão da exclusão lógica). */
-  revs: { ingredients: RevMap; recipes: RevMap; orders: RevMap; settings?: number };
+  revs: { ingredients: RevMap; recipes: RevMap; orders: RevMap; packagings: RevMap; settings?: number };
   baseline: DataSet;
   /** Alterações locais que o servidor substituiu. Ficam aqui até o usuário dispensar. */
   conflicts: ConflictRecord[];
   /** Conta a que estes dados pertencem. Impede misturar dados de contas diferentes no mesmo dispositivo. */
   userId?: string;
 };
-export const emptyDataSet = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [] });
-export const emptyMeta = (): SyncMeta => ({ revision: 0, revs: { ingredients: {}, recipes: {}, orders: {} }, baseline: emptyDataSet(), conflicts: [] });
+export const emptyDataSet = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [], packagings: [] });
+export const emptyMeta = (): SyncMeta => ({ revision: 0, revs: { ingredients: {}, recipes: {}, orders: {}, packagings: {} }, baseline: emptyDataSet(), conflicts: [] });
 
 export type PushResponse = { ok: true; revision: number; changed: boolean } | { ok: false; kind: 'conflict' | 'stale' } | { ok: false; kind: 'code'; orderIds: string[] };
 export interface SyncApi {
@@ -78,11 +78,11 @@ export class SyncError extends Error {
   constructor(readonly kind: 'offline' | 'unauthorized' | 'forbidden' | 'rate-limited' | 'rejected' | 'server', message: string) { super(message); }
 }
 
-const toMaps = (d: DataSet): KindMaps => ({ ingredients: new Map(d.ingredients.map(x => [x.id, x])), recipes: new Map(d.recipes.map(x => [x.id, x])), orders: new Map(d.orders.map(x => [x.id, x])) });
+const toMaps = (d: DataSet): KindMaps => ({ ingredients: new Map(d.ingredients.map(x => [x.id, x])), recipes: new Map(d.recipes.map(x => [x.id, x])), orders: new Map(d.orders.map(x => [x.id, x])), packagings: new Map((d.packagings ?? []).map(x => [x.id, x])) });
 const fromMaps = (like: DataSet, m: KindMaps): DataSet => {
   // Mantém a ordem local das entidades existentes e acrescenta as novas no fim.
   const order = <T extends { id: string }>(prev: T[], map: Map<string, T>): T[] => { const out = prev.filter(p => map.has(p.id)).map(p => map.get(p.id) as T); for (const [id, v] of map) if (!prev.some(p => p.id === id)) out.push(v); return out; };
-  return { ...like, ingredients: order(like.ingredients, m.ingredients), recipes: order(like.recipes, m.recipes), orders: order(like.orders, m.orders) };
+  return { ...like, ingredients: order(like.ingredients, m.ingredients), recipes: order(like.recipes, m.recipes), orders: order(like.orders, m.orders), packagings: order(like.packagings ?? [], m.packagings) };
 };
 const sameOpt = (a: unknown, b: unknown) => (a === undefined || b === undefined ? a === b : sameEntity(a, b));
 const clone = <T,>(v: T): T => structuredClone(v);
@@ -103,12 +103,12 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
   const L = toMaps(local), B = toMaps(meta.baseline), revs = clone(meta.revs), conflicts: ConflictRecord[] = [];
   const all: ConflictRecord[] = meta.conflicts.map(c => ({ ...c }));
   const at = now.toISOString();
-  const removed = { ingredients: new Map<string, Ingredient>(), recipes: new Map<string, Recipe>() };
+  const removed = { ingredients: new Map<string, Ingredient>(), recipes: new Map<string, Recipe>(), packagings: new Map<string, Packaging>() };
   const pendingFor = (kind: ConflictRecord['kind'], id: string) => all.find(c => isPendingConflict(c) && c.kind === kind && c.entityId === id);
 
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
-    for (const ent of pull[kind] as { id: string; rev: number; deleted: boolean; data?: Entity }[]) {
+    for (const ent of (pull[kind] ?? []) as { id: string; rev: number; deleted: boolean; data?: Entity }[]) {
       let lo = Lk.get(ent.id);
       const ba = Bk.get(ent.id), server = ent.deleted ? undefined : ent.data;
       if (kind === 'orders' && lo && server && !pendingFor(kind, ent.id)) {
@@ -131,6 +131,8 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
       if (!sameOpt(lo, server)) {
         if (sameOpt(lo, ba)) { // sem alteração local: aceita o servidor
           if (server) Lk.set(ent.id, server); else { Lk.delete(ent.id); if (kind !== 'orders' && lo) (removed[kind] as Map<string, Entity>).set(ent.id, lo); }
+        } else if (sameOpt(server, ba)) { // o servidor continua na base: só houve edição local
+          // Preserva a edição e confirma a revisão/base que o servidor acabou de devolver.
         } else {
           const financial = kind === 'orders' && lo ? financialDiff(lo as Order, ba as Order | undefined, server as Order | undefined) : undefined;
           if (financial) { // dinheiro mexido aqui e lá: reconciliação financeira explícita (o servidor é aplicado e o que foi lançado aqui fica pendente)
@@ -149,10 +151,11 @@ export function applyPull(local: DataSet, meta: SyncMeta, pull: PullResponse, no
   }
 
   // Algo novo aqui ainda depende de um item que o servidor excluiu? Restaura o item (será reenviado) em vez de quebrar a referência.
-  for (let round = 0; round < 3; round++) {
+  for (let round = 0; round < 4; round++) {
     let changed = false;
     for (const o of L.orders.values()) if (!L.recipes.has(o.recipeId) && removed.recipes.has(o.recipeId)) { const r = removed.recipes.get(o.recipeId) as Recipe; L.recipes.set(r.id, r); conflicts.push({ id: `recipes:${r.id}:restored`, kind: 'recipes', entityId: r.id, at, reason: 'restored', local: r, server: null }); changed = true; }
     for (const r of L.recipes.values()) for (const it of r.items) if (!L.ingredients.has(it.ingredientId) && removed.ingredients.has(it.ingredientId)) { const i = removed.ingredients.get(it.ingredientId) as Ingredient; L.ingredients.set(i.id, i); conflicts.push({ id: `ingredients:${i.id}:restored`, kind: 'ingredients', entityId: i.id, at, reason: 'restored', local: i, server: null }); changed = true; }
+    for (const r of L.recipes.values()) for (const it of r.packagingItems ?? []) if (!L.packagings.has(it.packagingId) && removed.packagings.has(it.packagingId)) { const p = removed.packagings.get(it.packagingId) as Packaging; L.packagings.set(p.id, p); conflicts.push({ id: `packagings:${p.id}:restored`, kind: 'packagings', entityId: p.id, at, reason: 'restored', local: p, server: null }); changed = true; }
     if (!changed) break;
   }
 
@@ -205,14 +208,14 @@ export function buildPushes(local: DataSet, meta: SyncMeta): PushRequest[] {
   const held = (kind: Kind, id: string) => pend.some(c => c.kind === kind && c.entityId === id);
   const goneInCloud = (kind: Kind, id: string) => pend.some(c => c.kind === kind && c.entityId === id && c.server === null);
   const blocked = (kind: Kind, e: Entity) => held(kind, e.id)
-    || (kind === 'recipes' && (e as Recipe).items.some(it => goneInCloud('ingredients', it.ingredientId)))
+    || (kind === 'recipes' && ((e as Recipe).items.some(it => goneInCloud('ingredients', it.ingredientId)) || ((e as Recipe).packagingItems ?? []).some(it => goneInCloud('packagings', it.packagingId))))
     || (kind === 'orders' && goneInCloud('recipes', (e as Order).recipeId));
   for (const kind of KINDS) {
     const Lk = L[kind] as Map<string, Entity>, Bk = B[kind] as Map<string, Entity>;
     for (const [id, e] of Lk) if (!blocked(kind, e) && !sameOpt(e, Bk.get(id))) upserts.push({ kind, id, apply: p => { (p.upserts[kind] as Entity[]).push(e); if (revOf(meta, kind, id) !== undefined) p.baseRevs[kind][id] = revOf(meta, kind, id) as number; } });
     for (const id of Bk.keys()) if (!Lk.has(id) && !held(kind, id)) deletes.push({ kind, id, apply: p => { p.deletes[kind].push(id); p.baseRevs[kind][id] = revOf(meta, kind, id) ?? 0; } });
   }
-  const rank = (k: Kind, del: boolean) => (del ? { orders: 0, recipes: 1, ingredients: 2 }[k] : { ingredients: 0, recipes: 1, orders: 2 }[k]);
+  const rank = (k: Kind, del: boolean) => (del ? { orders: 0, recipes: 1, ingredients: 2, packagings: 3 }[k] : { packagings: 0, ingredients: 1, recipes: 2, orders: 3 }[k]);
   const ops = [...upserts.sort((a, b) => rank(a.kind, false) - rank(b.kind, false)), ...deletes.sort((a, b) => rank(a.kind, true) - rank(b.kind, true))];
   const pushes: PushRequest[] = [];
   let current = emptyPush(meta.revision), count = 0;
@@ -229,13 +232,13 @@ const revOf = (meta: SyncMeta, kind: Kind, id: string): number | undefined => me
 export type SyncStatus = 'synced' | 'offline' | 'unauthorized' | 'forbidden' | 'needs-attention' | 'needs-decision' | 'error';
 export type SyncResult = { status: SyncStatus; message?: string; local: DataSet; meta: SyncMeta; pulled: number; pushed: number; newConflicts: ConflictRecord[] };
 
-const isEmpty = (d: DataSet) => !d.ingredients.length && !d.recipes.length && !d.orders.length;
+const isEmpty = (d: DataSet) => !d.ingredients.length && !d.recipes.length && !d.orders.length && !(d.packagings ?? []).length;
 /** O servidor tem algo que NÃO é idêntico ao que existe aqui (item ausente, diferente ou excluído lá)? */
 function hasForeignData(local: DataSet, pull: PullResponse): boolean {
   const L = toMaps(local);
-  return KINDS.some(kind => (pull[kind] as { id: string; deleted: boolean; data?: Entity }[]).some(e => (e.deleted ? L[kind].has(e.id) : !sameOpt(L[kind].get(e.id), e.data))));
+  return KINDS.some(kind => ((pull[kind] ?? []) as { id: string; deleted: boolean; data?: Entity }[]).some(e => (e.deleted ? L[kind].has(e.id) : !sameOpt(L[kind].get(e.id), e.data))));
 }
-const pulledCount = (p: PullResponse) => p.ingredients.length + p.recipes.length + p.orders.length;
+const pulledCount = (p: PullResponse) => p.ingredients.length + p.recipes.length + p.orders.length + (p.packagings?.length ?? 0);
 
 /**
  * Um ciclo de sincronização. Não altera os argumentos; devolve o novo estado.
@@ -245,6 +248,7 @@ const pulledCount = (p: PullResponse) => p.ingredients.length + p.recipes.length
 export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opts: { allowInitialMerge?: boolean; now?: Date } = {}): Promise<SyncResult> {
   let L = local, M = healConflicts(local, meta, opts.now), pulled = 0, pushed = 0;
   const newConflicts: ConflictRecord[] = [];
+  const acknowledgedRecipes = new Map<string, { recipe: Recipe; revision: number }>();
   const result = (status: SyncStatus, message?: string): SyncResult => ({ status, message, local: L, meta: M, pulled, pushed, newConflicts });
   try {
     for (let attempt = 0; attempt < 4; attempt++) {
@@ -253,8 +257,29 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
       // (um reenvio depois de uma resposta perdida encontra tudo idêntico e segue sozinho).
       if (attempt === 0 && M.revision === 0 && isEmpty(M.baseline) && !isEmpty(L) && pulledCount(pull) > 0 && !opts.allowInitialMerge && hasForeignData(L, pull)) return result('needs-decision', 'Há dados neste dispositivo e na conta. Escolha como combinar.');
       pulled += pulledCount(pull);
-      const merged = applyPull(L, M, pull, opts.now);
+      // Um Worker antigo pode responder sucesso e persistir os campos antigos de Recipe,
+      // descartando packagingItems. Para este pull da mesma revisão aceita, trate isso
+      // como limitação de compatibilidade: a base passa a refletir o eco real, mantendo
+      // a escolha local pendente, sem inventar uma edição concorrente.
+      const rejectedRecipePackaging = new Set<string>();
+      const mergeMeta = { ...M, baseline: { ...M.baseline, recipes: [...M.baseline.recipes] } };
+      const pulledRecipes = new Map((pull.recipes ?? []).map(entity => [entity.id, entity]));
+      for (const [id, expected] of acknowledgedRecipes) {
+        if (pull.revision < expected.revision) continue;
+        const entity = pulledRecipes.get(id);
+        if (entity?.deleted || (entity && entity.rev > expected.revision)) continue; // tombstone/edição posterior: segue o fluxo normal de conflito
+        const mismatch = !entity ? true : !entity.data || !sameEntity(entity.data.packagingItems ?? [], expected.recipe.packagingItems ?? []);
+        if (!mismatch || !(expected.recipe.packagingItems?.length)) continue;
+        rejectedRecipePackaging.add(id);
+        if (entity?.data) {
+          const index = mergeMeta.baseline.recipes.findIndex(r => r.id === id);
+          if (index < 0) mergeMeta.baseline.recipes.push(entity.data);
+          else mergeMeta.baseline.recipes[index] = entity.data;
+        }
+      }
+      const merged = applyPull(L, mergeMeta, pull, opts.now);
       L = merged.local; M = merged.meta; newConflicts.push(...merged.conflicts);
+      if (rejectedRecipePackaging.size) return result('needs-attention', 'O servidor aceitou a receita, mas não confirmou suas embalagens. A alteração foi preservada neste dispositivo e não foi tratada como conflito. Atualize o Worker e o banco antes de tentar sincronizar essas embalagens novamente.');
       const dangling = findDanglingRefs(L);
       if (dangling.length) return result('needs-attention', dangling[0]);
       const pushes = buildPushes(L, M);
@@ -270,6 +295,7 @@ export async function syncOnce(api: SyncApi, local: DataSet, meta: SyncMeta, opt
         }
         if (!resp.ok) { again = true; break; } // mudou no servidor: puxa de novo, mescla e tenta outra vez
         revision = resp.revision; pushed += countOf(req);
+        for (const recipe of req.upserts.recipes) if (recipe.packagingItems?.length) acknowledgedRecipes.set(recipe.id, { recipe, revision: resp.revision });
       }
       if (!again && attempt === 3) return result('error', 'Não foi possível concluir a sincronização. Tente novamente.');
     }

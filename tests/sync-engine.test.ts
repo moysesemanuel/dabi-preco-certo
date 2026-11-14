@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { PullResponse, PushRequest } from '../shared/sync';
-import { SYNC_LIMITS } from '../shared/sync';
+import { sameEntity, SYNC_LIMITS } from '../shared/sync';
 import type { DataSet, Ingredient, Order, Recipe } from '../src/domain/types';
 import { createHttpSyncApi } from '../src/sync/api';
 import { Device } from './helpers/device';
@@ -16,6 +16,24 @@ const E = <T,>(id: string, rev: number, d?: T) => (d === undefined ? { id, rev, 
 const metaWith = (baseline: DataSet, revision: number, revs: SyncMeta['revs']): SyncMeta => ({ ...emptyMeta(), revision, baseline, revs });
 
 describe('Motor: alterações locais e envios', () => {
+  it('trata ausência e zero de cobrança de embalagem como equivalentes para pedidos legados', () => {
+    const legacy = ord('o', 'r');
+    expect(sameEntity(legacy, { ...legacy, packagingCharge: 0 })).toBe(true);
+    expect(sameEntity(legacy, { ...legacy, packagingCharge: 3.75 })).toBe(false);
+  });
+  it('normaliza representações legadas equivalentes de embalagens sem ocultar diferenças reais', () => {
+    const legacy = rec('r', 'i');
+    const empty = { ...legacy, packagingItems: [] };
+    const nullable = { ...legacy, packagingItems: null };
+    const undefinedValue = { ...legacy, packagingItems: undefined };
+    expect(sameEntity(legacy, empty)).toBe(true);
+    expect(sameEntity(legacy, nullable)).toBe(true);
+    expect(sameEntity(legacy, undefinedValue)).toBe(true);
+    const a = { ...legacy, packagingItems: [{ packagingId: 'paper', quantityPerUnit: 1 }, { packagingId: 'bag', quantityPerUnit: 2 }] };
+    const reordered = { ...legacy, packagingItems: [...a.packagingItems].reverse() };
+    expect(sameEntity(a, reordered)).toBe(true);
+    expect(sameEntity(a, { ...legacy, packagingItems: [{ packagingId: 'paper', quantityPerUnit: 1 }, { packagingId: 'bag', quantityPerUnit: 3 }] })).toBe(false);
+  });
   it('detecta o que é novo, alterado e excluído, com as revisões conhecidas', () => {
     const base = data({ ingredients: [ing('a'), ing('b')] });
     const meta = metaWith(base, 4, { ingredients: { a: 2, b: 3 }, recipes: {}, orders: {} });
@@ -41,7 +59,7 @@ describe('Motor: alterações locais e envios', () => {
     expect(sequence).toMatch(/^i{150}r{30}o{40}$/); // dependências sempre antes de quem depende
     const base = data({ ingredients: [ing('a')], recipes: [rec('r', 'a')], orders: [ord('o', 'r')] });
     const del = buildPushes(data(), metaWith(base, 1, { ingredients: { a: 1 }, recipes: { r: 1 }, orders: { o: 1 } }));
-    expect(del).toHaveLength(1); expect(Object.keys(del[0].deletes)).toEqual(['ingredients', 'recipes', 'orders']);
+    expect(del).toHaveLength(1); expect(Object.keys(del[0].deletes)).toEqual(['ingredients', 'recipes', 'orders', 'packagings']);
   });
   it('as configurações locais novas entram no primeiro envio', () => {
     const [p] = buildPushes(data({ settings: { cupSizeMl: 250 } }), emptyMeta());
@@ -83,6 +101,17 @@ describe('Motor: mesclagem (3 vias)', () => {
     const same = ing('a', { purchasePrice: 8 });
     const out = applyPull(data({ ingredients: [same] }), meta, pullOf({ revision: 2, ingredients: [E('a', 2, same)] }), NOW);
     expect(out.conflicts).toEqual([]); expect(buildPushes(out.local, out.meta)).toEqual([]);
+  });
+  it('mantém edição local quando o pull só confirma que a nuvem continua igual à base', () => {
+    const base = data({ ingredients: [ing('a')], recipes: [rec('r', 'a')] });
+    const meta = metaWith(base, 4, { ingredients: { a: 2 }, recipes: { r: 3 }, orders: {}, packagings: {} });
+    const local = data({ ingredients: base.ingredients, recipes: [{ ...base.recipes[0], name: 'Brigadeiro Gourmet', packagingItems: [] }] });
+    const out = applyPull(local, meta, pullOf({ revision: 5, recipes: [E('r', 3, base.recipes[0])] }), NOW);
+    expect(out.local.recipes[0]).toEqual(local.recipes[0]);
+    expect(out.conflicts).toEqual([]);
+    expect(out.meta.baseline.recipes[0]).toEqual(base.recipes[0]);
+    expect(out.meta.revs.recipes.r).toBe(3);
+    expect(buildPushes(out.local, out.meta)[0].upserts.recipes).toEqual([local.recipes[0]]);
   });
   it('exclusão no servidor de algo que não mudei é aplicada; se eu tinha editado, é conflito pendente e a minha edição continua nos dados', () => {
     const base = data({ ingredients: [ing('a'), ing('b')] });
@@ -237,6 +266,17 @@ describe('Falhas de rede e recuperação', () => {
     expect((await A.sync()).status).toBe('synced');
     expect(srv.table('sync_state')[0].revision).toBe(rev); // sincronizar de novo não gera revisões
   });
+  it('salvar outra edição da receita na mesma aba com lista vazia não cria conflito no Worker atual', async () => {
+    const A = await device();
+    A.edit(() => data({ ingredients: [ing('f')], recipes: [rec('r', 'f')] }));
+    expect((await A.sync()).status).toBe('synced');
+    A.edit(d => ({ ...d, recipes: [{ ...d.recipes[0], name: 'Brigadeiro Gourmet', packagingItems: [] }] }));
+    const saved = await A.sync();
+    expect(saved.status).toBe('synced');
+    expect(saved.newConflicts).toEqual([]);
+    expect(A.meta.conflicts.filter(c => c.kind === 'recipes' && c.pending)).toEqual([]);
+    expect(A.data.recipes[0].name).toBe('Brigadeiro Gourmet');
+  });
   it('sessão expirada: "não autorizado", dados locais intactos', async () => {
     const A = await device();
     A.edit(() => full());
@@ -260,6 +300,26 @@ describe('Falhas de rede e recuperação', () => {
     expect(r.status).toBe('needs-attention');
     expect(A.data.ingredients[0].purchasePrice).toBe(-5);
     expect(srv.table('ingredients')).toHaveLength(0);
+  });
+  it('Worker antigo que confirma mas descarta embalagens não cria conflito falso nem apaga a edição local', async () => {
+    const oldServer = new Device(srv, await srv.login('bia@exemplo.com', 'Worker antigo'), body => {
+      body.upserts.recipes = body.upserts.recipes.map((recipe: Recipe) => { const { packagingItems: _unsupported, ...legacy } = recipe; return legacy; });
+      return body;
+    });
+    const packageRecord = { id: 'paper', name: 'Forminha', purchasePrice: 12, purchaseQuantity: 100, active: true };
+    oldServer.edit(() => data({ ingredients: [ing('f')], packagings: [packageRecord], recipes: [rec('r', 'f')] }));
+    expect((await oldServer.sync()).status).toBe('synced');
+    const next = { ...oldServer.data.recipes[0], packagingItems: [{ packagingId: 'paper', quantityPerUnit: 1 }] };
+    oldServer.edit(d => ({ ...d, recipes: [next] }));
+    const first = await oldServer.sync();
+    expect(first.status).toBe('needs-attention');
+    expect(first.message).toMatch(/não confirmou suas embalagens/);
+    expect(oldServer.data.recipes[0]).toEqual(next);
+    expect(first.meta.conflicts.filter(c => c.kind === 'recipes' && c.pending)).toEqual([]);
+    const again = await oldServer.sync();
+    expect(again.status).toBe('needs-attention');
+    expect(again.newConflicts).toEqual([]);
+    expect(oldServer.data.recipes[0].packagingItems).toEqual(next.packagingItems);
   });
   it('um erro inesperado (bug) não é engolido', async () => {
     const boom: SyncApi = { pull: async () => { throw new Error('bug'); }, push: async () => ({ ok: true, revision: 1, changed: true }) };

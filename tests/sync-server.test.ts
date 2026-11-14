@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { emptyPush, SYNC_LIMITS, type PullResponse, type PushRequest } from '../shared/sync';
-import type { Ingredient, Order, Recipe } from '../src/domain/types';
+import type { Ingredient, Order, Packaging, Recipe } from '../src/domain/types';
 import { makeServer, type Server, type Session } from './helpers/server';
 
 let s: Server;
@@ -38,6 +38,54 @@ describe('Acesso', () => {
   });
   it('parâmetro since inválido → 400', async () => {
     for (const since of ['abc', '-1', '1.5', '99999999999999999']) expect((await s.request('GET', `/api/sync?since=${since}`, { session: bia })).status, since).toBe(400);
+  });
+});
+
+describe('Sincronização de embalagens', () => {
+  const pack: Packaging = { id: 'box', name: 'Caixa 25', purchasePrice: 4.5, purchaseQuantity: 1, capacity: 25, active: true };
+  it('persiste embalagens, associações e snapshots no SQLite; cliente antigo não apaga vínculo ausente', async () => {
+    const created = await push(bia, p => {
+      p.upserts.packagings = [pack]; p.upserts.ingredients = [ing('f')];
+      p.upserts.recipes = [rec('r', 'f', { packagingItems: [{ packagingId: 'box', quantityPerUnit: 1 }] })];
+      p.upserts.orders = [ord('o', 'r', { packagingCharge: 18, costSnapshot: { costPerUnit: 1.25, capturedAt: '2026-11-11T10:00:00.000Z', packagingItems: [{ packagingId: 'box', name: 'Caixa 25', quantityPerUnit: 1, unitCost: 4.5 }] }, packagingItems: [{ packagingId: 'box', name: 'Caixa 25', quantity: 4, unitCost: 4.5 }] })];
+    });
+    expect(created.status).toBe(200);
+    const first = (await pull(bia)).body;
+    expect(first.packagings?.[0].data).toEqual(pack);
+    expect(first.recipes[0].data?.packagingItems).toEqual([{ packagingId: 'box', quantityPerUnit: 1 }]);
+    expect(first.orders[0].data?.packagingItems?.[0].quantity).toBe(4);
+    expect(first.orders[0].data?.costSnapshot?.costPerUnit).toBe(1.25);
+    expect(first.orders[0].data?.packagingCharge).toBe(18);
+
+    const legacy = emptyPush(1);
+    legacy.baseRevs.recipes = { r: 1 };
+    legacy.upserts.recipes = [rec('r', 'f', { desiredMargin: 25 })];
+    const oldShape = structuredClone(legacy) as unknown as Record<string, any>;
+    delete oldShape.baseRevs.packagings; delete oldShape.upserts.packagings; delete oldShape.deletes.packagings;
+    const response = await s.request('POST', '/api/sync/push', { session: bia, body: oldShape });
+    expect(response.status).toBe(200);
+    const later = (await pull(bia)).body;
+    expect(later.recipes[0].data?.packagingItems).toEqual([{ packagingId: 'box', quantityPerUnit: 1 }]);
+
+    const olderOrder = structuredClone(later.orders.find(x => x.id === 'o')!.data!) as Order & { packagingCharge?: number };
+    delete olderOrder.packagingCharge;
+    const oldOrderPush = emptyPush(later.revision);
+    oldOrderPush.baseRevs.orders = { o: later.orders.find(x => x.id === 'o')!.rev };
+    oldOrderPush.upserts.orders = [olderOrder];
+    const oldOrderResult = await s.request('POST', '/api/sync/push', { session: bia, body: oldOrderPush });
+    expect(oldOrderResult.status).toBe(200);
+    expect((await pull(bia)).body.orders.find(x => x.id === 'o')?.data?.packagingCharge).toBe(18);
+  });
+
+  it('isola o catálogo por conta e recusa referência cruzada', async () => {
+    const second = await s.issueFor('outra@example.com');
+    const other = await s.login('outra@example.com');
+    expect(second).toBeDefined();
+    const result = await push(other, p => {
+      p.upserts.ingredients = [ing('f')];
+      p.upserts.recipes = [rec('r', 'f', { packagingItems: [{ packagingId: 'box', quantityPerUnit: 1 }] })];
+    });
+    expect(result.status).toBe(422);
   });
 });
 

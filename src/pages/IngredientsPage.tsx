@@ -6,11 +6,12 @@ import { money } from '../domain/pricing';
 import { parseQuantity } from '../domain/quantity';
 import type { CatalogRef, DataSet, Ingredient, Unit } from '../domain/types';
 import { Field } from '../components/Field';
+import { MoneyInput } from '../components/MoneyInput';
 import { CATALOG_VERSION, makeRef, refDiffersFromCatalog, searchCatalog } from '../features/measurement/catalog';
 import { MeasuresDialog, type MeasuresDraft } from '../features/measurement/components/MeasuresDialog';
 import { MeasuresSummary, measureLines } from '../features/measurement/components/MeasuresSummary';
 import { densityToGramsPerCup, gramsPerCupToDensity } from '../features/measurement/densities';
-import { isMoney, isPositiveQuantity, toCents2 } from '../domain/money';
+import { isMoney, isPositiveQuantity, parseMoneyInput, toCents2 } from '../domain/money';
 import { cupSizeOf, newId, parse, tryApply, units, type PageProps } from '../utils';
 
 const brl = (n?: number) => (n === undefined ? 'não calculável' : money(n));
@@ -57,7 +58,7 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
   }
   function saveIngredient(e: FormEvent) {
     e.preventDefault();
-    const quantity = parse(qty), p = toCents2(parse(price));
+    const quantity = parse(qty), parsedPrice = parseMoneyInput(price), p = parsedPrice === undefined ? Number.NaN : toCents2(parsedPrice);
     if (!name.trim() || !isPositiveQuantity(quantity) || !isMoney(p)) return inform('Preencha nome, quantidade positiva e preço válido.');
     const cupValue = cupGrams.trim() ? parseQuantity(cupGrams) : undefined;
     const unitValue = unitGrams.trim() ? parseQuantity(unitGrams) : undefined;
@@ -107,7 +108,7 @@ export function IngredientsPage({ data, update, inform }: PageProps) {
             <Field label="Quantidade comprada"><input type="number" min="0.001" step="any" value={qty} onChange={e => setQty(e.target.value)} required /></Field>
             <Field label="Unidade"><select value={unit} onChange={e => setUnit(e.target.value as Unit)}>{units.map(u => <option key={u}>{u}</option>)}</select></Field>
           </div>
-          <Field label="Preço pago (R$)"><input type="number" min="0" step="0.01" value={price} onChange={e => setPrice(e.target.value)} placeholder="Ex.: 6.90" required /></Field>
+          <Field label="Preço pago (R$)"><MoneyInput value={price} onValueChange={setPrice} required /></Field>
           <p className="form-subtitle">Exemplo: 1000 g de farinha por R$ 6,90.</p>
           <MeasuresSummary ingredient={draftIngredient} cupSizeMl={cup} onAdjust={() => setAdjusting(true)} updateAvailable={refUpdate} />
           <div style={{ display: 'flex', gap: 8 }}><button className="primary" type="submit">{editingId ? <><Save size={17} /> Salvar alterações</> : <><Plus size={17} /> Adicionar ingrediente</>}</button>{editingId && <button className="secondary" type="button" onClick={resetForm}><X size={16} /> Cancelar</button>}</div>

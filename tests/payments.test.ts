@@ -3,6 +3,7 @@ import { validateDataSet } from '../shared/dataset';
 import { emptyPush } from '../shared/sync';
 import { updateOrder } from '../src/domain/edit';
 import { addPayment, balanceDue, orderTotal, removePayment, totalReceived } from '../src/domain/payments';
+import { calculateOrderFinancials } from '../src/domain/orderFinancials';
 import type { DataSet, Order, Payment } from '../src/domain/types';
 import { emptyDataSet } from '../src/sync/engine';
 import { Device } from './helpers/device';
@@ -27,6 +28,18 @@ describe('Recebimentos: cálculo', () => {
     const o = order({ quantity: 1, unitPrice: 1, deposit: 0, payments: Array.from({ length: 10 }, (_, i) => pay(0.1, `p${i}`)) });
     expect(totalReceived(o)).toBe(1); expect(balanceDue(o)).toBe(0);
     expect(balanceDue(order({ quantity: 3, unitPrice: 33.33, deposit: 0.1 }))).toBe(99.89); // 99,99 − 0,10
+  });
+  it('cobra embalagens adicionais sem alterar encomendas antigas e calcula o saldo pelo total cobrado', () => {
+    const current = order({ quantity: 25, unitPrice: 2.5, deposit: 20, packagingCharge: 3.75 });
+    expect(orderTotal(current)).toBe(66.25);
+    expect(balanceDue(current)).toBe(46.25);
+
+    const legacy = order({ quantity: 25, unitPrice: 2.5, deposit: 0, packagingItems: [{ packagingId: 'box', name: 'Caixa', quantity: 1, unitCost: 3.75 }] });
+    expect(orderTotal(legacy)).toBe(62.5);
+  });
+  it('inclui adicionais uma vez no custo e no preço para calcular o lucro', () => {
+    expect(calculateOrderFinancials({ quantity: 25, unitPrice: 2.5, packagingCharge: 3.75, recipeCostPerUnit: 1, additionalPackagingCost: 3.75 }))
+      .toEqual({ productsTotal: 62.5, packagingCharge: 3.75, totalCharged: 66.25, estimatedCost: 28.75, estimatedProfit: 37.5, balanceDue: 66.25 });
   });
   it('saldo nunca fica negativo', () => expect(balanceDue(order({ deposit: 100 }))).toBe(0));
 });
@@ -103,7 +116,7 @@ describe('Recebimentos: backup e migração', () => {
   });
   it('listas vazias somem (forma canônica); backups v1/v2 sem recebimentos continuam válidos', () => {
     expect('payments' in validateDataSet(tree({ payments: [] })).orders[0]).toBe(false);
-    for (const version of [1, 2]) expect(validateDataSet({ ...tree({}), schemaVersion: version }).schemaVersion).toBe(3);
+    for (const version of [1, 2]) expect(validateDataSet({ ...tree({}), schemaVersion: version }).schemaVersion).toBe(4);
   });
   it('rejeita recebimentos inválidos', () => {
     const bad = (payments: unknown, re: RegExp) => expect(() => validateDataSet(tree({ payments })), JSON.stringify(payments)).toThrow(re);

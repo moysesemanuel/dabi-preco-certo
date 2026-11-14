@@ -1,9 +1,10 @@
 import { isIsoDate } from '../../shared/dataset';
 import { isMoney, toCents2 } from './money';
+import { calculateOrderFinancials } from './orderFinancials';
 import type { DataSet, Order, Payment } from './types';
 
 /** Total da encomenda, em centavos exatos. */
-export const orderTotal = (o: Pick<Order, 'quantity' | 'unitPrice'>): number => toCents2(o.quantity * o.unitPrice);
+export const orderTotal = (o: Pick<Order, 'quantity' | 'unitPrice' | 'packagingCharge'>): number => calculateOrderFinancials(o).totalCharged;
 /** Sinal + recebimentos. */
 export const totalReceived = (o: Pick<Order, 'deposit' | 'payments'>): number => toCents2(o.deposit + (o.payments ?? []).reduce((s, p) => s + p.amount, 0));
 /** Saldo pendente (nunca negativo). */

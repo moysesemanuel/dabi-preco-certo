@@ -11,7 +11,7 @@ const nav = async (u: ReturnType<typeof user>, name: string) => { await u.click(
 const loaded = async () => { await waitFor(() => expect(screen.queryByText('Carregando seus dados…')).toBeNull()); };
 const toast = () => screen.queryByRole('status', { name: '' });
 
-beforeEach(async () => { await resetStorage(); vi.stubGlobal('confirm', () => true); });
+beforeEach(async () => { await resetStorage(); window.history.replaceState({}, '', '/'); vi.stubGlobal('confirm', () => true); });
 
 async function createIngredientAndRecipe(u: ReturnType<typeof user>) {
   await nav(u, 'Ingredientes');
@@ -29,6 +29,22 @@ async function createIngredientAndRecipe(u: ReturnType<typeof user>) {
 }
 
 describe('Fluxo crítico: ingrediente → receita → preço → encomenda → recebimento → agenda', () => {
+  it('permite apagar completamente a quantidade de ingrediente ao substituir o peso na receita', async () => {
+    const u = user();
+    render(<App />); await loaded();
+    await createIngredientAndRecipe(u);
+    await u.click(screen.getByRole('button', { name: 'Editar Bolo de cenoura' }));
+
+    const quantity = screen.getByLabelText('Quantidade utilizada') as HTMLInputElement;
+    expect(quantity.value).toBe('500');
+    fireEvent.change(quantity, { target: { value: '' } });
+    expect(quantity.value).toBe('');
+    await u.click(screen.getByRole('button', { name: /Salvar alterações/ }));
+    expect(await screen.findByText('Revise rendimento, ingredientes e custos. Margem: 0 até menos de 100%.')).toBeTruthy();
+    fireEvent.change(quantity, { target: { value: '250' } });
+    expect(quantity.value).toBe('250');
+  });
+
   it('percorre o fluxo completo e preserva o custo histórico e os recebimentos', async () => {
     const u = user();
     render(<App />); await loaded();
@@ -40,26 +56,26 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     expect(within(sim).getAllByText('R$ 0,30').length).toBeGreaterThan(0);
 
     // Encomenda
-    await nav(u, 'Encomendas');
+    await nav(u, 'Nova encomenda');
     await u.type(screen.getByLabelText('Nome do cliente'), 'Ana Martins');
     await u.selectOptions(screen.getByLabelText('Receita'), 'Bolo de cenoura');
     fireEvent.change(screen.getByLabelText('Quantidade'), { target: { value: '4' } });
-    fireEvent.change(screen.getByLabelText('Preço unitário (R$)'), { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText('Data da entrega'), { target: { value: localToday() } });
-    fireEvent.change(screen.getByLabelText('Sinal recebido (R$)'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Preço de venda unitário (R$)'), { target: { value: '10' } });
+    fireEvent.change(screen.getByLabelText('Data de entrega'), { target: { value: localToday() } });
+    fireEvent.change(screen.getByLabelText('Sinal recebido (opcional)'), { target: { value: '10' } });
     await u.click(screen.getByRole('button', { name: /Registrar encomenda/ }));
     expect(await screen.findByText('Encomenda cadastrada.')).toBeTruthy();
-    expect(screen.getByText(/Custo registrado no pedido: R\$ 0,30 por unidade/)).toBeTruthy();
-    expect(screen.getByText(/Valor: R\$ 40,00/)).toBeTruthy();
-    expect(screen.getByText('R$ 30,00', { selector: 'strong' })).toBeTruthy(); // saldo pendente: 40 − 10
+    expect(screen.getByText(/Custo unitário congelado/)).toBeTruthy();
+    expect(screen.getByText('Total da encomenda').parentElement?.textContent).toMatch(/40,00/);
+    expect(screen.getByText('Saldo pendente').parentElement?.textContent).toMatch(/30,00/); // saldo pendente: 40 − 10
 
     // O custo registrado NÃO muda quando o ingrediente fica mais caro
     await nav(u, 'Ingredientes');
     await u.click(screen.getByRole('button', { name: 'Editar Farinha de trigo' }));
     fireEvent.change(screen.getByLabelText('Preço pago (R$)'), { target: { value: '60' } });
     await u.click(screen.getByRole('button', { name: /Salvar alterações/ }));
-    await nav(u, 'Encomendas');
-    expect(screen.getByText(/Custo registrado no pedido: R\$ 0,30 por unidade/)).toBeTruthy();
+    await nav(u, 'Pedidos'); await u.click(screen.getByRole('button', { name: 'Ver detalhes' }));
+    expect(screen.getByText(/Custo unitário congelado/)).toBeTruthy();
 
     // Recebimento parcial e limite do saldo
     await u.click(screen.getByRole('button', { name: /Registrar recebimento/ }));
@@ -70,7 +86,7 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     fireEvent.change(amount, { target: { value: '20' } });
     await u.click(screen.getByRole('button', { name: 'Registrar recebimento' }));
     expect(await screen.findByText('Recebimento registrado.')).toBeTruthy();
-    expect(screen.getByText('R$ 10,00', { selector: 'strong' })).toBeTruthy(); // saldo: 40 − 10 − 20
+    expect(screen.getByText('Saldo pendente').parentElement?.textContent).toMatch(/10,00/); // saldo: 40 − 10 − 20
 
     // Agenda: um pedido novo está em "Orçamento", e a tela explica por que ele ainda não aparece
     await nav(u, 'Agenda');
@@ -80,7 +96,7 @@ describe('Fluxo crítico: ingrediente → receita → preço → encomenda → r
     expect(screen.getByText('Ana Martins')).toBeTruthy();
     await u.click(screen.getByLabelText('Incluir orçamentos'));
     // confirmado o pedido, a entrega de hoje aparece
-    await nav(u, 'Encomendas');
+    await nav(u, 'Pedidos'); await u.click(screen.getByRole('button', { name: 'Ver detalhes' }));
     await u.selectOptions(screen.getByLabelText('Status'), 'Confirmado');
     await nav(u, 'Agenda');
     expect(screen.getByRole('heading', { name: 'Agenda' })).toBeTruthy();
@@ -119,14 +135,14 @@ describe('Estados de carregamento e vazios', () => {
   it('mostra "Carregando" e não oferece formulários até os dados serem lidos', async () => {
     render(<App />);
     expect(screen.getByText('Carregando seus dados…')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Nova encomenda/ })).toBeNull();
+    expect(screen.queryByLabelText('Nome do cliente')).toBeNull();
     await loaded();
     expect(screen.getByRole('heading', { name: /Bom trabalho começa organizado/ })).toBeTruthy();
   });
   it('páginas vazias explicam o próximo passo', async () => {
     const u = user();
     render(<App />); await loaded();
-    await nav(u, 'Encomendas'); expect(screen.getByText('Nenhum pedido cadastrado.')).toBeTruthy();
+    await nav(u, 'Pedidos'); expect(screen.getByText('Nenhum pedido cadastrado.')).toBeTruthy();
     await nav(u, 'Agenda'); expect(screen.getByText('Nenhuma entrega para hoje.')).toBeTruthy();
     await nav(u, 'Receitas e preços'); expect(screen.getByText('Ainda não há receitas.')).toBeTruthy();
   });

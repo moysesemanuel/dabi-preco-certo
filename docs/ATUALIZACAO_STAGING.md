@@ -1,5 +1,24 @@
 # Atualização controlada da homologação (staging)
 
+## Etapa 10 — reestruturação local de encomendas e pedidos (13/11/2026)
+
+O trabalho local acrescenta a migração `0011_order_packaging_charge.sql`, dependente de `0010_packagings.sql`, e separa Nova encomenda, Pedidos e detalhes. A Etapa 9 informou que 0010 ainda não foi aplicada remotamente; esta tarefa não consultou nem alterou a Cloudflare e não aplicou as migrações. Antes de qualquer publicação, consulte a lista remota novamente: se ambas estiverem pendentes, aplique 0010 e depois 0011, somente após backup e autorização. Se o estado for diferente, pare e compare o esquema antes de publicar o Worker.
+
+Use `docs/ETAPA_10_PEDIDOS.md` para as regras financeiras, compatibilidade, testes e checklist manual. A publicação futura deve seguir: confirmar o SHA aprovado → backup → migrações pendentes em ordem → Worker staging → Pages staging → homologação. Não publique Pages que cobre embalagem antes de o Worker/schema compatível estar pronto.
+
+## Etapa 9 — preparação local de embalagens (13/11/2026)
+
+Esta seção complementa o histórico abaixo. O candidato local inclui `worker/migrations/0010_packagings.sql`; esta tarefa **não consultou nem alterou** o estado remoto da migration 0010. Antes de publicar, consultar novamente o banco de staging. Se 0010 ainda estiver pendente, a ordem será:
+
+1. Conferir branch/SHA aprovado e checkout limpo; exportar e validar um backup novo de staging.
+2. `npm run d1 -- migrations-list --env staging` — conferir a lista real; nunca presumir que o ambiente remoto está no schema 0009.
+3. Após autorização explícita: `npm run d1 -- migrate --env staging`, que aplica as migrations pendentes no D1 remoto. Parar se a lista incluir qualquer arquivo além de `0010_packagings.sql` ou se a saída divergir.
+4. `npm run worker:dry-run:staging`; após a revisão manual exigida pelo script e autorização, `npm run worker:deploy:staging`.
+5. `npm run pages:deploy:staging:dry`; conferir SHA completo no artefato e estado limpo; depois da autorização, `npm run pages:deploy:staging`.
+6. Homologar catálogo, várias embalagens na receita, extras e sugestão manual por capacidade, snapshots, sincronização, backup e recuperação.
+
+Não executar esta sequência como parte da auditoria local. A migration é aditiva, mas não há rollback SQL destrutivo seguro depois de novas escritas; rollback de aplicação exige versões Worker/Pages compatíveis entre si. Ver [`EMBALAGENS_E_PRECISAO_MONETARIA.md`](EMBALAGENS_E_PRECISAO_MONETARIA.md).
+
 > **Registro histórico:** as migrações 0001–0009 constam no D1 remoto de staging em 13/11/2026; o Pages de staging está publicado. Não repetir os comandos de migração deste roteiro. Consulte [ETAPA_7_PREPARACAO_PRODUCAO.md](ETAPA_7_PREPARACAO_PRODUCAO.md) para estado atual e produção.
 
 Este roteiro documenta a atualização histórica do staging, que à época tinha migrações 0001–0006 e Worker anterior. O estado atual já inclui as migrações 0001–0009.

@@ -29,6 +29,17 @@ describe('Montagem do orçamento público', () => {
     const r = buildPublicQuote(order({ unitPrice: 6.9, quantity: 3 }), recipe, settings, opts);
     if (!r.ok) throw new Error(r.error); expect(computeTotals(r.quote).totalCents).toBe(2070);
   });
+  it('inclui embalagens adicionais no orçamento público sem expor custos internos', () => {
+    const r = buildPublicQuote(order({ quantity: 25, unitPrice: 2.5, packagingCharge: 3.75, packagingItems: [{ packagingId: 'box', name: 'Caixa', quantity: 1, unitCost: 3.75 }] }), recipe, settings, opts);
+    if (!r.ok) throw new Error(r.error);
+    expect(computeTotals(r.quote).totalCents).toBe(6625);
+    expect(r.quote.items).toEqual([
+      { description: 'Bolo de chocolate', quantity: 25, unitPriceCents: 250 },
+      { description: 'Embalagens adicionais', quantity: 1, unitPriceCents: 375 },
+    ]);
+    expect(JSON.stringify(r.quote)).not.toContain('unitCost');
+    expect(JSON.stringify(r.quote)).not.toContain('packagingId');
+  });
   it('exige o nome do negócio e a receita; sem telefone, o orçamento sai sem WhatsApp', () => {
     expect(buildPublicQuote(order(), recipe, { cupSizeMl: 240 }, opts)).toMatchObject({ ok: false, error: expect.stringContaining('nome do negócio') });
     expect(buildPublicQuote(order(), recipe, undefined, opts)).toMatchObject({ ok: false });

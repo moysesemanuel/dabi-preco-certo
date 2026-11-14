@@ -4,7 +4,7 @@ import { withQuoteCodes } from '../../shared/quoteCode';
 import { emptyMeta, type SyncMeta } from '../sync/engine';
 /** Encomendas antigas (sem código de atendimento) recebem o código derivado do id; só esse campo é acrescentado (valores e recebimentos não mudam). */
 export const withCodes = (d: DataSet): DataSet => { const orders = withQuoteCodes(d.orders); return orders === d.orders ? d : { ...d, orders }; };
-export const emptyData = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [] });
+export const emptyData = (): DataSet => ({ schemaVersion: CURRENT_SCHEMA_VERSION, ingredients: [], recipes: [], orders: [], packagings: [] });
 const DB_NAME = 'pedidocerto-v1';
 const STORE = 'app';
 function connect(): Promise<IDBDatabase> {
@@ -82,7 +82,7 @@ export async function loadSyncMeta(): Promise<SyncMeta> {
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE, 'readonly');
     const request = tx.objectStore(STORE).get('sync');
-    request.onsuccess = () => { const v = request.result as Partial<SyncMeta> | undefined; resolve(v && typeof v.revision === 'number' && v.baseline && v.revs ? { ...emptyMeta(), ...v } as SyncMeta : emptyMeta()); };
+    request.onsuccess = () => { const v = request.result as Partial<SyncMeta> | undefined; resolve(v && typeof v.revision === 'number' && v.baseline && v.revs ? { ...emptyMeta(), ...v, revs: { ...emptyMeta().revs, ...v.revs, packagings: v.revs.packagings ?? {} } } as SyncMeta : emptyMeta()); };
     request.onerror = () => reject(request.error);
     tx.oncomplete = () => db.close();
   });

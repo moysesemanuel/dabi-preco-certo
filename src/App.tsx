@@ -14,13 +14,17 @@ import { AccessGate } from './components/AccessGate';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { DashboardPage } from './pages/DashboardPage';
 import { IngredientsPage } from './pages/IngredientsPage';
+import { PackagingsPage } from './pages/PackagingsPage';
 import { RecipesPage } from './pages/RecipesPage';
 import { OrdersPage } from './pages/OrdersPage';
+import { NewOrderPage } from './pages/NewOrderPage';
+import { OrderDetailPage } from './pages/OrderDetailPage';
 import { AgendaPage } from './pages/AgendaPage';
 import { ConverterPage } from './pages/ConverterPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { BackupPage } from './pages/BackupPage';
 import { Sidebar } from './components/Sidebar';
+import { pathForRoute, routeFromPath } from './appRoutes';
 
 /** Aviso quando a sincronização precisa de uma decisão sua (por exemplo, dados dos dois lados na primeira entrada). */
 function SyncBanner({ focus }: { focus: (p: Page) => void }) {
@@ -72,7 +76,8 @@ function LostWorkBanner({ onDownload, onReload }: { onDownload: () => void; onRe
 }
 
 export default function App() {
-  const [page, setPage] = useState<Page>('dashboard');
+  const [route, setRoute] = useState(() => routeFromPath(window.location.pathname));
+  const page = route.page;
   const [data, setData] = useState<DataSet>(emptyData);
   const [ready, setReady] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -103,6 +108,11 @@ export default function App() {
   const onRole = (r: Role) => { if (r === 'editor' && prevRole.current === 'viewer') { setReady(false); setEpoch(n => n + 1); } prevRole.current = r; setRole(r); };
 
   useEffect(() => { coordinator.start({ onRole, onRemoteSaved: () => { if (effRef.current !== 'editor') void reload.current('refresh'); } }); return () => coordinator.stop(); }, []);
+  useEffect(() => {
+    const onPopState = () => setRoute(routeFromPath(window.location.pathname));
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
   useEffect(() => { let alive = true; loadDataVersioned().then(({ data: d, version }) => { if (alive) { versionRef.current = version; persisted.current = d; setData(d); setReady(true); } }).catch(() => { if (alive) { setFeedback('Armazenamento indisponível. Suas alterações não serão persistidas.'); setReady(true); } }); return () => { alive = false; }; }, []);
   // Ao assumir a edição depois de ter sido só consulta, os dados são relidos do disco ANTES de permitir alterações.
   useEffect(() => { if (role === 'viewer') wasViewer.current = true; if (role === 'editor' && wasViewer.current) { wasViewer.current = false; void reload.current('promote'); } }, [role]);
@@ -131,12 +141,14 @@ export default function App() {
   }, [page]);
 
   const inform = (msg: string) => { setFeedback(msg); window.setTimeout(() => setFeedback(''), 4500); };
-  const focus = (p: Page) => { setPage(p); window.scrollTo({ top: 0, behavior: 'smooth' }); };
-  const props: PageProps = { data, update: guarded, inform: informPage, focus };
+  const navigate = (next: ReturnType<typeof routeFromPath>) => { window.history.pushState({}, '', pathForRoute(next)); setRoute(next); window.scrollTo({ top: 0, behavior: 'smooth' }); };
+  const focus = (p: Page) => navigate({ page: p });
+  const openOrder = (id: string) => navigate({ page: 'order-detail', orderId: id });
+  const props: PageProps = { data, update: guarded, inform: informPage, focus, openOrder };
   const viewer = eff === 'viewer';
 
   return <AccountProvider data={data} setData={setData} ready={ready && eff === 'editor'} epoch={epoch} metaVersion={metaVersion}><AccessGate data={data}><div className="app"><a className="skip-link" href="#conteudo">Pular para o conteúdo</a>
-    <Sidebar activePage={page} onNavigate={focus} />
+    <Sidebar activePage={page === 'order-detail' ? 'orders' : page} onNavigate={focus} />
     <main className="workspace"><header className="topbar"><strong>Seu espaço de trabalho</strong><TopbarStatus /><div className="avatar"><UserRound size={16} aria-hidden="true" /></div></header><div className="content" id="conteudo">
       {blocked ? <LostWorkBanner onDownload={() => downloadBackup(blocked)} onReload={() => { void reload.current('reset'); }} /> : viewer && <ViewerBanner canTakeOver={coordinator.supported} onTakeOver={() => coordinator.takeOver()} />}
       {!viewer && <SyncBanner focus={focus} />}
@@ -144,14 +156,17 @@ export default function App() {
       <ErrorBoundary key={page}>{!ready ? <div className="empty" role="status" aria-live="polite">Carregando seus dados…</div> : <>
       {page === 'dashboard' && <DashboardPage {...props} />}
       {page === 'ingredients' && <IngredientsPage {...props} />}
+      {page === 'packagings' && <PackagingsPage {...props} />}
       {page === 'recipes' && <RecipesPage {...props} />}
+      {page === 'new-order' && <NewOrderPage {...props} />}
       {page === 'orders' && <OrdersPage {...props} />}
+      {page === 'order-detail' && <OrderDetailPage {...props} orderId={route.orderId ?? ''} />}
       {page === 'agenda' && <AgendaPage {...props} />}
       {page === 'converter' && <ConverterPage {...props} />}
       {(page === 'settings' || page === 'backup') && viewer ? <div className="empty" role="status">Esta página só pode ser usada na aba que está editando. Assuma a edição nesta aba para continuar.</div> : <>
       {page === 'settings' && <SettingsPage {...props} />}
       {page === 'backup' && <BackupPage {...props} replaceData={replaceData} />}</>}
       </>}</ErrorBoundary>
-    </div></main>{!viewer && <ConflictDialog inform={inform} />}{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
+    </div></main>{!viewer && <ConflictDialog inform={inform} packagings={data.packagings ?? []} />}{feedback && <div className="toast" role="status" aria-live="polite">{feedback}</div>}
   </div></AccessGate></AccountProvider>;
 }
