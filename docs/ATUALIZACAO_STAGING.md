@@ -1,5 +1,19 @@
 # Atualização controlada da homologação (staging)
 
+## Etapa 11 — encomendas com vários itens (14/11/2026, local)
+
+O candidato local acrescenta `worker/migrations/0012_order_items.sql` (aditiva) e troca a sincronização para `/api/sync/v2` (o Worker novo responde 426 às rotas antigas). Nada foi publicado nem aplicado remotamente. Ordem obrigatória, cada passo só com autorização:
+
+1. Conferir o SHA aprovado e o checkout limpo; exportar e validar um backup novo do staging (`npm run d1 -- export --env staging --output backups/...`).
+2. `npm run d1 -- migrations-list --env staging`: a única pendente deve ser `0012_order_items.sql` (0010 e 0011 já constam). Se houver outra, parar.
+3. `npm run d1 -- migrate --env staging`.
+4. `npm run worker:dry-run:staging` e depois `npm run worker:deploy:staging`.
+5. `npm run pages:deploy:staging:dry` e depois `npm run pages:deploy:staging`. Entre os passos 4 e 5, abas abertas com o app antigo mostram erro de sincronização (426) sem perder dados; recarregar resolve.
+6. Homologar pelo checklist de `docs/ETAPA_11_PEDIDOS_MULTIPLOS.md` §11.
+
+Rollback: depois que existirem encomendas com vários itens, **não** volte o Worker; corrija para a frente (veja §8 do documento da etapa).
+
+
 ## Etapa 10 — reestruturação local de encomendas e pedidos (13/11/2026)
 
 O trabalho local acrescenta a migração `0011_order_packaging_charge.sql`, dependente de `0010_packagings.sql`, e separa Nova encomenda, Pedidos e detalhes. A Etapa 9 informou que 0010 ainda não foi aplicada remotamente; esta tarefa não consultou nem alterou a Cloudflare e não aplicou as migrações. Antes de qualquer publicação, consulte a lista remota novamente: se ambas estiverem pendentes, aplique 0010 e depois 0011, somente após backup e autorização. Se o estado for diferente, pare e compare o esquema antes de publicar o Worker.

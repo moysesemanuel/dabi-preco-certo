@@ -8,6 +8,8 @@
 
 > Estimativas deste documento são **projeções com hipóteses explícitas**, nunca capacidade garantida. Os números oficiais vêm dos painéis dos provedores.
 
+**Etapa 11 — encomendas com vários itens:** cada gravação de encomenda regrava suas linhas em `order_items` (DELETE + INSERT dos itens, no mesmo `db.batch`), e o pull faz +1 consulta para ler os itens das encomendas devolvidas. Nenhuma requisição nova e nenhum polling. Medição `npm run costs` (14/11/2026): o limite que manda continua sendo **escritas**, com ≈ 201 contas ativas no cenário típico e ≈ 64 no pessimista até 50% da cota (antes ≈ 228 e ≈ 73), pelas linhas de itens. Baixar a conta inteira passou de 12 para 13 consultas (limite gratuito: 50 por invocação). Encomendas antigas não geram escrita na migração 0012 (sem preenchimento retroativo).
+
 ## 1. Provedores e limites gratuitos
 
 Verificado nas documentações oficiais em **12/11/2026** (a data de última atualização de cada página está na coluna "Fonte"). Limites mudam: reverifique antes de decisões de contratação e ao menos a cada trimestre.
@@ -111,7 +113,7 @@ Resultado medido + hipóteses (**estimativa**, aceitando a incerteza da contagem
 | 100 | 12.306 (12,3%) | 21.854 (21,9%) | 68.180 (68,2%) |
 | 500 | 61.530 (61,5%) | **109.270 (109,3%)** | **340.900 (340,9%)** |
 
-Contas ativas até a meta de 50%: **≈ 228** (típico) e **≈ 73** (pessimista), limitadas por **escritas no D1**; depois, requisições (≈ 406 / 132). Leituras (≈ 2.700 / 890 contas) e Resend (≈ 1.100 / 250 contas) não são gargalo. Armazenamento: ≈ 14 KiB por conta típica (≈ 250 B/registro) → milhares de contas dentro de 250 MB.
+Contas ativas até a meta de 50%: **≈ 201** (típico) e **≈ 64** (pessimista) desde a Etapa 11 (eram ≈ 228 e ≈ 73), limitadas por **escritas no D1**; depois, requisições (≈ 406 / 132). Leituras (≈ 2.700 / 890 contas) e Resend (≈ 1.100 / 250 contas) não são gargalo. Armazenamento: ≈ 14 KiB por conta típica (≈ 250 B/registro) → milhares de contas dentro de 250 MB.
 
 **Leitura honesta:** 10, 50 e 100 contas ativas cabem com folga em qualquer cenário; **500 contas ativas não cabem** no plano gratuito (escritas). Planeje a migração de plano ao passar de ~200 contas ativas por dia ou quando o monitoramento acusar 60% (seção 8).
 
