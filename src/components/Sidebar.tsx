@@ -1,4 +1,4 @@
-import { ArchiveRestore, CalendarDays, ChefHat, ChevronRight, ClipboardList, LayoutDashboard, Package, PlusCircle, Ruler, Settings, ShoppingBasket } from 'lucide-react';
+import { ArchiveRestore, CalendarDays, ChefHat, ChevronLeft, ChevronRight, ClipboardList, LayoutDashboard, Package, PlusCircle, Ruler, Settings, ShoppingBasket } from 'lucide-react';
 import { useState } from 'react';
 import type { Page } from '../utils';
 
@@ -26,7 +26,7 @@ export function Sidebar({ activePage, onNavigate }: { activePage: Page; onNaviga
         </span>
       </div>
       <button className="sidebar-toggle" type="button" aria-label={collapsed ? 'Expandir menu' : 'Recolher menu'} aria-expanded={!collapsed} aria-controls="primary-navigation" title={collapsed ? 'Expandir menu' : 'Recolher menu'} onClick={() => setCollapsed(value => !value)}>
-        <ChevronRight size={14} aria-hidden="true" />
+        {collapsed ? <ChevronRight size={14} aria-hidden="true" /> : <ChevronLeft size={14} aria-hidden="true" />}
       </button>
     </div>
     <nav className="nav" id="primary-navigation" aria-label="Navegação principal">

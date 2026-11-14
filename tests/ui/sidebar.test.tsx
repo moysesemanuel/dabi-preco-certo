@@ -10,11 +10,15 @@ describe('menu lateral', () => {
     const nav = within(screen.getByRole('navigation', { name: 'Navegação principal' }));
 
     expect(screen.getByRole('img', { name: 'Custô' }).getAttribute('src')).toBe('/brand/custo-color.svg');
-    fireEvent.click(screen.getByRole('button', { name: 'Recolher menu' }));
+    const collapse = screen.getByRole('button', { name: 'Recolher menu' });
+    expect(collapse.querySelector('svg')?.classList.contains('lucide-chevron-left')).toBe(true);
+    fireEvent.click(collapse);
 
     expect(sidebar.classList.contains('is-collapsed')).toBe(true);
     expect(document.querySelector('.brand-logo-icon')?.getAttribute('src')).toBe('/brand/favicon-custo-color.svg');
-    expect(screen.getByRole('button', { name: 'Expandir menu' }).getAttribute('aria-expanded')).toBe('false');
+    const expand = screen.getByRole('button', { name: 'Expandir menu' });
+    expect(expand.getAttribute('aria-expanded')).toBe('false');
+    expect(expand.querySelector('svg')?.classList.contains('lucide-chevron-right')).toBe(true);
     expect(nav.getByRole('button', { name: 'Agenda' })).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Expandir menu' }));
